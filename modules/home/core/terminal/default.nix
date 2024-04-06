@@ -1,8 +1,12 @@
-{ pkgs, home-manager, username, ... }: {
+{ pkgs, home-manager, username, userFullName, userEmail, ... }: {
   imports = [ ./nvim ./tmux ./starship ];
 
   home-manager.users.${username} = {
-    programs.git.enable = true;
+    programs.git = {
+      enable = true;
+      userName = userFullName;
+      userEmail = userEmail;
+    };
     programs.vim.enable = true;
     programs.bash = {
       enable = true;
@@ -18,8 +22,8 @@
     programs.fish = {
       enable = true;
       interactiveShellInit = ''
-          set fish_greeting # Disable greeting
-        '';
+        set fish_greeting # Disable greeting
+      '';
       plugins = [
         {
           name = "z";
@@ -49,9 +53,9 @@
 
       functions = {
         develop = {
-	  wraps = "nix develop";
-	  body = "nix develop --command fish";
-	};
+          wraps = "nix develop";
+          body = "nix develop --command fish";
+        };
       };
     };
 
@@ -60,6 +64,6 @@
       nix-direnv.enable = true;
     };
 
-    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl bash ];
+    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl bash nixpkgs-fmt ];
   };
 }

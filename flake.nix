@@ -20,20 +20,53 @@
       supportedSystems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
-    in {
+    in
+    {
 
       nixosConfigurations = {
 
-        work-wsl = let system = "x86_64-linux";
-        in nixpkgs.lib.nixosSystem {
-          inherit system;
-          specialArgs = {
-            username = "mitch";
-            hostName = "work-wsl";
+        surface =
+          let system = "x86_64-linux";
+          in nixpkgs.lib.nixosSystem {
             inherit system;
-          } // attrs;
-          modules = [ ./wsl.nix ];
-        };
+            specialArgs = {
+              username = "mitch";
+              userFullName = "Mitchell Pleune";
+              userEmail = "mitchpleune@gmail.com";
+              hostName = "surface";
+            } // attrs;
+            modules = [
+              ./platforms/surface
+              ./modules/system/core
+              ./modules/home/core
+              ./modules/home/applications/vscode
+            ];
+          };
+
+        work-wsl =
+          let system = "x86_64-linux";
+          in nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = {
+              username = "mitch";
+              hostName = "work-wsl";
+              userFullName = "Mitchell Pleune";
+              userEmail = "mitchell.pleune@magna.com";
+              inherit system;
+            } // attrs;
+            modules = [
+              {
+                services.openssh = {
+                  enable = true;
+                  settings.PasswordAuthentication = true;
+                };
+              }
+              ./platforms/wsl
+              ./modules/system/core
+              ./modules/home/core
+              ./modules/system/services/gitea
+            ];
+          };
 
       };
 
