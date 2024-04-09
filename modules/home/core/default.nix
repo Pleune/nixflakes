@@ -1,1 +1,1 @@
-{ imports = [ ./nix ./terminal ]; }
+{ imports = [ ./nix ./terminal ./fonts ]; }

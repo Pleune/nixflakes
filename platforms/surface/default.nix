@@ -13,26 +13,34 @@
   boot.loader.efi.canTouchEfiVariables = true;
   networking.networkmanager.enable = true;
 
-  services.xserver.enable = true;
-  services.xserver.displayManager.gdm.enable = true;
-  services.xserver.desktopManager.gnome.enable = true;
+  environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; }; # Force intel-media-driver
 
-  services.xserver.xkb = {
-    layout = "us";
-    variant = "";
+  services.xserver = {
+    enable = true;
+    displayManager = {
+      gdm = {
+        enable = true;
+        wayland = true;
+      };
+      setupCommands = ''
+        if [ $XDG_SESSION_TYPE == "wayland" ]; then export QT_QPA_PLAYFORM="wayland"; fi
+      '';
+    };
+    desktopManager.gnome.enable = true;
+
+    xkb = {
+      layout = "us";
+      variant = "";
+    };
+  };
+  environment.gnome.excludePackages = with pkgs; [ snapshot ];
+  environment.systemPackages = with pkgs; [ gnome.cheese ];
+  services.gnome = 
+  {
+    games.enable = true;
   };
 
   services.printing.enable = true;
 
-  sound.enable = true;
-  hardware.pulseaudio.enable = false;
-  security.rtkit.enable = true;
-  services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    alsa.support32Bit = true;
-    pulse.enable = true;
-  };
-
-  users.users.${username}.extraGroups = [ "networkmanager" ];
+  users.users.${username}.extraGroups = [ "networkmanager" "video" ];
 }

@@ -1,6 +1,15 @@
 {
   description = "Mitch's flake";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://nix-community.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -11,6 +20,17 @@
 
     NixOS-WSL = {
       url = "github:nix-community/NixOS-WSL";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    nix-ld-rs = {
+      url = "github:nix-community/nix-ld-rs";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # needed for microsoft surface configuration
+    nixos-hardware = {
+      url = "github:NixOS/nixos-hardware/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -39,7 +59,9 @@
               ./platforms/surface
               ./modules/system/core
               ./modules/home/core
-              ./modules/home/applications/vscode
+              ./modules/home/apps/vscode
+	      ./modules/home/apps/nvim
+              ./modules/home/apps/misc
             ];
           };
 
@@ -65,6 +87,7 @@
               ./modules/system/core
               ./modules/home/core
               ./modules/system/services/gitea
+	      ./modules/home/apps/nvim
             ];
           };
 

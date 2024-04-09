@@ -64,6 +64,6 @@
       nix-direnv.enable = true;
     };
 
-    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl bash nixpkgs-fmt ];
+    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl nixpkgs-fmt ];
   };
 }
