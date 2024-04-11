@@ -9,6 +9,7 @@
       trilium-desktop
       xournal
       signal-desktop
+      firefox
     ];
   };
 }

@@ -33,6 +33,11 @@
       url = "github:NixOS/nixos-hardware/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    lanzaboote = {
+      url = "github:nix-community/lanzaboote/v0.3.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = { self, nixpkgs, ... }@attrs:
@@ -58,6 +63,7 @@
             modules = [
               ./platforms/surface
               ./modules/system/core
+              ./modules/system/lanzaboote
               ./modules/home/core
               ./modules/home/apps/vscode
 	      ./modules/home/apps/nvim
