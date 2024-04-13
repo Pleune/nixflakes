@@ -94,6 +94,7 @@
               ./modules/home/core
               ./modules/system/services/gitea
 	      ./modules/home/apps/nvim
+              ./modules/home/theme/gtk-wsl
             ];
           };
 

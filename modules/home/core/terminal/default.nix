@@ -7,6 +7,7 @@
       userName = userFullName;
       userEmail = userEmail;
     };
+
     programs.vim.enable = true;
     programs.bash = {
       enable = true;
@@ -56,6 +57,31 @@
           wraps = "nix develop";
           body = "nix develop --command fish";
         };
+        cmake = {
+          wraps = "cmake";
+          body = ''
+              # Exit early if not a configure type command
+              set identifiers --build --install --open -P -E --find-package --workflow --help -DCMAKE_EXPORT_COMPILE_COMMANDS
+              for i in $identifiers
+                if string match -q -e -- $i $argv 
+                  command cmake $argv
+                  return
+                end
+              end
+              
+              # default to generate a compile_commands.json
+              if not string match -q -e -- CMAKE_EXPORT_COMPILE_COMMANDS
+                set -a argv -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+              end
+              
+              # default to using Ninja
+              if type -q ninja; and not string match -q -e -- -G
+                set -a argv -G Ninja
+              end
+
+              command cmake $argv
+            '';
+        };
       };
     };
 
@@ -64,6 +90,6 @@
       nix-direnv.enable = true;
     };
 
-    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl nixpkgs-fmt ];
+    home.packages = with pkgs; [ grc gh ripgrep btop todoist zip unzip wget curl nixpkgs-fmt git-subrepo ];
   };
 }

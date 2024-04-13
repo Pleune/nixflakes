@@ -4,7 +4,7 @@
     htop.enable = true;
     mtr.enable = true;
     bash = {
-      loginShellInit = ''
+      interactiveShellInit = ''
         nitch
       '';
     };
