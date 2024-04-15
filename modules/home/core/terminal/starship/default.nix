@@ -1,4 +1,10 @@
-{ pkgs, home-manager, username, ... }: {
+{
+  pkgs,
+  home-manager,
+  username,
+  ...
+}:
+{
   home-manager.users.${username} = {
     programs.starship = {
       enable = true;
@@ -14,7 +20,9 @@
           vimcmd_symbol = "[<](bold green)";
         };
 
-        git_commit = { tag_symbol = " tag "; };
+        git_commit = {
+          tag_symbol = " tag ";
+        };
         git_status = {
           ahead = ">";
           behind = "<";
@@ -26,26 +34,54 @@
           min_time = 500;
           format = "took [$duration](bold yellow)";
         };
-        aws = { symbol = "aws "; };
-        azure = { symbol = "az "; };
-        bun = { symbol = "bun "; };
+        aws = {
+          symbol = "aws ";
+        };
+        azure = {
+          symbol = "az ";
+        };
+        bun = {
+          symbol = "bun ";
+        };
 
-        cmake = { symbol = "cmake "; };
-        deno = { symbol = "deno "; };
-        directory = { read_only = " ro"; };
-        docker_context = { symbol = "docker "; };
-        git_branch = { symbol = "git "; };
-        golang = { symbol = "go "; };
+        cmake = {
+          symbol = "cmake ";
+        };
+        deno = {
+          symbol = "deno ";
+        };
+        directory = {
+          read_only = " ro";
+        };
+        docker_context = {
+          symbol = "docker ";
+        };
+        git_branch = {
+          symbol = "git ";
+        };
+        golang = {
+          symbol = "go ";
+        };
         hostname = {
           ssh_only = false;
           format = " on [$hostname](bold red)\n";
           disabled = false;
         };
-        lua = { symbol = "lua "; };
-        nodejs = { symbol = "nodejs "; };
-        memory_usage = { symbol = "memory "; };
-        nim = { symbol = "nim "; };
-        nix_shell = { symbol = "nix "; };
+        lua = {
+          symbol = "lua ";
+        };
+        nodejs = {
+          symbol = "nodejs ";
+        };
+        memory_usage = {
+          symbol = "memory ";
+        };
+        nim = {
+          symbol = "nim ";
+        };
+        nix_shell = {
+          symbol = "nix ";
+        };
         os.symbols = {
           Alpaquita = "alq ";
           Alpine = "alp ";
@@ -89,13 +125,27 @@
           Unknown = "unk ";
           Windows = "win ";
         };
-        package = { symbol = "pkg "; };
-        purescript = { symbol = "purs "; };
-        python = { symbol = "py "; };
-        rust = { symbol = "rs "; };
-        status = { symbol = "[x](bold red) "; };
-        sudo = { symbol = "sudo "; };
-        terraform = { symbol = "terraform "; };
+        package = {
+          symbol = "pkg ";
+        };
+        purescript = {
+          symbol = "purs ";
+        };
+        python = {
+          symbol = "py ";
+        };
+        rust = {
+          symbol = "rs ";
+        };
+        status = {
+          symbol = "[x](bold red) ";
+        };
+        sudo = {
+          symbol = "sudo ";
+        };
+        terraform = {
+          symbol = "terraform ";
+        };
         username = {
           style_user = "green bold";
           style_root = "red bold";
@@ -103,7 +153,9 @@
           disabled = false;
           show_always = true;
         };
-        zig = { symbol = "zig "; };
+        zig = {
+          symbol = "zig ";
+        };
       };
     };
   };

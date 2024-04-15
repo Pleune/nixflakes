@@ -1,4 +1,10 @@
-{ pkgs, username, NixOS-WSL, home-manager, ... }:
+{
+  pkgs,
+  username,
+  NixOS-WSL,
+  home-manager,
+  ...
+}:
 {
   imports = [ NixOS-WSL.nixosModules.wsl ];
   wsl = {
@@ -34,7 +40,10 @@
   };
 
   #environment.sessionVariables.LIBVA_DRIVER_NAME = "d3d12";
-  environment.systemPackages = [ pkgs.glxinfo pkgs.libva-utils ];
+  environment.systemPackages = [
+    pkgs.glxinfo
+    pkgs.libva-utils
+  ];
   users.users.${username}.extraGroups = [ "video" ];
   # just make vscode with the WSL remote extension work
   #home-manager.users.${username}.home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";

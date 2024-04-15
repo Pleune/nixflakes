@@ -1,4 +1,5 @@
-{ pkgs, ... }: {
+{ pkgs, ... }:
+{
   services.gitea = {
     enable = true;
     appName = "Local Gitea";

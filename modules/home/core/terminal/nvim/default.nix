@@ -1,4 +1,10 @@
-{ pkgs, system, username, ... }: {
+{
+  pkgs,
+  system,
+  username,
+  ...
+}:
+{
   home-manager.users.${username} = {
     programs.neovim = {
       enable = true;

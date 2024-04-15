@@ -2,9 +2,7 @@
   description = "Mitch's flake";
 
   nixConfig = {
-    extra-substituters = [
-      "https://nix-community.cachix.org"
-    ];
+    extra-substituters = [ "https://nix-community.cachix.org" ];
     extra-trusted-public-keys = [
       "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
     ];
@@ -39,7 +37,8 @@
     };
   };
 
-  outputs = { self, nixpkgs, ... }@attrs:
+  outputs =
+    { self, nixpkgs, ... }@attrs:
     let
       supportedSystems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -50,8 +49,10 @@
       nixosConfigurations = {
 
         surface =
-          let system = "x86_64-linux";
-          in nixpkgs.lib.nixosSystem {
+          let
+            system = "x86_64-linux";
+          in
+          nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
               username = "mitch";
@@ -65,14 +66,16 @@
               ./modules/system/lanzaboote
               ./modules/home/core
               ./modules/home/apps/vscode
-	      ./modules/home/apps/nvim
+              ./modules/home/apps/nvim
               ./modules/home/apps/misc
             ];
           };
 
         work-wsl =
-          let system = "x86_64-linux";
-          in nixpkgs.lib.nixosSystem {
+          let
+            system = "x86_64-linux";
+          in
+          nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
               username = "mitch";
@@ -92,19 +95,26 @@
               ./modules/system/core
               ./modules/home/core
               ./modules/system/services/gitea
-	      ./modules/home/apps/nvim
+              ./modules/home/apps/nvim
               ./modules/home/theme/gtk-wsl
             ];
           };
-
       };
 
-      devShells = forAllSystems (system:
-        let pkgs = nixpkgsFor.${system};
-        in {
-          default =
-            pkgs.mkShell { buildInputs = with pkgs; [ nixfmt statix ]; };
-        });
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              nixfmt
+              statix
+            ];
+          };
+        }
+      );
 
       templates.default = {
         path = ./.;

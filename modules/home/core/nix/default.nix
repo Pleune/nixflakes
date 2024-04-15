@@ -1,4 +1,10 @@
-{ home-manager, pkgs, username, ... }: {
+{
+  home-manager,
+  pkgs,
+  username,
+  ...
+}:
+{
   nixpkgs.config.allowUnfree = true;
   home-manager.users.${username} = {
     home.stateVersion = "23.11";

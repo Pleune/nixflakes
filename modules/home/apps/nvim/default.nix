@@ -1,8 +1,4 @@
-{
-  pkgs,
-  username,
-  ...
-}:
+{ pkgs, username, ... }:
 {
   imports = [ ../../core/terminal/nvim ]; # enabled and default editor
   home-manager.users.${username}.programs.neovim = {

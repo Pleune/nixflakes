@@ -1,4 +1,10 @@
-{ pkgs, system, username, ... }: {
+{
+  pkgs,
+  system,
+  username,
+  ...
+}:
+{
   home-manager.users.${username} = {
     services.syncthing = {
       enable = true;

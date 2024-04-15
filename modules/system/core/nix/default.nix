@@ -1,4 +1,11 @@
-{ pkgs, username, nixpkgs, nix-ld-rs, ... }: {
+{
+  pkgs,
+  username,
+  nixpkgs,
+  nix-ld-rs,
+  ...
+}:
+{
   system = {
     extraSystemBuilderCmds = ''
       ln -sv ${pkgs.path} $out/nixpkgs
@@ -10,7 +17,10 @@
     #package = pkgs.nixVersions.nix_2_21;
     nixPath = [ "nixpkgs=/run/current-system/nixpkgs" ];
     settings = {
-      experimental-features = [ "nix-command" "flakes" ];
+      experimental-features = [
+        "nix-command"
+        "flakes"
+      ];
       auto-optimise-store = true;
     };
 
@@ -25,9 +35,8 @@
       dates = "weekly";
       options = "--delete-older-than 30d";
     };
-
   };
-  
+
   nixpkgs.config.allowUnfree = true;
 
   home-manager.useUserPackages = true;

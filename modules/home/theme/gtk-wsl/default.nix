@@ -1,4 +1,10 @@
-{ pkgs, system, username, ... }: {
+{
+  pkgs,
+  system,
+  username,
+  ...
+}:
+{
   home-manager.users.${username} = {
     gtk = {
       enable = true;
@@ -11,6 +17,11 @@
       #  package = pkgs.luna-icons;
       #};
     };
-    home.packages = [ pkgs.dconf pkgs.firefox pkgs.lxappearance pkgs.venta ];
+    home.packages = [
+      pkgs.dconf
+      pkgs.firefox
+      pkgs.lxappearance
+      pkgs.venta
+    ];
   };
 }

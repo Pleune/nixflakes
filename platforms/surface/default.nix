@@ -1,10 +1,12 @@
-{ config, pkgs, username, ... }:
+{
+  config,
+  pkgs,
+  username,
+  ...
+}:
 
 {
-  imports =
-    [
-      ./hardware-configuration.nix
-    ];
+  imports = [ ./hardware-configuration.nix ];
 
   time.timeZone = "America/Detroit";
   i18n.defaultLocale = "en_US.UTF-8";
@@ -30,12 +32,14 @@
   };
   environment.gnome.excludePackages = with pkgs; [ snapshot ];
   environment.systemPackages = with pkgs; [ gnome.cheese ];
-  services.gnome = 
-  {
+  services.gnome = {
     games.enable = true;
   };
 
   services.printing.enable = true;
 
-  users.users.${username}.extraGroups = [ "networkmanager" "video" ];
+  users.users.${username}.extraGroups = [
+    "networkmanager"
+    "video"
+  ];
 }
