@@ -7,14 +7,24 @@
   imports =
     [
       (modulesPath + "/installer/scan/not-detected.nix")
-      nixos-hardware.nixosModules.microsoft-surface-pro-intel
+    nixos-hardware.nixosModules.microsoft-surface-pro-intel
     ];
 
   boot = {
-    initrd.availableKernelModules = [ "xhci_pci" "nvme" "uas" "sd_mod" ];
-    initrd.kernelModules = [ ];
+    initrd = {
+      availableKernelModules = [ "xhci_pci" "nvme" "uas" "sd_mod" ];
+      kernelModules = [ ];
+    };
+    loader = {
+      systemd-boot.enable = true;
+      efi.canTouchEfiVariables = true;
+    };
     kernelModules = [ "kvm-intel" ];
     extraModulePackages = [ ];
+  };
+
+  zramSwap = {
+
   };
 
   fileSystems."/" =
@@ -57,23 +67,11 @@
     pulseaudio.enable = false;
   };
 
+  environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; }; # Force intel-media-driver
 
   services = {
     logind.lidSwitch = "hibernate";
     thermald.enable = true;
-    auto-cpufreq = {
-      enable = true;
-      settings = {
-        battery = {
-          governor = "powersave";
-          turbo = "never";
-        };
-        charger = {
-          governor = "performance";
-          turbo = "auto";
-        };
-      };
-    };
 
     pipewire = {
       enable = true;

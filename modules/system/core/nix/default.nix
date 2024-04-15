@@ -37,4 +37,7 @@
     enable = true;
     package = nix-ld-rs.packages."${pkgs.system}".nix-ld-rs;
   };
+
+  # Does not work with flakes
+  programs.command-not-found.enable = false;
 }

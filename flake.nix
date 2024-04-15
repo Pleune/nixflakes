@@ -31,7 +31,6 @@
     # needed for microsoft surface configuration
     nixos-hardware = {
       url = "github:NixOS/nixos-hardware/master";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     lanzaboote = {

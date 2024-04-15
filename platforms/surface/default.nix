@@ -9,12 +9,7 @@
   time.timeZone = "America/Detroit";
   i18n.defaultLocale = "en_US.UTF-8";
 
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.efi.canTouchEfiVariables = true;
   networking.networkmanager.enable = true;
-
-  environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; }; # Force intel-media-driver
-
   services.xserver = {
     enable = true;
     displayManager = {

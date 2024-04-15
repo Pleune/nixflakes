@@ -76,6 +76,16 @@ require('lazy').setup({
 
       lspconfig.cmake.setup {}
 
+      lspconfig.nil_ls.setup {
+        settings = {
+	  ['nil'] = {
+            formatting = {
+              command = { "nixfmt" }
+            }
+	  }
+	}
+      }
+
       -- npm install -g dockerfile-language-server-nodejs
       lspconfig.dockerls.setup {}
 
