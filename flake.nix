@@ -35,6 +35,17 @@
       url = "github:nix-community/lanzaboote/v0.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    agenix = {
+      url = "github:ryantm/agenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    private = {
+      url = "git+ssh://gitea@git.pleunetowne.com:2223/mitchpleune/secrets.git";
+      inputs.agenix.follows = "agenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -45,7 +56,6 @@
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
     in
     {
-
       nixosConfigurations = {
 
         surface =
@@ -64,10 +74,14 @@
               ./platforms/surface
               ./modules/system/core
               ./modules/system/lanzaboote
+              ./modules/system/agenix
+              ./modules/system/networkmanager/pleunenet # requires agenix
               ./modules/home/core
+              ./modules/home/gpg
               ./modules/home/apps/vscode
               ./modules/home/apps/nvim
               ./modules/home/apps/misc
+              ./modules/home/theme/gnome
             ];
           };
 

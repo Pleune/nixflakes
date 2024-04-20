@@ -16,8 +16,26 @@
     programs = {
       git = {
         enable = true;
+        lfs.enable = true;
         userName = userFullName;
         userEmail = userEmail;
+        delta = {
+          enable = true;
+          options = {
+            navigate = true;
+            side-by-side = true;
+          };
+        };
+      };
+
+      zoxide = {
+        enable = true;
+        enableFishIntegration = true;
+      };
+
+      fzf = {
+        enable = true;
+        enableFishIntegration = true;
       };
 
       vim.enable = true;
@@ -37,6 +55,9 @@
         interactiveShellInit = ''
           set fish_greeting # Disable greeting
         '';
+        shellAliases = {
+          # cd = "z";
+        };
         plugins = [
           {
             name = "z";
@@ -108,6 +129,8 @@
       };
     };
 
+    services.gpg-agent.enableFishIntegration = true;
+
     home.packages = with pkgs; [
       grc
       gh
@@ -120,6 +143,8 @@
       curl
       nixfmt-rfc-style
       git-subrepo
+      tldr
+      bat
     ];
   };
 }

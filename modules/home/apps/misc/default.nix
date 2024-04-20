@@ -1,9 +1,4 @@
-{
-  pkgs,
-  home-manager,
-  username,
-  ...
-}:
+{ pkgs, username, ... }:
 {
   home-manager.users.${username} = {
     home.packages = with pkgs; [
@@ -13,9 +8,31 @@
       prismlauncher-qt5
       spotify
       trilium-desktop
-      xournal
+      xournalpp
       signal-desktop
       firefox
+      superTux
+      superTuxKart
+      openttd
+      openrct2
+      gzdoom
+      steam
+      krita
+      libreoffice
+
+      winetricks
+      wineWow64Packages.unstableFull
     ];
+
+    programs = {
+      thunderbird = {
+        enable = true;
+        profiles.default = {
+          isDefault = true;
+          withExternalGnupg = true;
+        };
+      };
+      awscli.enable = true;
+    };
   };
 }

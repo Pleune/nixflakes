@@ -1,6 +1,5 @@
 {
   pkgs,
-  username,
   nixpkgs,
   nix-ld-rs,
   ...
