@@ -23,14 +23,13 @@
   hardware.opengl = {
     enable = true;
     driSupport = true;
-    #driSupport32Bit = true;
+    setLdLibraryPath = true;
 
     extraPackages = with pkgs; [
       mesa.drivers
       libvdpau-va-gl
-      #intel-vaapi-driver
-      #intel-media-driver
-      vaapiVdpau
+      (libedit.overrideAttrs (attrs: {postInstall = (attrs.postInstall or "") + ''ln -s $out/lib/libedit.so $out/lib/libedit.so.2'';}))
+      linuxPackages.nvidia_x11
     ];
   };
 
@@ -39,12 +38,15 @@
     unitConfig.ConditionPathExists = "!/run/user/%i";
   };
 
-  #environment.sessionVariables.LIBVA_DRIVER_NAME = "d3d12";
-  environment.systemPackages = [
-    pkgs.glxinfo
-    pkgs.libva-utils
-  ];
+  programs.bash.shellInit = ''
+      export CUDA_PATH=${pkgs.cudatoolkit}
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/wsl/lib:${pkgs.linuxPackages.nvidia_x11}/lib:${pkgs.ncurses5}/lib
+      export EXTRA_LDFLAGS="-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib"
+      export EXTRA_CCFLAGS="-I/usr/include"
+   '';
+
   users.users.${username}.extraGroups = [ "video" ];
+  environment.systemPackages = with pkgs; [ glxinfo libva-utils cudatoolkit ];
   # just make vscode with the WSL remote extension work
-  #home-manager.users.${username}.home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
+  home-manager.users.${username}.home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
 }
