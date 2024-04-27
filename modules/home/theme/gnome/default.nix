@@ -62,6 +62,7 @@
           "clipboard-indicator@tudmotu.com"
           "gsconnect@andyholmes.github.io"
           "hidetopbar@mathieu.bidon.ca"
+          "hass-gshell@geoph9-on-github"
         ];
       };
     };
@@ -79,7 +80,8 @@
       gnomeExtensions.blur-my-shell
       gnomeExtensions.clipboard-indicator
       gnomeExtensions.gsconnect
-      gnomeExtensions.hidetopbar
+      gnomeExtensions.hide-top-bar
+      gnomeExtensions.home-assistant-extension
 
       gnome.gnome-tweaks
       palenight-theme

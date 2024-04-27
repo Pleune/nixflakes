@@ -10,7 +10,6 @@
       trilium-desktop
       xournalpp
       signal-desktop
-      firefox
       superTux
       superTuxKart
       openttd
@@ -19,6 +18,7 @@
       steam
       krita
       libreoffice
+      keepassxc
 
       winetricks
       wineWow64Packages.unstableFull
@@ -33,6 +33,10 @@
         };
       };
       awscli.enable = true;
+      firefox = {
+        enable = true;
+        nativeMessagingHosts = [ pkgs.gnome-browser-connector ];
+      };
     };
   };
 }

@@ -20,11 +20,7 @@
   # with explicit per-interface declarations with `networking.interfaces.<interface>.useDHCP`.
   networking.useDHCP = lib.mkDefault true;
   networking.wireguard.enable = lib.mkDefault true;
-  networking.firewall.enable = false;
-  networking.firewall.checkReversePath = false;
   networking.networkmanager.enable = true;
-
-  programs.firefox.enable = true;
 
   services = {
     xserver = {

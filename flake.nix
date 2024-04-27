@@ -75,6 +75,7 @@
               ./modules/home/apps/nvim
               ./modules/home/apps/misc
               ./modules/home/theme/gnome
+              ./modules/home/syncthing
             ];
           };
 
