@@ -9,11 +9,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1713348128,
-        "narHash": "sha256-n+RMDvfxqLLxD4/I19wyYJQMbXct/4Sj5FDhVL2rff0=",
+        "lastModified": 1713947658,
+        "narHash": "sha256-q3zu2D5HVphfAMZ070o/K9IPxw5DLsLkvwr7H1b5fpE=",
         "owner": "nix-community",
         "repo": "NixOS-WSL",
-        "rev": "fc58f5c486f8056bc5fd38488d5510ab5fd294b7",
+        "rev": "f41f95c2c187a49a4ef98b5d00fdf1a68c5f88ba",
         "type": "github"
       },
       "original": {
@@ -273,11 +273,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1713453913,
-        "narHash": "sha256-vbXq52VRlL1defMHrwhsoeHm95O3mFefsSSJyNEghbA=",
+        "lastModified": 1713906585,
+        "narHash": "sha256-fv84DCOkBtjF6wMATt0rfovu7e95L8rdEkSfNbwKR3U=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "178e26895b3aef028a00a32fb7e7ed0fc660645c",
+        "rev": "bfa7c06436771e3a0c666ccc6ee01e815d4c33aa",
         "type": "github"
       },
       "original": {
@@ -322,11 +322,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1713026309,
-        "narHash": "sha256-345jReT2AFR6VK0KYAEmIjsMvlCCFsoT0Xaku6Nw1fQ=",
+        "lastModified": 1713589173,
+        "narHash": "sha256-8LBvfDbnuPMrF43bmejUZwD9TuP081iuG1nLl8m0jM4=",
         "owner": "nix-community",
         "repo": "nix-ld-rs",
-        "rev": "6b76b4aa158819d6bce637485c4cdd710517c6ce",
+        "rev": "c4f56b515ed0bf8c2cd4d6a13224067017a6dc39",
         "type": "github"
       },
       "original": {
@@ -337,11 +337,11 @@
     },
     "nixos-hardware": {
       "locked": {
-        "lastModified": 1713441075,
-        "narHash": "sha256-3GGeFsEO8ivD+TcDEqe4s/d0VLvMYGNDGtx0ZnBxkUs=",
+        "lastModified": 1713864415,
+        "narHash": "sha256-/BPDMJEkrsFAFOsQWhwm31wezlgshPFlLBn34KEUdVA=",
         "owner": "NixOS",
         "repo": "nixos-hardware",
-        "rev": "6f976e53752e5b9ab08f9a3b1b0b9c67815c9754",
+        "rev": "797f8d8082c7cc3259cba7275c699d4991b09ecc",
         "type": "github"
       },
       "original": {
@@ -353,11 +353,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1713248628,
-        "narHash": "sha256-NLznXB5AOnniUtZsyy/aPWOk8ussTuePp2acb9U+ISA=",
+        "lastModified": 1714076141,
+        "narHash": "sha256-Drmja/f5MRHZCskS6mvzFqxEaZMeciScCTFxWVLqWEY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "5672bc9dbf9d88246ddab5ac454e82318d094bb8",
+        "rev": "7bb2ccd8cdc44c91edba16c48d2c8f331fb3d856",
         "type": "github"
       },
       "original": {
@@ -424,10 +424,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1713533927,
+        "lastModified": 1713620301,
         "narHash": "sha256-FgbhNVZTCrx1eEymPNtME5SIOb7wSNbVoptz2crfNtA=",
         "ref": "refs/heads/main",
-        "rev": "5777707fbb5f9fc71de9fcafb641b95531e92071",
+        "rev": "5d4ce1482b8820e212eb19ab9646850849cba881",
         "revCount": 2,
         "type": "git",
         "url": "ssh://gitea@git.pleunetowne.com:2223/mitchpleune/secrets.git"

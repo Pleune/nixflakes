@@ -5,16 +5,18 @@
     withRuby = true;
     withNodeJs = true;
     withPython3 = true;
-    extraPython3Packages = (pkgs: with pkgs; [ python-lsp-server ]);
     extraLuaConfig = ''
       ${builtins.readFile ./init.lua}
     '';
     extraPackages = with pkgs; [
+      ruff-lsp
+      nodePackages.pyright
       fzf
       gcc
       nil
       dockerfile-language-server-nodejs
       lua-language-server
+      cmake-language-server
     ];
   };
 }

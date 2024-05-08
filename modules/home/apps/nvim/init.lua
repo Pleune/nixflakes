@@ -50,13 +50,42 @@ require('lazy').setup({
       local lspconfig = require('lspconfig')
 
       -- pip install python-language-server
-      lspconfig.pylsp.setup {
+      -- lspconfig.pylsp.setup {
+      --   settings = {
+      --     pylsp = {
+      --       plugins = {
+      --         black = {
+      --           enabled = true
+      --         }
+      --       }
+      --     }
+      --   }
+      -- }
+
+      -- lspconfig.pylsp.setup {
+      --   settings = {
+      --     pylsp = {
+      --       plugins = {
+      --         -- disable functionality given by ruff
+      --         autopep8 = { enabled = false },
+      --         flake8 = { enabled = false },
+      --         pyflakes = { enabled = false },
+      --         mccabe = { enabled = false },
+      --         pycodestyle = { enabled = false }
+      --       }
+      --     }
+      --   }
+      -- }
+      lspconfig.ruff_lsp.setup {}
+      lspconfig.pyright.setup {
         settings = {
-          pylsp = {
-            plugins = {
-              black = {
-                enabled = true
-              }
+          pyright = {
+            disableTaggedHints = true,
+            disableOrganizeImports = true,
+          },
+          python = {
+            analysis = {
+              ignore = { "*" },
             }
           }
         }
@@ -78,12 +107,12 @@ require('lazy').setup({
 
       lspconfig.nil_ls.setup {
         settings = {
-	  ['nil'] = {
+          ['nil'] = {
             formatting = {
               command = { "nixfmt" }
             }
-	  }
-	}
+          }
+        }
       }
 
       -- npm install -g dockerfile-language-server-nodejs
@@ -301,7 +330,7 @@ require('lazy').setup({
     },
     setup = true,
     keys = {
-      { '<leader>e',      '<cmd>TroubleToggle<cr>',                desc = 'Show Errors' },
+      { '<leader>e', '<cmd>TroubleToggle<cr>', desc = 'Show Errors' },
     },
   },
 
@@ -473,4 +502,3 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = highlight_group,
   pattern = '*',
 })
-
