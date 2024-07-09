@@ -77,6 +77,15 @@ require('lazy').setup({
       --   }
       -- }
       lspconfig.ruff_lsp.setup {}
+      lspconfig.yamlls.setup {
+        settings = {
+          yaml = {
+            format = {
+              enable = true,
+            }
+          }
+        }
+      }
       lspconfig.pyright.setup {
         settings = {
           pyright = {
@@ -165,6 +174,13 @@ require('lazy').setup({
     end
   },
 
+  {
+    "andrewferrier/wrapping.nvim",
+    config = function()
+      require("wrapping").setup()
+    end
+  },
+
   { -- autocomplete
     'hrsh7th/nvim-cmp',
     dependencies = {
@@ -180,6 +196,7 @@ require('lazy').setup({
           capabilities = require('cmp_nvim_lsp').default_capabilities(capabilities)
         end
       },
+      'hrsh7th/cmp-path',
     },
     config = function()
       local cmp = require 'cmp'
@@ -246,8 +263,8 @@ require('lazy').setup({
         sources = cmp.config.sources({
           { name = 'nvim_lsp' },
           { name = 'snippy' },
-        }, {
           { name = 'buffer' },
+          { name = 'path' },
         }),
       }
     end
@@ -321,6 +338,17 @@ require('lazy').setup({
         end,
       })
     end
+  },
+
+  {
+    'folke/trouble.nvim',
+    dependencies = {
+      'nvim-tree/nvim-web-devicons'
+    },
+    setup = true,
+    keys = {
+      { '<leader>e', '<cmd>TroubleToggle<cr>', desc = 'Show Errors' },
+    },
   },
 
   {

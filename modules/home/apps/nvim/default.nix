@@ -17,6 +17,7 @@
       dockerfile-language-server-nodejs
       lua-language-server
       cmake-language-server
+      yaml-language-server
     ];
   };
 }

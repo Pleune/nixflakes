@@ -2,7 +2,6 @@
   pkgs,
   username,
   NixOS-WSL,
-  home-manager,
   ...
 }:
 {
@@ -19,6 +18,7 @@
 
   time.timeZone = "America/Detroit";
   i18n.defaultLocale = "en_US.UTF-8";
+  networking.timeServers = [ "time.windows.com" ];
 
   hardware.opengl = {
     enable = true;
