@@ -9,14 +9,15 @@
       ${builtins.readFile ./init.lua}
     '';
     extraPackages = with pkgs; [
-      ruff-lsp
-      nodePackages.pyright
+      clang-tools
+      cmake-language-server
+      dockerfile-language-server-nodejs
       fzf
       gcc
-      nil
-      dockerfile-language-server-nodejs
       lua-language-server
-      cmake-language-server
+      nil
+      nodePackages.pyright
+      ruff-lsp
       yaml-language-server
     ];
   };
