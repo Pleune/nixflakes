@@ -116,6 +116,17 @@
               command cmake $argv
             '';
           };
+          colcon = {
+            wraps = "colcon";
+            body = ''
+              if string match -q -e -- build $argv 
+                if not string match -q -e -- CMAKE_EXPORT_COMPILE_COMMANDS
+                  set -a argv '--cmake-args' ' -DCMAKE_EXPORT_COMPILE_COMMANDS=1'
+                end
+              end
+              command colcon $argv
+            '';
+          };
         };
       };
 
@@ -133,19 +144,20 @@
     services.gpg-agent.enableFishIntegration = true;
 
     home.packages = with pkgs; [
-      grc
-      gh
-      ripgrep
+      bat
       btop
+      curl
+      gh
+      git-subrepo
+      grc
+      nix-tree
+      nixfmt-rfc-style
+      ripgrep
+      tldr
       todoist
-      zip
       unzip
       wget
-      curl
-      nixfmt-rfc-style
-      git-subrepo
-      tldr
-      bat
+      zip
     ];
   };
 }
