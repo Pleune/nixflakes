@@ -20,15 +20,15 @@
   i18n.defaultLocale = "en_US.UTF-8";
   networking.timeServers = [ "time.windows.com" ];
 
-  hardware.opengl = {
+  hardware.graphics = {
     enable = true;
-    driSupport = true;
-    setLdLibraryPath = true;
 
     extraPackages = with pkgs; [
       mesa.drivers
       libvdpau-va-gl
-      (libedit.overrideAttrs (attrs: {postInstall = (attrs.postInstall or "") + ''ln -s $out/lib/libedit.so $out/lib/libedit.so.2'';}))
+      (libedit.overrideAttrs (attrs: {
+        postInstall = (attrs.postInstall or "") + ''ln -s $out/lib/libedit.so $out/lib/libedit.so.2'';
+      }))
       linuxPackages.nvidia_x11
     ];
   };
@@ -38,15 +38,25 @@
     unitConfig.ConditionPathExists = "!/run/user/%i";
   };
 
-  programs.bash.shellInit = ''
-      export CUDA_PATH=${pkgs.cudatoolkit}
-      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/wsl/lib:${pkgs.linuxPackages.nvidia_x11}/lib:${pkgs.ncurses5}/lib
-      export EXTRA_LDFLAGS="-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib"
-      export EXTRA_CCFLAGS="-I/usr/include"
-   '';
+  environment.sessionVariables = {
+    CUDA_PATH = "${pkgs.cudatoolkit}";
+    EXTRA_LDFLAGS = "-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib";
+    EXTRA_CCFLAGS = "-I/usr/include";
+    LD_LIBRARY_PATH = [
+      "/usr/lib/wsl/lib"
+      "${pkgs.linuxPackages.nvidia_x11}/lib"
+      "${pkgs.ncurses5}/lib"
+      "/run/opengl-driver/lib"
+    ];
+    MESA_D3D12_DEFAULT_ADAPTER_NAME = "Nvidia";
+  };
 
   users.users.${username}.extraGroups = [ "video" ];
-  environment.systemPackages = with pkgs; [ glxinfo libva-utils cudatoolkit ];
+  environment.systemPackages = with pkgs; [
+    glxinfo
+    libva-utils
+    cudatoolkit
+  ];
   # just make vscode with the WSL remote extension work
   home-manager.users.${username}.home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
 }

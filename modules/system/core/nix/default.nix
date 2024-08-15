@@ -13,7 +13,7 @@
   };
 
   nix = {
-    #package = pkgs.nixVersions.nix_2_21;
+    package = pkgs.nixVersions.latest;
     nixPath = [ "nixpkgs=/run/current-system/nixpkgs" ];
     settings = {
       experimental-features = [
@@ -24,10 +24,6 @@
     };
 
     registry.nixpkgs.flake = nixpkgs;
-
-    #optimize = {
-    #  automatic = true;
-    #};
 
     gc = {
       automatic = true;

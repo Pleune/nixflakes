@@ -16,7 +16,7 @@
       gcc
       lua-language-server
       nil
-      nodePackages.pyright
+      pyright
       ruff-lsp
       yaml-language-server
     ];
