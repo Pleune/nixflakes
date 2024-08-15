@@ -6,7 +6,7 @@
     drivers = with pkgs; [
       gutenprint
       gutenprintBin
-      hplipWithPlugin
+      #hplipWithPlugin
       postscript-lexmark
       samsung-unified-linux-driver
       splix

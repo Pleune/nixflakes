@@ -12,6 +12,8 @@
       clang-tools
       cmake-language-server
       dockerfile-language-server-nodejs
+      ruff-lsp
+      basedpyright
       fzf
       gcc
       lua-language-server

@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
 
     home-manager = {
       url = "github:nix-community/home-manager";
@@ -12,11 +13,13 @@
     NixOS-WSL = {
       url = "github:nix-community/NixOS-WSL";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
     };
 
     nix-ld-rs = {
       url = "github:nix-community/nix-ld-rs";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
     };
 
     # needed for microsoft surface configuration
@@ -27,6 +30,7 @@
     lanzaboote = {
       url = "github:nix-community/lanzaboote/v0.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
     };
 
     agenix = {
@@ -42,15 +46,14 @@
   };
 
   outputs =
-    { self, nixpkgs, ... }@attrs:
-    let
-      supportedSystems = [ "x86_64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
-    in
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      ...
+    }@attrs:
     {
       nixosConfigurations = {
-
         surface =
           let
             system = "x86_64-linux";
@@ -104,10 +107,10 @@
           };
       };
 
-      devShells = forAllSystems (
+      devShells = flake-utils.lib.eachDefaultSystem (
         system:
         let
-          pkgs = nixpkgsFor.${system};
+          pkgs = nixpkgs.legacyPackages.${system};
         in
         {
           default = pkgs.mkShell {

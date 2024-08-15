@@ -86,9 +86,9 @@ require('lazy').setup({
           }
         }
       }
-      lspconfig.pyright.setup {
+      lspconfig.basedpyright.setup {
         settings = {
-          pyright = {
+          basedpyright = {
             disableTaggedHints = true,
             disableOrganizeImports = true,
           },

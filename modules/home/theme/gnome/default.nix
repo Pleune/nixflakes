@@ -83,7 +83,7 @@
       gnomeExtensions.hide-top-bar
       gnomeExtensions.home-assistant-extension
 
-      gnome.gnome-tweaks
+      gnome-tweaks
       palenight-theme
     ];
 

@@ -50,7 +50,7 @@
   };
 
   environment = {
-    systemPackages = with pkgs; [ gnome.cheese ];
+    systemPackages = with pkgs; [ cheese ];
     gnome.excludePackages = with pkgs; [ snapshot ];
   };
   users.users.${username}.extraGroups = [

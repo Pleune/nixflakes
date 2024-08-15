@@ -14,6 +14,19 @@ let
   '';
 in
 {
+  # don't block all the traffic please
+  networking.firewall = {
+    logReversePathDrops = true;
+    extraCommands = ''
+      ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN 
+      ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --dport 51820 -j RETURN 
+    '';
+    extraStopCommands = ''
+      ip46tables -t mangle -D nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN || true 
+      ip46tables -t mangle -D nixos-fw-rpfilter -p udp -m udp --dport 51820 -j RETURN || true
+    '';
+  };
+
   age.secrets.wireguard-template.file = "${private.secrets}/wireguard_template.age";
   age.secrets.wireguard-settings.file = "${private.secrets}/wireguard_settings_${hostName}.age";
   systemd.services.NetworkManager.partOf = [ "instantiate_pleunenet.service" ];

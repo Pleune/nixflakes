@@ -5,7 +5,7 @@
       parsec-bin
       moonlight-qt
       discord
-      prismlauncher-qt5
+      prismlauncher
       spotify
       trilium-desktop
       xournalpp
