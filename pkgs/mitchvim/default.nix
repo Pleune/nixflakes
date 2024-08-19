@@ -1,0 +1,396 @@
+{ makeNixvim }:
+makeNixvim {
+
+  colorschemes.kanagawa.enable = true;
+
+  globals = {
+    mapleader = " ";
+    maplocalleader = " ";
+  };
+
+  keymaps = [
+
+    # Core find via telescope
+    {
+      options.desc = "Find files";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>ff";
+      action = ":Telescope find_files<cr>";
+    }
+    {
+      options.desc = "Find by grep";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>fg";
+      action = ":Telescope live_grep<cr>";
+    }
+    {
+      options.desc = "Find by help tags";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>fh";
+      action = ":Telescope help_tags<cr>";
+    }
+    {
+      options.desc = "Find by git files";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>fG";
+      action = ":Telescope git_files<cr>";
+    }
+    {
+      options.desc = "Find buffer";
+      mode = "n";
+      options.silent = true;
+      key = "<leader><space>";
+      action = ":Telescope buffers<cr>";
+    }
+    {
+      options.desc = "Find in buffer";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>/";
+      action = ":Telescope current_buffer_fuzzy_find<cr>";
+    }
+
+    # Open file tree window
+    {
+      options.desc = "Open filetree (root)";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>e";
+      action = ":Neotree toggle reveal_force_cwd<cr>";
+    }
+    {
+      options.desc = "Open filetree (cwd)";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>E";
+      action = ":Neotree toggle<cr>";
+    }
+
+    # Toggleterm
+    {
+      options.desc = "Open Terminal";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>T";
+      action = ":ToggleTerm<cr>";
+    }
+
+    # random diagnostic
+    {
+      options.desc = "Show diagnostic";
+      mode = "n";
+      key = "<leader>de";
+      action.__raw = "vim.diagnostic.open_float";
+    }
+    # {
+    #   options.desc = "Show diagnostic";
+    #   mode = "n";
+    #   key = "[d";
+    #   action.__raw = "vim.diagnostic.goto_prev";
+    # }
+    # {
+    #   options.desc = "Show diagnostic";
+    #   mode = "n";
+    #   key = "]d";
+    #   action.__raw = "vim.diagnostic.goto_next";
+    # }
+  ];
+
+  keymapsOnEvents = {
+    # make moving in and out of Toggle Term easier when not closing it
+    TermOpen = [
+      {
+        mode = "t";
+        key = "<esc>";
+        action = ''<C-\><C-n>'';
+      }
+      {
+        mode = "t";
+        key = "jk";
+        action = ''<C-\><C-n>'';
+      }
+      {
+        mode = "t";
+        key = "<C-h>";
+        action = "<Cmd>wincmd h<CR>";
+      }
+      {
+        mode = "t";
+        key = "<C-j>";
+        action = "<Cmd>wincmd j<CR>";
+      }
+      {
+        mode = "t";
+        key = "<C-k>";
+        action = "<Cmd>wincmd k<CR>";
+      }
+      {
+        mode = "t";
+        key = "<C-l>";
+        action = "<Cmd>wincmd l<CR>";
+      }
+      {
+        mode = "t";
+        key = "<C-w>";
+        action = ''<C-\><C-n>'';
+      }
+    ];
+
+    LspAttach = [
+      {
+        key = "<leader>LF";
+        action.__raw = "vim.lsp.buf.format";
+        options.desc = "Format buffer";
+      }
+      {
+        key = "<leader>LR";
+        action.__raw = "vim.lsp.buf.rename";
+        options.desc = "Rename symbol";
+      }
+      {
+        key = "<leader>Ld";
+        action.__raw = "vim.lsp.buf.definition";
+        options.desc = "Goto definiton";
+      }
+      {
+        key = "<leader>LD";
+        action.__raw = "vim.lsp.buf.type_definition";
+        options.desc = "Goto type definiton";
+      }
+      {
+        key = "<leader>Ll";
+        action.__raw = "vim.lsp.buf.declaration";
+        options.desc = "Goto declaration";
+      }
+      {
+        key = "<leader>Li";
+        action.__raw = "vim.lsp.buf.implementation";
+        options.desc = "Goto definiton";
+      }
+      {
+        key = "<leader>Lr";
+        action.__raw = "require('telescope.builtin').lsp_references";
+        options.desc = "View references";
+      }
+      {
+        key = "<leader>Ls";
+        action.__raw = "require('telescope.builtin').lsp_document_symbols";
+        options.desc = "View document symbols";
+      }
+      {
+        key = "<leader>LS";
+        action.__raw = "require('telescope.builtin').lsp_workspace_symbols";
+        options.desc = "View workspace symbols";
+      }
+      {
+        # Hover
+        key = "K";
+        action.__raw = "vim.lsp.buf.hover";
+        options.desc = "Hover Documentation";
+      }
+      {
+        key = "<leader>Lk";
+        action.__raw = "vim.lsp.buf.signature_help";
+        options.desc = "Signature Documentation";
+      }
+    ];
+  };
+
+  plugins = {
+    which-key = {
+      enable = true;
+      settings.spec = [
+        {
+          __unkeyed-1 = "<leader>f";
+          group = "Find";
+        }
+      ];
+    };
+    fugitive.enable = true;
+    sleuth.enable = true;
+    comment.enable = true;
+    gitsigns.enable = true;
+    lualine = {
+      enable = true;
+      iconsEnabled = false;
+      theme = "onedark";
+      extensions = [ "fzf" ];
+      sectionSeparators.left = "";
+      sectionSeparators.right = "";
+      componentSeparators.left = "|";
+      componentSeparators.right = "|";
+    };
+    barbecue.enable = true;
+    trouble.enable = true;
+    indent-blankline.enable = true;
+    guess-indent.enable = true;
+    telescope = {
+      enable = true;
+      extensions = {
+        fzy-native = {
+          enable = true;
+          settings = {
+            #case_mode = "smart_case";
+            #fuzzy = true;
+            override_generic_sorter = true;
+            override_file_sorter = false; # frency
+          };
+        };
+        media-files.enable = true;
+        ui-select.enable = true;
+        frecency.enable = true;
+        file-browser = {
+          enable = true;
+          settings.hijack_netrw = true;
+        };
+      };
+    };
+    treesitter = {
+      enable = true;
+      settings = {
+        indent.enable = true;
+        highlight.enable = true;
+        ensure_installed = "all";
+      };
+    };
+    neo-tree = {
+      enable = true;
+      closeIfLastWindow = true;
+      enableGitStatus = true;
+      enableModifiedMarkers = true;
+      enableRefreshOnWrite = true;
+      buffers = {
+        bindToCwd = false;
+        followCurrentFile = {
+          enabled = true;
+        };
+      };
+    };
+    leap.enable = true;
+    toggleterm.enable = true;
+
+    cmp = {
+      enable = true;
+      settings = {
+        sources = [
+          { name = "spell"; }
+          { name = "async_path"; }
+          { name = "fish"; }
+          { name = "nvim_lsp"; }
+          { name = "buffer"; }
+          { name = "treesitter"; }
+          { name = "snippy"; }
+        ];
+
+        # Tab style snippet mapping, where by default nothing
+        # is selected. Tab cycles through completions, while
+        # automatically applying them, however snippets require
+        # enter to expand.
+        snippet.expand = ''function(args) require('snippy').expand_snippet(args.body); end''; 
+        mapping = {
+          "<Tab>" = ''
+            cmp.mapping(function(fallback)
+              snippy = require('snippy')
+              local has_words_before = function()
+                unpack = unpack or table.unpack
+                local line, col = unpack(vim.api.nvim_win_get_cursor(0))
+                return col ~= 0 and vim.api.nvim_buf_get_lines(0, line - 1, line, true)[1]:sub(col, col):match("%s") == nil
+              end
+              if cmp.visible() then
+                cmp.select_next_item()
+              elseif snippy.can_expand_or_advance() then
+                snippy.expand_or_advance()
+              elseif has_words_before() then
+                cmp.complete()
+              else
+                fallback()
+              end
+            end, { "i", "s" })
+          '';
+          "<S-Tab>" = ''
+            cmp.mapping(function(fallback)
+              snippy = require('snippy')
+              if cmp.visible() then
+                cmp.select_prev_item()
+              elseif snippy.can_jump(-1) then
+                snippy.previous()
+              else
+                fallback()
+              end
+            end, { "i", "s" })
+          '';
+          "<CR>" = ''
+            cmp.mapping(function(fallback)
+              snippy = require('snippy')
+              if snippy.can_expand() then
+                snippy.expand()
+              else
+                fallback()
+              end
+            end, { 'i', 's' })
+          '';
+        };
+      };
+    };
+
+    lsp = {
+      enable = true;
+      servers = {
+        ruff.enable = true;
+        yamlls = {
+          enable = true;
+          settings = {
+            format.enable = true;
+          };
+        };
+        pyright = {
+          enable = true;
+          settings = {
+            pytight.disableTaggedHints = true;
+            pyright.disableOrganizeImports = true;
+            python.analysis.ignore = "*";
+          };
+        };
+        clangd.enable = true;
+        lua-ls = {
+          enable = true;
+          settings = {
+            workspace.checkThirdParty = false;
+            telemetry.enable = false;
+          };
+        };
+        cmake.enable = true;
+        nixd.enable = true;
+        dockerls.enable = true;
+      };
+    };
+  };
+
+  localOpts = {
+    number = true; # Show line numbers
+    signcolumn = "yes";
+  };
+
+  opts = {
+    mouse = "a"; # enable mouse mode
+    clipboard = "unnamedplus"; # enable copy paste
+    breakindent = true;
+    undofile = true;
+    ignorecase = true;
+    smartcase = true;
+    updatetime = 200;
+    timeout = true;
+    timeoutlen = 300;
+    completeopt = "menuone,noselect";
+    termguicolors = true;
+  };
+
+  performance = {
+    combinePlugins.enable = true;
+    byteCompileLua.enable = true;
+  };
+}

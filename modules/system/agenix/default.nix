@@ -1,6 +1,18 @@
-{ agenix, pkgs, ... }:
 {
-  services.openssh.enable = true;
+  agenix,
+  lib,
+  pkgs,
+  config,
+  ...
+}:
+with lib;
+{
   imports = [ agenix.nixosModules.age ];
-  environment.systemPackages = [ agenix.packages.${pkgs.system}.default ];
+  options.nixflakes.agenix.enable = mkEnableOption "Agenix";
+  config = mkIf config.nixflakes.agenix.enable (mkMerge [
+    {
+      services.openssh.enable = true;
+      environment.systemPackages = [ agenix.packages.${pkgs.system}.default ];
+    }
+  ]);
 }

@@ -38,7 +38,7 @@
         enableFishIntegration = true;
       };
 
-      vim.enable = true;
+      #vim.enable = true;
       bash = {
         enable = true;
         initExtra = ''

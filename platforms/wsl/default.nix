@@ -26,10 +26,10 @@
     extraPackages = with pkgs; [
       mesa.drivers
       libvdpau-va-gl
-      (libedit.overrideAttrs (attrs: {
-        postInstall = (attrs.postInstall or "") + ''ln -s $out/lib/libedit.so $out/lib/libedit.so.2'';
-      }))
-      linuxPackages.nvidia_x11
+      #(libedit.overrideAttrs (attrs: {
+      #  postInstall = (attrs.postInstall or "") + ''ln -s $out/lib/libedit.so $out/lib/libedit.so.2'';
+      #}))
+      #linuxPackages.nvidia_x11
     ];
   };
 
@@ -39,16 +39,16 @@
   };
 
   environment.sessionVariables = {
-    CUDA_PATH = "${pkgs.cudatoolkit}";
-    EXTRA_LDFLAGS = "-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib";
+    #CUDA_PATH = "${pkgs.cudatoolkit}";
+    #EXTRA_LDFLAGS = "-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib";
     EXTRA_CCFLAGS = "-I/usr/include";
     LD_LIBRARY_PATH = [
       "/usr/lib/wsl/lib"
-      "${pkgs.linuxPackages.nvidia_x11}/lib"
-      "${pkgs.ncurses5}/lib"
+      #"${pkgs.linuxPackages.nvidia_x11}/lib"
+      #"${pkgs.ncurses5}/lib"
       "/run/opengl-driver/lib"
     ];
-    MESA_D3D12_DEFAULT_ADAPTER_NAME = "Nvidia";
+    #MESA_D3D12_DEFAULT_ADAPTER_NAME = "Nvidia";
   };
 
   users.users.${username}.extraGroups = [ "video" ];
@@ -58,5 +58,12 @@
     cudatoolkit
   ];
   # just make vscode with the WSL remote extension work
-  home-manager.users.${username}.home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
+  home-manager.users.${username} = {
+    home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
+  };
+
+  # My configs
+  nixflakes = {
+    programs.mitchvim.enable = true;
+  };
 }

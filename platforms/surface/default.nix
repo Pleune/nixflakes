@@ -57,4 +57,12 @@
     "networkmanager"
     "video"
   ];
+
+  # My options
+  nixflakes = {
+    programs.mitchvim.enable = true;
+    secureboot.enable = true;
+    pleunenet.enable = true;
+    printing.enable = true;
+  };
 }

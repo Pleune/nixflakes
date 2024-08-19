@@ -1,7 +1,9 @@
 {
+  system,
   pkgs,
   nixpkgs,
   nix-ld-rs,
+  lib,
   ...
 }:
 {
@@ -32,7 +34,10 @@
     };
   };
 
-  nixpkgs.config.allowUnfree = true;
+  nixpkgs = {
+    config.allowUnfree = true;
+    hostPlatform = system;
+  };
 
   home-manager.useUserPackages = true;
   home-manager.useGlobalPkgs = true;
@@ -41,6 +46,8 @@
     enable = true;
     package = nix-ld-rs.packages."${pkgs.system}".nix-ld-rs;
   };
+
+  systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkForce 40960;
 
   # Does not work with flakes
   programs.command-not-found.enable = false;
