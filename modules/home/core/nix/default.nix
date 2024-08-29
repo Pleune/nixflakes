@@ -1,11 +1,10 @@
+{ ... }:
 {
-  username,
-  ...
-}:
-{
-  nixpkgs.config.allowUnfree = true;
-  home-manager.users.${username} = {
-    home.stateVersion = "23.11";
-    nixpkgs.config.allowUnfree = true;
+  # espically important for system revision causing dangling user profile versions that never get cleaned up by root nix-collect-garbage
+  nix.gc = {
+    automatic = true;
+    frequency = "daily";
   };
+
+  home.stateVersion = "24.05";
 }

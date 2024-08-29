@@ -5,7 +5,6 @@
       "https://nix-community.cachix.org"
       "https://cuda-maintainers.cachix.org"
       "https://numtide.cachix.org"
-      "https://ros.cachix.org"
     ];
     trusted-substituters = [
       "https://nix-community.cachix.org"

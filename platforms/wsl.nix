@@ -1,7 +1,7 @@
 {
   pkgs,
-  username,
   NixOS-WSL,
+  username,
   ...
 }:
 {
@@ -57,13 +57,15 @@
     libva-utils
     cudatoolkit
   ];
-  # just make vscode with the WSL remote extension work
-  home-manager.users.${username} = {
-    home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
-  };
 
-  # My configs
-  nixflakes = {
-    programs.mitchvim.enable = true;
+  home-manager.users.${username} = {
+    # just make vscode with the WSL remote extension work
+    home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
+
+    nixflakes = {
+      theme = "wsl";
+      gui = false;
+      daily = false;
+    };
   };
 }

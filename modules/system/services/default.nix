@@ -1,4 +1,4 @@
 { ... }:
 {
-  imports = [ ./gitea ];
+  imports = [ ./local-gitea ];
 }

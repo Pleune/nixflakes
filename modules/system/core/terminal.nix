@@ -6,7 +6,6 @@
   };
 
   environment.systemPackages = with pkgs; [
-    htop
     git
     curl
     zip

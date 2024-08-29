@@ -1,10 +1,10 @@
 { hostName, ... }:
 {
   imports = [
-    ./nix
-    ./terminal
-    ./user
-    ./trusted-substituters
+    ./nix.nix
+    ./terminal.nix
+    ./user.nix
+    ./trusted-substituters.nix
   ];
   networking.hostName = "${hostName}";
 }

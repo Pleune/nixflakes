@@ -61,17 +61,21 @@
         flake = {
           nixosConfigurations =
             let
+              sysdef = {
+                username = "mitch";
+                userFullName = "Mitchell Pleune";
+                userEmail = "mitchpleune@gmail.com";
+              };
               specialArgs =
                 ctx: hostName:
                 {
-                  hostName = hostName;
-                  username = "mitch";
-                  userFullName = "Mitchell Pleune";
-                  userEmail = "mitchpleune@gmail.com";
                   inherit (ctx) inputs' self' system;
                   packages = ctx.config.packages;
+                  root = ./.;
+                  inherit inputs sysdef;
+                  hostName = hostName;
                 }
-                // inputs;
+                // inputs // sysdef;
 
             in
             {
@@ -80,14 +84,8 @@
                 inputs.nixpkgs.lib.nixosSystem {
                   specialArgs = specialArgs ctx "surface";
                   modules = [
-                    ./platforms/surface
-                    ./modules/system
-                    ./modules/home/core
-                    ./modules/home/gpg
-                    ./modules/home/apps/vscode
-                    ./modules/home/apps/misc
-                    ./modules/home/theme/gnome
-                    ./modules/home/syncthing
+                    ./platforms/surface.nix
+                    ./modules
                   ];
                 }
               );
@@ -97,10 +95,8 @@
                 inputs.nixpkgs.lib.nixosSystem {
                   specialArgs = specialArgs ctx "wsl";
                   modules = [
-                    ./platforms/wsl
-                    ./modules/home/core
-                    ./modules/home/theme/gtk-wsl
-                    ./modules/system
+                    ./platforms/wsl.nix
+                    ./modules
                   ];
                 }
               );
@@ -115,14 +111,11 @@
         };
 
         systems = [ "x86_64-linux" ];
-
         perSystem =
           { pkgs, inputs', ... }:
           {
             packages = {
-              mitchvim = pkgs.callPackage ./pkgs/mitchvim {
-                makeNixvim = inputs'.nixvim.legacyPackages.makeNixvim;
-              };
+              mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (import ./modules/home/core/terminal/nvim/options.nix);
             };
           };
       }

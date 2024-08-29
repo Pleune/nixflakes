@@ -1,6 +1,4 @@
-{ makeNixvim }:
-makeNixvim {
-
+{
   colorschemes.kanagawa.enable = true;
 
   globals = {
@@ -367,7 +365,10 @@ makeNixvim {
           };
         };
         cmake.enable = true;
-        nixd.enable = true;
+        nil-ls = {
+          enable = true;
+          settings.formatting.command = [ "nixfmt" ];
+        };
         dockerls.enable = true;
       };
     };
