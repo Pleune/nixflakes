@@ -100,6 +100,17 @@
                   ];
                 }
               );
+
+              lxc = withSystem "x86_64-linux" (
+                ctx:
+                inputs.nixpkgs.lib.nixosSystem {
+                  specialArgs = specialArgs ctx "lxc";
+                  modules = [
+                    ./platforms/lxc.nix
+                    ./modules
+                  ];
+                }
+              );
             };
 
           templates.default = {
