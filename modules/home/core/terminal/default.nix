@@ -144,6 +144,7 @@
   services.gpg-agent.enableFishIntegration = config.nixflakes.gpg;
 
   home.packages = with pkgs; [
+    bash-completion
     bat
     btop
     curl

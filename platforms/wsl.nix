@@ -33,30 +33,30 @@
     ];
   };
 
-  systemd.services."user-runtime-dir@" = {
-    overrideStrategy = "asDropin";
-    unitConfig.ConditionPathExists = "!/run/user/%i";
-  };
+  # systemd.services."user-runtime-dir@" = {
+  #   overrideStrategy = "asDropin";
+  #   unitConfig.ConditionPathExists = "!/run/user/%i";
+  # };
 
-  environment.sessionVariables = {
-    #CUDA_PATH = "${pkgs.cudatoolkit}";
-    #EXTRA_LDFLAGS = "-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib";
-    EXTRA_CCFLAGS = "-I/usr/include";
-    LD_LIBRARY_PATH = [
-      "/usr/lib/wsl/lib"
-      #"${pkgs.linuxPackages.nvidia_x11}/lib"
-      #"${pkgs.ncurses5}/lib"
-      "/run/opengl-driver/lib"
-    ];
-    #MESA_D3D12_DEFAULT_ADAPTER_NAME = "Nvidia";
-  };
+  # environment.sessionVariables = {
+  #   #CUDA_PATH = "${pkgs.cudatoolkit}";
+  #   #EXTRA_LDFLAGS = "-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib";
+  #   EXTRA_CCFLAGS = "-I/usr/include";
+  #   LD_LIBRARY_PATH = [
+  #     "/usr/lib/wsl/lib"
+  #     #"${pkgs.linuxPackages.nvidia_x11}/lib"
+  #     #"${pkgs.ncurses5}/lib"
+  #     "/run/opengl-driver/lib"
+  #   ];
+  #   #MESA_D3D12_DEFAULT_ADAPTER_NAME = "Nvidia";
+  # };
 
   users.users.${username}.extraGroups = [ "video" ];
-  environment.systemPackages = with pkgs; [
-    glxinfo
-    libva-utils
-    cudatoolkit
-  ];
+  # environment.systemPackages = with pkgs; [
+  #   glxinfo
+  #   libva-utils
+  #   cudatoolkit
+  # ];
 
   home-manager.users.${username} = {
     # just make vscode with the WSL remote extension work

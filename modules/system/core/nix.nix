@@ -35,6 +35,8 @@
         "flakes"
       ];
       auto-optimise-store = true;
+      allowed-users = [ "*" "@users" ];
+      trusted-users = [ "@wheel" ];
     };
 
     gc = {

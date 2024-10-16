@@ -5,7 +5,6 @@
   root,
   inputs,
   sysdef,
-  lib,
   ...
 }:
 {

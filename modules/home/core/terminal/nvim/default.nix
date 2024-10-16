@@ -2,6 +2,7 @@
   lib,
   config,
   nixvim,
+  pkgs,
   ...
 }:
 with lib;
@@ -13,6 +14,6 @@ with lib;
       enable = true;
       defaultEditor = true;
       vimdiffAlias = true;
-    } // (import ./options.nix);
+    } // (import ./options.nix { inherit pkgs; });
   };
 }

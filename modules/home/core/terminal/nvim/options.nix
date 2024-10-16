@@ -1,5 +1,14 @@
+{ pkgs, ... }:
 {
+  vimAlias = true;
+
   colorschemes.kanagawa.enable = true;
+
+  # impureRtp = true;
+  # opts = {
+  #   spell = true;
+  #   spelllang = [ "en_US" ];
+  # };
 
   globals = {
     mapleader = " ";
@@ -51,6 +60,13 @@
       key = "<leader>/";
       action = ":Telescope current_buffer_fuzzy_find<cr>";
     }
+    {
+      options.desc = "Neoclip select";
+      mode = "n";
+      options.silent = true;
+      key = "P";
+      action = ":Telescope neoclip<cr>";
+    }
 
     # Open file tree window
     {
@@ -77,13 +93,56 @@
       action = ":ToggleTerm<cr>";
     }
 
+    # LazyGit
+    {
+      options.desc = "Open LazyGit";
+      mode = "n";
+      options.silent = true;
+      key = "<leader>g";
+      action = ":LazyGit<cr>";
+    }
+
     # random diagnostic
     {
       options.desc = "Show diagnostic";
       mode = "n";
-      key = "<leader>de";
+      key = "<leader>d";
       action.__raw = "vim.diagnostic.open_float";
     }
+
+    # reload from last time
+    {
+      options.desc = "Load directory";
+      mode = "n";
+      key = "<leader>pl";
+      action.__raw = "function() require('persistence').load() end";
+    }
+    {
+      options.desc = "Load last";
+      mode = "n";
+      key = "<leader>pL";
+      action.__raw = "function() require('persistence').load({ last = true }) end";
+    }
+    {
+      options.desc = "select";
+      mode = "n";
+      key = "<leader>ps";
+      action.__raw = "function() require('persistence').select() end";
+    }
+    {
+      options.desc = "Persistance quit";
+      mode = "n";
+      key = "<leader>pq";
+      action.__raw = "function() require('persistence').stop() end";
+    }
+
+    {
+      options.desc = "LaTeX preview";
+      mode = "n";
+      key = "<leader>l";
+      action = ":TeXpresso %<cr>";
+    }
+
     # {
     #   options.desc = "Show diagnostic";
     #   mode = "n";
@@ -170,6 +229,11 @@
         options.desc = "Goto definiton";
       }
       {
+        key = "<leader>La";
+        action.__raw = "vim.lsp.buf.code_action";
+        options.desc = "Code Action";
+      }
+      {
         key = "<leader>Lr";
         action.__raw = "require('telescope.builtin').lsp_references";
         options.desc = "View references";
@@ -199,12 +263,43 @@
   };
 
   plugins = {
+    direnv.enable = true;
+    fidget.enable = true; # LSP notifications
+    gitblame.enable = true;
+    headlines.enable = true; # better markdown rendering
+    hex.enable = true; # binary file mode
+    hmts.enable = true; # Just slightly better syntax highlighting for home-manager nix files
+    # image = { # idk does not work in wsl
+    #   enable = true;
+    #   backend = "ueberzug"; # support more than just kitty term
+    # };
+    persistence.enable = true;
+    ledger.enable = true; # literally accounting
+    neoclip.enable = true;
+    spider.enable = true;
+    texpresso.enable = true;
+    trim.enable = true;
+    lazygit = {
+      enable = true;
+      settings = {
+        floating_window_scaling_factor = 0.9;
+        use_neovim_remote = 1; # faster startup
+      };
+    };
     which-key = {
       enable = true;
       settings.spec = [
         {
           __unkeyed-1 = "<leader>f";
           group = "Find";
+        }
+        {
+          __unkeyed-1 = "<leader>L";
+          group = "Language";
+        }
+        {
+          __unkeyed-1 = "<leader>p";
+          group = "Persistance";
         }
       ];
     };
@@ -214,13 +309,15 @@
     gitsigns.enable = true;
     lualine = {
       enable = true;
-      iconsEnabled = false;
-      theme = "onedark";
-      extensions = [ "fzf" ];
-      sectionSeparators.left = "";
-      sectionSeparators.right = "";
-      componentSeparators.left = "|";
-      componentSeparators.right = "|";
+      settings.options = {
+        iconsEnabled = true;
+        theme = "onedark";
+        extensions = [ "fzf" ];
+        # sectionSeparators.left = "";
+        # sectionSeparators.right = "";
+        # componentSeparators.left = "|";
+        # componentSeparators.right = "|";
+      };
     };
     barbecue.enable = true;
     trouble.enable = true;
@@ -251,8 +348,18 @@
       enable = true;
       settings = {
         indent.enable = true;
-        highlight.enable = true;
         ensure_installed = "all";
+        highlight = {
+          enable = true;
+
+          # prefer vimtex highlighting over treesitter,
+          # even though it uses the legacy system
+          disable = [ "latex" ];
+          additional_vim_regex_highlighting = [
+            "latex"
+            "markdown"
+          ];
+        };
       };
     };
     neo-tree = {
@@ -271,6 +378,13 @@
     leap.enable = true;
     toggleterm.enable = true;
 
+    vimtex = {
+      enable = true;
+      settings.view_method = "zathura";
+      texlivePackage = pkgs.texlive.combined.scheme-full; # TODO: replace with medium in flake export
+    };
+
+    intellitab.enable = true;
     cmp = {
       enable = true;
       settings = {
@@ -283,13 +397,15 @@
           { name = "treesitter"; }
           #{ name = "snippy"; }
           { name = "luasnip"; }
+          { name = "latex-symbols"; }
+          { name = "nvim_lsp_signature_help"; }
         ];
 
         # Tab style snippet mapping, where by default nothing
         # is selected. Tab cycles through completions, while
         # automatically applying them, however snippets require
         # enter to expand.
-        #snippet.expand = ''function(args) require('snippy').expand_snippet(args.body); end''; 
+        #snippet.expand = ''function(args) require('snippy').expand_snippet(args.body); end'';
         snippet.expand = ''function(args) require'luasnip'.lsp_expand(args.body); end'';
         mapping = {
           "<C-p>" = "cmp.mapping.select_prev_item()";
@@ -309,7 +425,7 @@
                   })
                 end
               else
-                fallback()
+                cmp.complete()
               end
             end)'';
           "<Tab>" = ''
@@ -319,7 +435,8 @@
               elseif require("luasnip").locally_jumpable(1) then
                 require("luasnip").jump(1)
               else
-                fallback()
+                require("intellitab").indent()
+                -- fallback()
               end
             end, { "i", "s" })'';
 
@@ -370,8 +487,21 @@
           settings.formatting.command = [ "nixfmt" ];
         };
         dockerls.enable = true;
+        texlab = {
+          enable = true;
+          settings.texlab = {
+            local = "latexindent.yaml";
+            latexindent = {
+              modifyLineBreaks = true;
+            };
+          };
+        };
+        ltex.enable = true; # grammar checking
       };
     };
+    lsp-lines.enable = true;
+    lsp-status.enable = true; # Show some lsp goodies in the lualine
+    lspkind.enable = true; # Show little icons for what type things are
   };
 
   localOpts = {

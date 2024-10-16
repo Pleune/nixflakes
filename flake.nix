@@ -75,7 +75,8 @@
                   inherit inputs sysdef;
                   hostName = hostName;
                 }
-                // inputs // sysdef;
+                // inputs
+                // sysdef;
 
             in
             {
@@ -126,7 +127,9 @@
           { pkgs, inputs', ... }:
           {
             packages = {
-              mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (import ./modules/home/core/terminal/nvim/options.nix);
+              mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
+                import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
+              );
             };
           };
       }
