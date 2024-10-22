@@ -17,12 +17,6 @@
       inputs.flake-utils.follows = "flake-utils";
     };
 
-    nix-ld-rs = {
-      url = "github:nix-community/nix-ld-rs";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
-
     # needed for microsoft surface configuration
     nixos-hardware = {
       url = "github:NixOS/nixos-hardware/master";

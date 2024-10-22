@@ -1,7 +1,6 @@
 {
   system,
   pkgs,
-  nix-ld-rs,
   lib,
   inputs,
   ...
@@ -51,10 +50,7 @@
     hostPlatform = system;
   };
 
-  programs.nix-ld = {
-    enable = true;
-    package = nix-ld-rs.packages."${pkgs.system}".nix-ld-rs;
-  };
+  programs.nix-ld.enable = true;
 
   systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkForce 40960;
 
