@@ -4,11 +4,7 @@
 
   colorschemes.kanagawa.enable = true;
 
-  # impureRtp = true;
-  # opts = {
-  #   spell = true;
-  #   spelllang = [ "en_US" ];
-  # };
+  impureRtp = true;
 
   globals = {
     mapleader = " ";
@@ -263,12 +259,16 @@
   };
 
   plugins = {
+    ltex-extra = {
+      enable = true;
+      settings.path = "~/.cache/nvim/";
+    };
+    web-devicons.enable = true;
     direnv.enable = true;
     fidget.enable = true; # LSP notifications
     gitblame.enable = true;
     headlines.enable = true; # better markdown rendering
     hex.enable = true; # binary file mode
-    hmts.enable = true; # Just slightly better syntax highlighting for home-manager nix files
     # image = { # idk does not work in wsl
     #   enable = true;
     #   backend = "ueberzug"; # support more than just kitty term
@@ -474,7 +474,7 @@
           };
         };
         clangd.enable = true;
-        lua-ls = {
+        lua_ls = {
           enable = true;
           settings = {
             workspace.checkThirdParty = false;
@@ -482,7 +482,7 @@
           };
         };
         cmake.enable = true;
-        nil-ls = {
+        nil_ls = {
           enable = true;
           settings.formatting.command = [ "nixfmt" ];
         };
@@ -496,7 +496,16 @@
             };
           };
         };
-        ltex.enable = true; # grammar checking
+        ltex = {
+          enable = true; # grammar checking
+          settings = {
+            configurationTarget = {
+              dictionary = "user";
+              disabledRules = "workspaceFolderExternalFile";
+              hiddenFalsePositives = "workspaceFolderExternalFile";
+            };
+          };
+        };
       };
     };
     lsp-lines.enable = true;
