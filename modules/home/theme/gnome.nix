@@ -55,7 +55,7 @@
             "Vitals@CoreCoding.com"
             "sound-output-device-chooser@kgshank.net"
             "space-bar@luchrioh"
-            "rounded-window-corners@yilozt"
+            #"rounded-window-corners@yilozt"
             "wireless-hid@chlumskyvaclav.gmail.com"
             "x11gestures@joseexposito.github.io"
             "AlphabeticalAppGrid@stuarthayhurst"
@@ -76,7 +76,7 @@
         gnomeExtensions.space-bar
         gnomeExtensions.x11-gestures
         gnomeExtensions.wireless-hid
-        gnomeExtensions.rounded-window-corners
+        #gnomeExtensions.rounded-window-corners
         gnomeExtensions.alphabetical-app-grid
         gnomeExtensions.blur-my-shell
         gnomeExtensions.clipboard-indicator

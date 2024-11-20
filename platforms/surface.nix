@@ -127,4 +127,6 @@
   home-manager.users.${username}.nixflakes = {
     theme = "gnome";
   };
+
+  system.stateVersion = "23.11";
 }

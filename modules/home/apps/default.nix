@@ -37,7 +37,7 @@
 
       services.syncthing = {
         enable = true;
-        tray = config.nixflakes.gui;
+        tray.enable = config.nixflakes.gui;
       };
 
       programs = {

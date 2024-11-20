@@ -68,4 +68,6 @@
       daily = false;
     };
   };
+
+  system.stateVersion = "23.11";
 }

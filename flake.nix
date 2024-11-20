@@ -3,7 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-stable.url = "github:nixos/nixpkgs/nixos-24.05";
+
+    deploy-rs.url = "github:serokell/deploy-rs";
 
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
@@ -15,7 +16,7 @@
 
     NixOS-WSL = {
       url = "github:nix-community/NixOS-WSL";
-      inputs.nixpkgs.follows = "nixpkgs-stable";
+      inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
 
@@ -32,7 +33,7 @@
 
     agenix = {
       url = "github:ryantm/agenix";
-      inputs.nixpkgs.follows = "nixpkgs-stable";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     nixvim = {
@@ -50,7 +51,7 @@
     private = {
       url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
-      inputs.nixpkgs.follows = "nixpkgs-stable";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
@@ -78,52 +79,33 @@
       in
       {
         flake = {
-          nixosConfigurations = {
-            surface = withSystem "x86_64-linux" (
-              ctx:
-              inputs.nixpkgs.lib.nixosSystem {
-                specialArgs = specialArgs ctx "surface";
-                modules = [
-                  ./platforms/surface.nix
-                  ./modules
-                ];
-              }
-            );
+          nixosConfigurations =
+            let
+              makeSystem =
+                name:
+                withSystem "x86_64-linux" (
+                  ctx:
+                  inputs.nixpkgs.lib.nixosSystem {
+                    specialArgs = specialArgs ctx name;
+                    modules = [
+                      "${./.}/platforms/${name}.nix"
+                      ./modules
+                    ];
+                  }
+                );
+            in
+            {
+              surface = makeSystem "surface";
+              wsl = makeSystem "wsl";
+              lxc = makeSystem "lxc";
 
-            wsl = withSystem "x86_64-linux" (
-              ctx:
-              inputs.nixpkgs.lib.nixosSystem {
-                specialArgs = specialArgs ctx "wsl";
-                modules = [
-                  ./platforms/wsl.nix
-                  ./modules
-                ];
-              }
-            );
-
-            lxc = withSystem "x86_64-linux" (
-              ctx:
-              inputs.nixpkgs.lib.nixosSystem {
-                specialArgs = specialArgs ctx "lxc";
-                modules = [
-                  ./platforms/lxc.nix
-                  ./modules
-                ];
-              }
-            );
-
-            nas = withSystem "x86_64-linux" (
-              ctx:
-              inputs.nixpkgs.lib.nixosSystem {
-                # currently unstabled needed for rustic-rs
-                specialArgs = (specialArgs ctx "nas");
-                modules = [
-                  ./platforms/nas.nix
-                  ./modules
-                ];
-              }
-            );
-          };
+              # homelab
+              nas = makeSystem "nas";
+              git = makeSystem "git";
+              git-runner1 = makeSystem "git-runner1";
+              immich = makeSystem "immich";
+              nextcloud = makeSystem "nextcloud";
+            };
 
           templates.default = {
             path = ./.;
@@ -131,6 +113,31 @@
           };
 
           formatter.x86_64-linux = inputs.nixpkgs.legacyPackages.x86_64-linux.nixfmt;
+
+          deploy.nodes =
+            let
+              homedeploy = name: extra: {
+                hostname = "${name}.home.pleunetowne.com";
+                profiles.system = {
+                  sshUser = "root";
+                  path = inputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.${name};
+                } // extra;
+              };
+            in
+            {
+              nas = homedeploy "nas" {};
+              git = homedeploy "git" {};
+              git-runner1 = homedeploy "git-runner1" {};
+              immich = homedeploy "immich" {};
+              nextcloud = homedeploy "nextcloud" {
+                # cannot downgrade nextcloud!
+                autoRollback = false;
+                magicRollback = false;
+              };
+            };
+          checks = builtins.mapAttrs (
+            system: deployLib: deployLib.deployChecks self.deploy
+          ) inputs.deploy-rs.lib;
         };
 
         systems = [ "x86_64-linux" ];
@@ -156,6 +163,10 @@
                 ];
                 format = "iso";
               };
+            };
+
+            devShells.default = pkgs.mkShell {
+              buildInputs = [ pkgs.deploy-rs ];
             };
           };
       }

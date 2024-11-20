@@ -6,21 +6,21 @@
   ...
 }:
 {
-  imports =
-    let
-      sriov-modules = builtins.fetchGit {
-        url = "https://github.com/cyberus-technology/nixos-sriov";
-        rev = "6bfcad7698afebbfead331826ee77f0b970603ed";
-      };
-    in
-    [ "${sriov-modules}/sriov.nix" ];
-
-  virtualisation.cyberus.intel-graphics-sriov.enable = lib.mkIf (config.specialisation != { }) true;
-  specialisation = {
-    no-intel-kernel.configuration = {
-      virtualisation.cyberus.intel-graphics-sriov.enable = false;
-    };
-  };
+  # imports =
+  #   let
+  #     sriov-modules = builtins.fetchGit {
+  #       url = "https://github.com/cyberus-technology/nixos-sriov";
+  #       rev = "6bfcad7698afebbfead331826ee77f0b970603ed";
+  #     };
+  #   in
+  #   [ "${sriov-modules}/sriov.nix" ];
+  #
+  # virtualisation.cyberus.intel-graphics-sriov.enable = lib.mkIf (config.specialisation != { }) true;
+  # specialisation = {
+  #   no-intel-kernel.configuration = {
+  #     virtualisation.cyberus.intel-graphics-sriov.enable = false;
+  #   };
+  # };
 
   fileSystems = {
     "/" = {
@@ -437,8 +437,6 @@
   systemd.services.loki.after = [ "network-online.target" ];
   systemd.services.loki.wants = [ "network-online.target" ];
 
-  system.stateVersion = lib.mkForce "24.11"; # Did you read the comment?
-
   networking = {
     useDHCP = false;
     hostId = "177ad6ac";
@@ -505,6 +503,6 @@
     };
   };
 
-  # don't load user config
   nixflakes.home-manager.enable = false;
+  system.stateVersion = lib.mkForce "24.11";
 }

@@ -7,12 +7,11 @@
   ...
 }:
 {
-  system = {
-    extraSystemBuilderCmds = ''
-      ln -sv ${pkgs.path} $out/nixpkgs
-    '';
-    stateVersion = "23.11";
-  };
+  # system = {
+  #   extraSystemBuilderCmds = ''
+  #     ln -sv ${pkgs.path} $out/nixpkgs
+  #   '';
+  # };
 
   # put all inputs on nix_path
   environment.etc = lib.mapAttrs' (name: flake: {
@@ -21,11 +20,11 @@
   }) inputs;
   nix.nixPath = [ "/etc/nix/inputs" ];
 
-  # put all inputs in flake registry
-  nix.registry = lib.mapAttrs (n: flake: { inherit flake; }) inputs;
-
   nix = {
     package = pkgs.nixVersions.latest;
+
+    # put all inputs in flake registry
+    registry = lib.mapAttrs (n: flake: { inherit flake; }) inputs;
     #nixPath = [ "nixpkgs=/run/current-system/nixpkgs" ];
     #registry.nixpkgs.flake = nixpkgs;
 
@@ -51,7 +50,7 @@
     hostPlatform = system;
   };
 
-  programs.nix-ld.enable = true;
+  #programs.nix-ld.enable = true;
 
   systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkForce 40960;
 
