@@ -3,6 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs-stable.url = "github:nixos/nixpkgs/nixos-24.05";
+
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
 
@@ -13,7 +15,7 @@
 
     NixOS-WSL = {
       url = "github:nix-community/NixOS-WSL";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs-stable";
       inputs.flake-utils.follows = "flake-utils";
     };
 
@@ -30,7 +32,7 @@
 
     agenix = {
       url = "github:ryantm/agenix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs-stable";
     };
 
     nixvim = {
@@ -40,10 +42,15 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    private = {
-      url = "git+ssh://gitea@git.pleunetowne.com:2223/mitchpleune/secrets.git";
-      inputs.agenix.follows = "agenix";
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    private = {
+      url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
+      inputs.agenix.follows = "agenix";
+      inputs.nixpkgs.follows = "nixpkgs-stable";
     };
   };
 
@@ -51,62 +58,72 @@
     inputs@{ self, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit self inputs; } (
       { withSystem, ... }:
+      let
+        sysdef = {
+          username = "mitch";
+          userFullName = "Mitchell Pleune";
+          userEmail = "mitchpleune@gmail.com";
+        };
+        specialArgs =
+          ctx: hostName:
+          {
+            inherit (ctx) inputs' self' system;
+            packages = ctx.config.packages;
+            root = ./.;
+            inherit inputs sysdef;
+            hostName = hostName;
+          }
+          // inputs
+          // sysdef;
+      in
       {
         flake = {
-          nixosConfigurations =
-            let
-              sysdef = {
-                username = "mitch";
-                userFullName = "Mitchell Pleune";
-                userEmail = "mitchpleune@gmail.com";
-              };
-              specialArgs =
-                ctx: hostName:
-                {
-                  inherit (ctx) inputs' self' system;
-                  packages = ctx.config.packages;
-                  root = ./.;
-                  inherit inputs sysdef;
-                  hostName = hostName;
-                }
-                // inputs
-                // sysdef;
+          nixosConfigurations = {
+            surface = withSystem "x86_64-linux" (
+              ctx:
+              inputs.nixpkgs.lib.nixosSystem {
+                specialArgs = specialArgs ctx "surface";
+                modules = [
+                  ./platforms/surface.nix
+                  ./modules
+                ];
+              }
+            );
 
-            in
-            {
-              surface = withSystem "x86_64-linux" (
-                ctx:
-                inputs.nixpkgs.lib.nixosSystem {
-                  specialArgs = specialArgs ctx "surface";
-                  modules = [
-                    ./platforms/surface.nix
-                    ./modules
-                  ];
-                }
-              );
+            wsl = withSystem "x86_64-linux" (
+              ctx:
+              inputs.nixpkgs.lib.nixosSystem {
+                specialArgs = specialArgs ctx "wsl";
+                modules = [
+                  ./platforms/wsl.nix
+                  ./modules
+                ];
+              }
+            );
 
-              wsl = withSystem "x86_64-linux" (
-                ctx:
-                inputs.nixpkgs.lib.nixosSystem {
-                  specialArgs = specialArgs ctx "wsl";
-                  modules = [
-                    ./platforms/wsl.nix
-                    ./modules
-                  ];
-                }
-              );
+            lxc = withSystem "x86_64-linux" (
+              ctx:
+              inputs.nixpkgs.lib.nixosSystem {
+                specialArgs = specialArgs ctx "lxc";
+                modules = [
+                  ./platforms/lxc.nix
+                  ./modules
+                ];
+              }
+            );
 
-              lxc = withSystem "x86_64-linux" (
-                ctx:
-                inputs.nixpkgs.lib.nixosSystem {
-                  specialArgs = specialArgs ctx "lxc";
-                  modules = [
-                    ./platforms/lxc.nix
-                    ./modules
-                  ];
-                }
-              );
-            };
+            nas = withSystem "x86_64-linux" (
+              ctx:
+              inputs.nixpkgs.lib.nixosSystem {
+                # currently unstabled needed for rustic-rs
+                specialArgs = (specialArgs ctx "nas");
+                modules = [
+                  ./platforms/nas.nix
+                  ./modules
+                ];
+              }
+            );
+          };
 
           templates.default = {
             path = ./.;
@@ -118,12 +135,27 @@
 
         systems = [ "x86_64-linux" ];
         perSystem =
-          { pkgs, inputs', ... }:
+          {
+            system,
+            pkgs,
+            inputs',
+            ...
+          }@ctx:
           {
             packages = {
               mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
                 import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
               );
+              live-iso = inputs.nixos-generators.nixosGenerate {
+                inherit system;
+                specialArgs = specialArgs ctx "nixflakes-live";
+                modules = [
+                  "${inputs.nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-base.nix"
+                  ./platforms/live.nix
+                  ./modules
+                ];
+                format = "iso";
+              };
             };
           };
       }

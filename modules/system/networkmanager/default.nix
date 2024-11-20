@@ -19,15 +19,16 @@ with lib;
   options.nixflakes.pleunenet.enable = mkEnableOption "PleuneNET Wireguard NM preset";
   config = mkIf config.nixflakes.pleunenet.enable (mkMerge [
     {
+      networking.wireguard.enable = true;
       # don't block all the traffic please
       networking.firewall = {
         logReversePathDrops = true;
         extraCommands = ''
-          ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN 
-          ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --dport 51820 -j RETURN 
+          ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN
+          ip46tables -t mangle -I nixos-fw-rpfilter -p udp -m udp --dport 51820 -j RETURN
         '';
         extraStopCommands = ''
-          ip46tables -t mangle -D nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN || true 
+          ip46tables -t mangle -D nixos-fw-rpfilter -p udp -m udp --sport 51820 -j RETURN || true
           ip46tables -t mangle -D nixos-fw-rpfilter -p udp -m udp --dport 51820 -j RETURN || true
         '';
       };

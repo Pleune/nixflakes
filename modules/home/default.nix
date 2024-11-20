@@ -11,8 +11,8 @@ with lib; {
     nixflakes = {
       gui = mkDefault true;
       daily = mkDefault true;
-      programs.mitchvim.enable = true;
-      gpg = true;
+      programs.mitchvim.enable = mkDefault true;
+      gpg = mkDefault true;
     };
   };
 

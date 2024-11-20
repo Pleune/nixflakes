@@ -3,6 +3,7 @@
   pkgs,
   lib,
   inputs,
+  self,
   ...
 }:
 {
@@ -56,4 +57,9 @@
 
   # Does not work with flakes
   programs.command-not-found.enable = false;
+
+  programs.nh = {
+    enable = true;
+    flake = self;
+  };
 }

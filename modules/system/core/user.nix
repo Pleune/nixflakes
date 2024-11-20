@@ -1,28 +1,41 @@
 {
   pkgs,
+  lib,
   home-manager,
   username,
-  root,
   inputs,
   sysdef,
+  config,
+  self,
   ...
 }:
+with lib;
 {
-  users.users.${username} = {
-    shell = pkgs.bash;
-    isNormalUser = true;
-    initialPassword = "temp123";
-    extraGroups = [
-      "wheel"
-      "dialout"
-    ];
+  imports = [ home-manager.nixosModules.home-manager ];
+
+  options.nixflakes = {
+    home-manager.enable = mkEnableOption "home-manager system integration";
   };
 
-  imports = [ home-manager.nixosModules.home-manager ];
-  home-manager = {
-    useUserPackages = true;
-    useGlobalPkgs = true;
-    extraSpecialArgs = inputs // sysdef;
-    users.${username} = "${root}/modules/home";
+  config = {
+
+    nixflakes.home-manager.enable = mkDefault true;
+
+    users.users.${username} = {
+      shell = pkgs.bash;
+      isNormalUser = true;
+      initialPassword = "temp123";
+      extraGroups = [
+        "wheel"
+        "dialout"
+      ];
+    };
+
+    home-manager = mkIf config.nixflakes.home-manager.enable {
+      useUserPackages = true;
+      useGlobalPkgs = true;
+      extraSpecialArgs = inputs // sysdef;
+      users.${username} = "${self}/modules/home";
+    };
   };
 }
