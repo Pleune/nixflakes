@@ -1,4 +1,7 @@
 { ... }:
 {
-  imports = [ ./local-gitea ];
+  imports = [
+    ./local-gitea
+    ./incus-backup-rustic
+  ];
 }

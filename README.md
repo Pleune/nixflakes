@@ -39,5 +39,5 @@ nix run git+https://git.pleunetowne.com/mitchpleune/nixflakes.git#mitchvim
 nix flake update
 
 # builds and deploys to every nix host
-nix run .#deploy
+nix develop . -c deploy
 ```

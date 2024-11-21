@@ -3,6 +3,7 @@
   lib,
   config,
   private,
+  packages,
   ...
 }:
 {
@@ -340,6 +341,7 @@
               {
                 source_labels = [ "__journal__systemd_unit" ];
                 target_label = "unit";
+
               }
             ];
           }
@@ -355,6 +357,7 @@
   virtualisation.incus = {
     enable = true;
     ui.enable = true;
+
     softDaemonRestart = true;
     preseed = {
       config = {
@@ -452,56 +455,14 @@
   nixflakes.agenix.enable = true;
   age.secrets."rustic.toml".file = "${private.secrets}/nas_backup_rustic_config.age";
   age.secrets."rustic_warmup".file = "${private.secrets}/nas_backup_rustic_warmup.age";
-
-  environment.systemPackages = with pkgs; [
-    awscli2 # needed for rustic warmup
-  ];
-
-  systemd.services."incus-backup@" = {
-    description = "Backup the incus system %I to s3";
-    after = [
-      "network-online.target"
-      "incus.service"
-    ];
-    wants = [
-      "network-online.target"
-      "incus.service"
-    ];
-
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart =
-        let
-          backup = pkgs.writeShellScript "backup-incus" ''
-            if [[ -z "$1" ]]; then
-              echo "No name supplied"
-              exit 1
-            fi
-            echo "stopping if needed..."
-            if ${config.virtualisation.incus.package}/bin/incus stop $1; then
-              WAS_RUNNING=true
-              echo "stopped."
-            fi
-            FNAME="$1.tar"
-            FNAME_TMP="/tmp/incus-export-$(${pkgs.coreutils}/bin/date '+%Y-%m-%d_%H-%M-%S')-$FNAME"
-            echo "exporting to $FNAME_TMP..."
-            ${config.virtualisation.incus.package}/bin/incus export $1 "$FNAME_TMP" -v --compression none --instance-only
-            if [ "$WAS_RUNNING" = "true" ]; then
-              echo "starting..."
-              ${config.virtualisation.incus.package}/bin/incus start $1
-              echo "started."
-            fi
-            echo "backing up..."
-            ${pkgs.rustic}/bin/rustic -P /run/agenix/rustic backup "$FNAME_TMP" --as-path "$FNAME" --tag "incus-export" --label "incus-export-$1"
-            echo "cleaning up..."
-            rm "$FNAME_TMP"
-          '';
-        in
-        [
-          "${backup} %I"
-        ];
-    };
+  nixflakes.services.incus-backup-rustic = {
+   enable = true;
+   rustic-profile = "/run/agenix/rustic";
   };
+  environment.systemPackages = [
+    pkgs.awscli2 # needed for rustic warmup
+    packages.incus-backup-rustic
+  ];
 
   nixflakes.home-manager.enable = false;
   system.stateVersion = lib.mkForce "24.11";

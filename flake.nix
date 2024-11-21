@@ -69,10 +69,9 @@
           ctx: hostName:
           {
             inherit (ctx) inputs' self' system;
+            inherit inputs sysdef hostName;
             packages = ctx.config.packages;
             root = ./.;
-            inherit inputs sysdef;
-            hostName = hostName;
           }
           // inputs
           // sysdef;
@@ -87,6 +86,7 @@
                   ctx:
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
+                    #overlays = [ inputs.deploy-rs.overlay ];
                     modules = [
                       "${./.}/platforms/${name}.nix"
                       ./modules
@@ -125,16 +125,17 @@
               };
             in
             {
-              nas = homedeploy "nas" {};
-              git = homedeploy "git" {};
-              git-runner1 = homedeploy "git-runner1" {};
-              immich = homedeploy "immich" {};
+              nas = homedeploy "nas" { };
+              git = homedeploy "git" { };
+              git-runner1 = homedeploy "git-runner1" { };
+              immich = homedeploy "immich" { };
               nextcloud = homedeploy "nextcloud" {
                 # cannot downgrade nextcloud!
                 autoRollback = false;
                 magicRollback = false;
               };
             };
+
           checks = builtins.mapAttrs (
             system: deployLib: deployLib.deployChecks self.deploy
           ) inputs.deploy-rs.lib;
@@ -153,6 +154,7 @@
               mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
                 import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
               );
+              incus-backup-rustic = pkgs.callPackage ./pkgs/incus-backup-rustic { };
               live-iso = inputs.nixos-generators.nixosGenerate {
                 inherit system;
                 specialArgs = specialArgs ctx "nixflakes-live";
@@ -166,7 +168,7 @@
             };
 
             devShells.default = pkgs.mkShell {
-              buildInputs = [ pkgs.deploy-rs ];
+              buildInputs = [ inputs'.deploy-rs.packages.default ];
             };
           };
       }
