@@ -10,6 +10,7 @@ stdenv.mkDerivation {
     (python3.withPackages (
       pythonPackages: with pythonPackages; [
         python-dateutil
+        requests-unixsocket
       ]
     ))
     rustic

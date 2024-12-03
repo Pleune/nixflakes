@@ -4,6 +4,7 @@
   config,
   private,
   packages,
+  username,
   ...
 }:
 {
@@ -452,12 +453,24 @@
     firewall.trustedInterfaces = [ "br0" ];
   };
 
+  users.groups.rustic = {};
+  users.groups.rustic-restore = {};
+  users.users.${config.nixflakes.services.incus-backup-rustic.user}.extraGroups = [ "rustic" ];
+  users.users.${username}.extraGroups = [ "rustic" "rustic-restore" ];
   nixflakes.agenix.enable = true;
-  age.secrets."rustic.toml".file = "${private.secrets}/nas_backup_rustic_config.age";
-  age.secrets."rustic_warmup".file = "${private.secrets}/nas_backup_rustic_warmup.age";
+  age.secrets."rustic.toml" = {
+    file = "${private.secrets}/nas_backup_rustic_config.age";
+    group = "rustic";
+    mode = "660";
+  };
+  age.secrets."rustic_warmup" = {
+    file = "${private.secrets}/nas_backup_rustic_warmup.age";
+    group = "rustic-restore";
+    mode = "660";
+  };
   nixflakes.services.incus-backup-rustic = {
    enable = true;
-   rustic-profile = "/run/agenix/rustic";
+   rustic-profile = "/run/agenix/rustic"; # agenix path without ".toml"
   };
   environment.systemPackages = [
     pkgs.awscli2 # needed for rustic warmup
