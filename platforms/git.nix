@@ -93,6 +93,7 @@
       };
     };
     lfs.enable = true;
+    package = pkgs.forgejo;
   };
 
   nixflakes.makeUser = false;

@@ -4,6 +4,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    nix = {
+      url = "github:/nixos/nix?ref=2.16.1"; # using nix 2.16.1
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     deploy-rs.url = "github:serokell/deploy-rs";
 
     flake-utils.url = "github:numtide/flake-utils";
@@ -17,7 +22,6 @@
     NixOS-WSL = {
       url = "github:nix-community/NixOS-WSL";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
     };
 
     # needed for microsoft surface configuration
@@ -26,7 +30,7 @@
     };
 
     lanzaboote = {
-      url = "github:nix-community/lanzaboote/v0.3.0";
+      url = "github:nix-community/lanzaboote/v0.4.1";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
@@ -58,7 +62,7 @@
   outputs =
     inputs@{ self, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit self inputs; } (
-      { withSystem, ... }:
+      { withSystem, lib, ... }:
       let
         sysdef = {
           username = "mitch";
@@ -86,7 +90,6 @@
                   ctx:
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
-                    #overlays = [ inputs.deploy-rs.overlay ];
                     modules = [
                       "${./.}/platforms/${name}.nix"
                       ./modules
@@ -95,15 +98,16 @@
                 );
             in
             {
+              lxc = makeSystem "lxc";
               surface = makeSystem "surface";
               wsl = makeSystem "wsl";
-              lxc = makeSystem "lxc";
 
               # homelab
-              nas = makeSystem "nas";
               git = makeSystem "git";
               git-runner1 = makeSystem "git-runner1";
               immich = makeSystem "immich";
+              jump = makeSystem "jump";
+              nas = makeSystem "nas";
               nextcloud = makeSystem "nextcloud";
             };
 
@@ -125,10 +129,11 @@
               };
             in
             {
-              nas = homedeploy "nas" { };
               git = homedeploy "git" { };
               git-runner1 = homedeploy "git-runner1" { };
               immich = homedeploy "immich" { };
+              jump = homedeploy "immich" { };
+              nas = homedeploy "nas" { };
               nextcloud = homedeploy "nextcloud" {
                 # cannot downgrade nextcloud!
                 autoRollback = false;
@@ -168,7 +173,10 @@
             };
 
             devShells.default = pkgs.mkShell {
-              buildInputs = [ inputs'.deploy-rs.packages.default ];
+              buildInputs = with inputs'; [
+                deploy-rs.packages.default
+                agenix.packages.default
+              ];
             };
           };
       }

@@ -1,0 +1,85 @@
+name: nixflakes
+on: [push]
+
+jobs:
+  build:
+    runs-on: nix
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Check
+        run: nix flake check
+      - name: Builds
+        run: |
+          nix develop -c "true"
+          nix build .#mitchvim
+          nixos-rebuild build --flake .#wsl
+          nixos-rebuild build --flake .#lxc
+          nixos-rebuild build --flake .#surface
+
+  deploy-git:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git"
+
+  deploy-immich:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#immich"
+
+  deploy-nextcloud:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nextcloud"
+
+  deploy-jump:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#jump"
+
+  deploy-nas:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas"
+
+  deploy-git-runner1:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git-runner1 --boot"
+          ssh -i deploy.key -o StrictHostKeychecking=no git-runner1.home.pleunetowne.com 'systemctl reboot --when="+1 hour"'

@@ -11,7 +11,17 @@
 }:
 with lib;
 {
-  imports = [ home-manager.nixosModules.home-manager ];
+  imports = [
+    home-manager.nixosModules.home-manager
+
+    # just allow for prettier system configurations
+    (mkAliasOptionModule [ "nixuserflakes" ] [
+      "home-manager"
+      "users"
+      "${username}"
+      "nixflakes"
+    ])
+  ];
 
   options.nixflakes = {
     makeUser = mkEnableOption "Create the default user ${username}";

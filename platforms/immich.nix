@@ -11,7 +11,11 @@
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
 
-  environment.systemPackages = with pkgs; [ vim ];
+  environment.systemPackages = with pkgs; [
+    vim
+    config.boot.kernelPackages.nvidiaPackages.legacy_535.bin
+    nvidia-container-toolkit
+  ];
   time.timeZone = "America/Detroit";
 
   networking = {
@@ -48,8 +52,8 @@
         "dev-dri-renderD128.mount"
       ];
       script = ''
-        chgrp video /dev/dri/card0
-        chgrp render /dev/dri/renderD128
+        chgrp video /dev/dri/card*
+        chgrp render /dev/dri/renderD*
       '';
       serviceConfig = {
         Type = "oneshot";
@@ -76,6 +80,29 @@
     };
   };
 
+  # NOTE: broken nixpkgs.config.cudaSupport = true;
+  services.xserver.videoDrivers = [ "nvidia" ];
+  hardware = {
+    nvidia = {
+      modesetting.enable = false;
+      open = false;
+      nvidiaSettings = false;
+
+      # debian 12 bookworm still has only 535 instead of 550 (needed for containers)
+      package = config.boot.kernelPackages.nvidiaPackages.legacy_535;
+    };
+    nvidia-container-toolkit.enable = true;
+    graphics = {
+      enable = true;
+      extraPackages = with pkgs; [
+        nvidia-vaapi-driver
+        intel-media-driver
+        vpl-gpu-rt
+        libvdpau-va-gl
+      ];
+    };
+  };
+
   services.immich = {
     enable = true;
     openFirewall = true;
@@ -96,6 +123,11 @@
     file = "${private.secrets}/PT-Immich.crt";
     owner = config.services.nginx.user;
   };
+
+  # TODO: issue upstream
+  systemd.services."immich-server".serviceConfig.PrivateDevices = pkgs.lib.mkForce false;
+  systemd.services."immich-machine-learning".serviceConfig.PrivateDevices = pkgs.lib.mkForce false;
+
   services.nginx = {
     enable = true;
     recommendedProxySettings = true;

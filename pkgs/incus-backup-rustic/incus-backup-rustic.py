@@ -172,7 +172,7 @@ def backup_instance(name, wait_days):
     )
 
     if resp_backup.status_code == 202:
-        incus_wait(resp_backup.json()["metadata"]["id"])
+        incus_wait(resp_backup.json()["metadata"]["id"], timeout=18000)
     else:
         raise RuntimeError(f"Failed to create backup on {name}: {resp_backup.content}")
 

@@ -7,7 +7,7 @@
 {
   config = lib.mkIf (config.nixflakes.gui) {
     home.packages = with pkgs; [
-      nerdfonts
+      # TODO: add back nerdfonts
       noto-fonts
       noto-fonts-cjk-sans
       noto-fonts-emoji

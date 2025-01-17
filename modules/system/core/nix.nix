@@ -39,9 +39,9 @@
     };
 
     gc = {
-      automatic = true;
-      dates = "weekly";
-      options = "--delete-older-than 30d";
+      automatic = lib.mkDefault true;
+      dates = lib.mkDefault "weekly";
+      options = lib.mkDefault "--delete-older-than 30d";
     };
   };
 

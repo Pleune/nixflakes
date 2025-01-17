@@ -110,12 +110,13 @@
     initrd.availableKernelModules = [
       "xhci_pci"
       "ahci"
-      "thunderbolt"
+      #"thunderbolt"
       "nvme"
       "usbhid"
       "sd_mod"
     ];
     kernelModules = [ "kvm-intel" ];
+    # kernelParams = [ "module_blacklist=i915" ]; # only use nvidia
     initrd.systemd.enable = true;
 
     loader.grub = {
@@ -149,13 +150,29 @@
 
     loader.efi.canTouchEfiVariables = false;
 
-    supportedFilesystems = [ "zfs" "ext4" ];
+    supportedFilesystems = [
+      "zfs"
+      "ext4"
+    ];
     zfs.forceImportRoot = false;
   };
+
+  # load propritary nvidia driver
+  services.xserver.videoDrivers = ["nvidia"];
 
   hardware = {
     enableRedistributableFirmware = true;
     cpu.intel.updateMicrocode = true;
+    graphics.enable = true;
+    nvidia = {
+      modesetting.enable = true;
+      powerManagement.enable = true;
+      open = false;
+      nvidiaSettings = false;
+
+      # debian 12 bookworm still has only 535 instead of 550 (needed for containers)
+      package = config.boot.kernelPackages.nvidiaPackages.legacy_535;
+    };
   };
 
   nixpkgs = {
@@ -422,8 +439,8 @@
     };
 
     networks = {
-      "enp58s0" = {
-        matchConfig.Name = "enp58s0";
+      "enp" = {
+        matchConfig.Name = "enp*";
         networkConfig.Bridge = "br0";
         linkConfig.RequiredForOnline = "enslaved";
       };
@@ -453,10 +470,13 @@
     firewall.trustedInterfaces = [ "br0" ];
   };
 
-  users.groups.rustic = {};
-  users.groups.rustic-restore = {};
+  users.groups.rustic = { };
+  users.groups.rustic-restore = { };
   users.users.${config.nixflakes.services.incus-backup-rustic.user}.extraGroups = [ "rustic" ];
-  users.users.${username}.extraGroups = [ "rustic" "rustic-restore" ];
+  users.users.${username}.extraGroups = [
+    "rustic"
+    "rustic-restore"
+  ];
   nixflakes.agenix.enable = true;
   age.secrets."rustic.toml" = {
     file = "${private.secrets}/nas_backup_rustic_config.age";
@@ -469,12 +489,13 @@
     mode = "660";
   };
   nixflakes.services.incus-backup-rustic = {
-   enable = true;
-   rustic-profile = "/run/agenix/rustic"; # agenix path without ".toml"
+    enable = true;
+    rustic-profile = "/run/agenix/rustic"; # agenix path without ".toml"
   };
   environment.systemPackages = [
     pkgs.awscli2 # needed for rustic warmup
     packages.incus-backup-rustic
+    pkgs.pciutils
   ];
 
   nixflakes.home-manager.enable = false;

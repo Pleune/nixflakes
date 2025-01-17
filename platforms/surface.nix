@@ -56,7 +56,6 @@
     };
     cpu.intel.updateMicrocode = true;
     enableRedistributableFirmware = true;
-    pulseaudio.enable = false;
   };
 
   environment.sessionVariables = {
@@ -65,6 +64,7 @@
 
   services = {
     logind.lidSwitch = "hibernate";
+    pulseaudio.enable = false;
 
     pipewire = {
       enable = true;

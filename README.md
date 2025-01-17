@@ -30,7 +30,7 @@ sudo rm -rf /home/nixos
 
 ## Running custom Neovim
 ```bash
-nix run git+https://git.pleunetowne.com/mitchpleune/nixflakes.git#mitchvim
+nix run git+https://git.pleunetowne.com/mitchpleune/nixflakes.git#mitchvim --option substituters "https://nix.pleunetowne.com/?trusted=1"
 ```
 
 ## Deploy to all nix homelab components
