@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
-from subprocess import run, PIPE, DEVNULL
-import json
-import os
+from argparse import ArgumentParser
 from datetime import datetime, timezone, timedelta
 from dateutil.parser import parse as parsedate
-import shutil
-from argparse import ArgumentParser
+from subprocess import run, PIPE, DEVNULL
+from textwrap import indent
+import json
+import os
 import requests_unixsocket
-import traceback
+import shutil
 import time
+import traceback
 
 parser = ArgumentParser(
     prog="incus-backup-rustic",
@@ -52,6 +53,12 @@ parser.add_argument("--incus-socket", type=str, default="/var/lib/incus/unix.soc
 parser.add_argument("--profile", type=str, default=None, help="passed to rustic -P")
 parser.add_argument("--dry-run", action="store_true", help="run rustic with --dry-run")
 parser.add_argument("--live", action="store_true", help="don't stop instances")
+parser.add_argument(
+    "--shutdown-wait",
+    type=int,
+    default=10800,
+    help="How many seconds to wait for an instance to shutdown",
+)
 args = parser.parse_args()
 
 incus_socket = f"http+unix://{args.incus_socket.replace("/", "%2F")}"
@@ -124,8 +131,8 @@ def incus_wait(id, timeout=30, check=True):
     return resp_wait.json()
 
 
-def backup_instance(name, wait_days):
-    print(f"{name} wait_days={wait_days}")
+def backup_instance(name, wait_days, shutdown_wait):
+    print(f"Checking {name}, wait_days={wait_days}")
     tar = f"{name}.tar"
     label = f"incus-export-{name}"
 
@@ -151,7 +158,7 @@ def backup_instance(name, wait_days):
             )
             if result_wait["type"] == "error" and ("already" in result_wait["error"]):
                 was_running = False
-            print(f"was_running={was_running}")
+            print(f"  was_running={was_running}")
         else:
             raise RuntimeError(f"Failed to stop {name}")
 
@@ -172,7 +179,7 @@ def backup_instance(name, wait_days):
     )
 
     if resp_backup.status_code == 202:
-        incus_wait(resp_backup.json()["metadata"]["id"], timeout=18000)
+        incus_wait(resp_backup.json()["metadata"]["id"], timeout=shutdown_wait)
     else:
         raise RuntimeError(f"Failed to create backup on {name}: {resp_backup.content}")
 
@@ -326,11 +333,11 @@ for instance in incus_list.json()["metadata"]:
             default_days=args.default_days,
         )
         if backup:
-            backup_instance(name, days)
+            backup_instance(name, days, args.shutdown_wait)
 
     except Exception as _:
-        print("Failed to process instance")
-        print(traceback.format_exc())
+        print("!!! Failed to process instance")
+        print(indent(traceback.format_exc(), "    "))
 
 print("Backing up storage pools")
 # storage_list = run(
