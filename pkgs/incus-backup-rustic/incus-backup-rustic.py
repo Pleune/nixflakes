@@ -59,6 +59,12 @@ parser.add_argument(
     default=10800,
     help="How many seconds to wait for an instance to shutdown",
 )
+parser.add_argument(
+    "--backup-wait",
+    type=int,
+    default=10800,
+    help="How many seconds to wait for an instance to create and export a backup",
+)
 args = parser.parse_args()
 
 incus_socket = f"http+unix://{args.incus_socket.replace("/", "%2F")}"
@@ -126,12 +132,12 @@ def incus_wait(id, timeout=30, check=True):
 
     if check:
         if resp_wait.json()["type"] == "error":
-            raise RuntimeError(f"wait on {id} error: {resp_wait.content}")
+            raise RuntimeError(f"wait on {id} ({timeout}s) error: {resp_wait.content}")
 
     return resp_wait.json()
 
 
-def backup_instance(name, wait_days, shutdown_wait):
+def backup_instance(name, wait_days, shutdown_wait, backup_wait):
     print(f"Checking {name}, wait_days={wait_days}")
     tar = f"{name}.tar"
     label = f"incus-export-{name}"
@@ -140,65 +146,68 @@ def backup_instance(name, wait_days, shutdown_wait):
         return
 
     was_running = False
-    if not args.live:
-        was_running = True
-        print("  stopping")
-        resp_stop = session.put(
-            f"{incus_socket}/1.0/instances/{name}/state",
-            data=json.dumps(
-                {
-                    "action": "stop",
-                    "timeout": 1200,
-                }
-            ),
-        )
-        if resp_stop.status_code == 202:
-            result_wait = incus_wait(
-                resp_stop.json()["metadata"]["id"], timeout=1200, check=False
-            )
-            if result_wait["type"] == "error" and ("already" in result_wait["error"]):
-                was_running = False
-            print(f"  was_running={was_running}")
-        else:
-            raise RuntimeError(f"Failed to stop {name}")
-
-    print("  creating backup")
-    resp_backup = session.post(
-        f"{incus_socket}/1.0/instances/{name}/backups",
-        data=json.dumps(
-            {
-                "compression_algorithm": "none",
-                "expires_at": (
-                    datetime.now(tz=timezone.utc) + timedelta(days=1)
-                ).isoformat(),
-                "instance_only": True,
-                "name": "incus-backup-rustic",
-                "optimized_storage": False,
-            }
-        ),
-    )
-
-    if resp_backup.status_code == 202:
-        incus_wait(resp_backup.json()["metadata"]["id"], timeout=shutdown_wait)
-    else:
-        raise RuntimeError(f"Failed to create backup on {name}: {resp_backup.content}")
-
-    if not args.live and was_running:
-        print("  restarting")
-        resp_start = session.put(
-            f"{incus_socket}/1.0/instances/{name}/state",
-            data=json.dumps(
-                {
-                    "action": "start",
-                    "timeout": 30,
-                }
-            ),
-        )
-        if resp_start.status_code == 202:
+    try:
+        if not args.live:
             was_running = True
-            incus_wait(resp_start.json()["metadata"]["id"])
+            print("  stopping")
+            resp_stop = session.put(
+                f"{incus_socket}/1.0/instances/{name}/state",
+                data=json.dumps(
+                    {
+                        "action": "stop",
+                        "timeout": shutdown_wait,
+                    }
+                ),
+            )
+            if resp_stop.status_code == 202:
+                result_wait = incus_wait(
+                    resp_stop.json()["metadata"]["id"], timeout=(shutdown_wait + 5), check=False
+                )
+                if result_wait["type"] == "error" and ("already" in result_wait["error"]):
+                    was_running = False
+                print(f"  was_running={was_running}")
+            else:
+                raise RuntimeError(f"Failed to stop {name}")
+
+        print("  creating backup")
+        resp_backup = session.post(
+            f"{incus_socket}/1.0/instances/{name}/backups",
+            data=json.dumps(
+                {
+                    "compression_algorithm": "none",
+                    "expires_at": (
+                        datetime.now(tz=timezone.utc) + timedelta(days=0.9) # expires hopefully just before next daily run if there was a failure
+                    ).isoformat(),
+                    "instance_only": True,
+                    "name": "incus-backup-rustic",
+                    "optimized_storage": False,
+                }
+            ),
+        )
+
+        if resp_backup.status_code == 202:
+            incus_wait(resp_backup.json()["metadata"]["id"], timeout=backup_wait)
         else:
-            print("  Failed to restart!")
+            raise RuntimeError(f"Failed to create backup on {name}: {resp_backup.content}")
+
+    finally:
+        # make sure if we had an error after stopping an instance, we restart it
+        if not args.live and was_running:
+            print("  restarting")
+            resp_start = session.put(
+                f"{incus_socket}/1.0/instances/{name}/state",
+                data=json.dumps(
+                    {
+                        "action": "start",
+                        "timeout": 30,
+                    }
+                ),
+            )
+            if resp_start.status_code == 202:
+                was_running = True
+                incus_wait(resp_start.json()["metadata"]["id"])
+            else:
+                print("  Failed to restart!")
 
     try:
         print("  exporting")
@@ -333,7 +342,7 @@ for instance in incus_list.json()["metadata"]:
             default_days=args.default_days,
         )
         if backup:
-            backup_instance(name, days, args.shutdown_wait)
+            backup_instance(name, days, args.shutdown_wait, args.backup_wait)
 
     except Exception as _:
         print("!!! Failed to process instance")
