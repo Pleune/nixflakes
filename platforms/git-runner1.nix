@@ -47,13 +47,33 @@
       auto-optimise-store = true;
     };
 
-    gc = {
-      automatic = true;
-      dates = "daily";
-      options = "--delete-older-than 120d";
-    };
-
+    gc.automatic = false;
     optimise.automatic = true;
+
+    # free 1G of nix store whenever there is less than 20G free
+    extraOptions = ''
+        min-free = ${toString (20 * 1024 * 1024 * 1024)}
+        max-free = ${toString (1 * 1024 * 1024 * 1024)}
+    '';
+  };
+
+  systemd.timers."delete-system-profiles" = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
+      Unit = "delete-system-profiles.service";
+    };
+  };
+
+  systemd.services."delete-system-profiles" = {
+    script = ''
+      ${config.nix.package}/bin/nix profile wipe-history --profile /nix/var/nix/profiles/system --older-than 30d
+    '';
+    serviceConfig = {
+      Type = "oneshot";
+      User = "root";
+    };
   };
 
   virtualisation.podman = {
