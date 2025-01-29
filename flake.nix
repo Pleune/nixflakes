@@ -132,7 +132,7 @@
               git = homedeploy "git" { };
               git-runner1 = homedeploy "git-runner1" { };
               immich = homedeploy "immich" { };
-              jump = homedeploy "immich" { };
+              jump = homedeploy "jump" { };
               nas = homedeploy "nas" { };
               nextcloud = homedeploy "nextcloud" {
                 # cannot downgrade nextcloud!

@@ -5,7 +5,10 @@
   private,
   ...
 }:
-
+let
+  # needs to match nas host
+  nvidia_x11 = pkgs.linuxPackages.nvidia_x11_legacy535;
+in
 {
   imports = [
     "${modulesPath}/virtualisation/lxc-container.nix"
@@ -13,8 +16,7 @@
 
   environment.systemPackages = with pkgs; [
     vim
-    config.boot.kernelPackages.nvidiaPackages.legacy_535.bin
-    nvidia-container-toolkit
+    nvidia_x11.bin
   ];
   time.timeZone = "America/Detroit";
 
@@ -80,25 +82,15 @@
     };
   };
 
-  # NOTE: broken nixpkgs.config.cudaSupport = true;
-  services.xserver.videoDrivers = [ "nvidia" ];
   hardware = {
-    nvidia = {
-      modesetting.enable = false;
-      open = false;
-      nvidiaSettings = false;
-
-      # debian 12 bookworm still has only 535 instead of 550 (needed for containers)
-      package = config.boot.kernelPackages.nvidiaPackages.legacy_535;
-    };
-    nvidia-container-toolkit.enable = true;
     graphics = {
       enable = true;
       extraPackages = with pkgs; [
-        nvidia-vaapi-driver
         intel-media-driver
-        vpl-gpu-rt
         libvdpau-va-gl
+        nvidia-vaapi-driver
+        nvidia_x11.out
+        vpl-gpu-rt
       ];
     };
   };
@@ -109,6 +101,7 @@
     host = "::";
     secretsFile = "${config.services.immich.mediaLocation}/env";
   };
+
   users.users.immich.extraGroups = [
     "video"
     "render"
