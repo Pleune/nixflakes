@@ -6,6 +6,12 @@
 {
   imports = [ "${nixpkgs}/nixos/modules/virtualisation/proxmox-lxc.nix" ];
 
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   time.timeZone = "America/Detroit";
   i18n.defaultLocale = "en_US.UTF-8";
 

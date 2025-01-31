@@ -13,6 +13,12 @@
 
   environment.systemPackages = with pkgs; [ vim ];
 
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   networking = {
     dhcpcd.enable = false;
     useDHCP = false;
@@ -45,6 +51,23 @@
 
       # minimize store duplication immedeately
       auto-optimise-store = true;
+
+      # The gccarch options do not get added until after the hostPlatform is added
+      # bootstrap adding them since we know this system is alderlake anyways
+      system-features = [
+        "gccarch-alderlake"
+        "gccarch-broadwell"
+        "gccarch-haswell"
+        "gccarch-ivybridge"
+        "gccarch-sandybridge"
+        "gccarch-silvermont"
+        "gccarch-skylake"
+        "gccarch-x86-64-v2"
+        "gccarch-x86-64-v3"
+        "gccarch-x86-64-v3"
+        "big-parallel"
+        "kvm"
+      ];
     };
 
     gc.automatic = false;
@@ -52,8 +75,8 @@
 
     # free 1G of nix store whenever there is less than 20G free
     extraOptions = ''
-        min-free = ${toString (20 * 1024 * 1024 * 1024)}
-        max-free = ${toString (1 * 1024 * 1024 * 1024)}
+      min-free = ${toString (20 * 1024 * 1024 * 1024)}
+      max-free = ${toString (1 * 1024 * 1024 * 1024)}
     '';
   };
 

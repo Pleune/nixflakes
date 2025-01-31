@@ -11,6 +11,12 @@
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
 
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   environment.systemPackages = with pkgs; [ vim ];
   nixpkgs.config.allowUnfree = true;
 

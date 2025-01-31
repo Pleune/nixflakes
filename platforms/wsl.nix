@@ -6,6 +6,13 @@
 }:
 {
   imports = [ NixOS-WSL.nixosModules.wsl ];
+
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   wsl = {
     enable = true;
     defaultUser = "${username}";

@@ -72,7 +72,7 @@
         specialArgs =
           ctx: hostName:
           {
-            inherit (ctx) inputs' self' system;
+            inherit (ctx) inputs' self';
             inherit inputs sysdef hostName;
             packages = ctx.config.packages;
             root = ./.;

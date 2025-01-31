@@ -47,7 +47,6 @@
 
   nixpkgs = {
     config.allowUnfree = true;
-    hostPlatform = system;
   };
 
   #programs.nix-ld.enable = true;

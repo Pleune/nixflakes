@@ -13,7 +13,17 @@ in
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
 
-  environment.systemPackages = with pkgs; [ vim ];
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
+  environment.systemPackages = with pkgs; [
+    vim
+    #nvidia_x11.bin
+  ];
+
   networking.firewall.allowedTCPPorts = [ config.services.forgejo.settings.server.HTTP_PORT ];
 
   networking = {

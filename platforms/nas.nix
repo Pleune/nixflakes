@@ -24,6 +24,12 @@
   #   };
   # };
 
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   fileSystems = {
     "/" = {
       device = "rpool/nixos/root";
@@ -176,7 +182,6 @@
   };
 
   nixpkgs = {
-    hostPlatform = lib.mkDefault "x86_64-linux";
     flake = {
       setFlakeRegistry = false;
       setNixPath = false;

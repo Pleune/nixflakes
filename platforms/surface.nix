@@ -11,6 +11,12 @@
     nixos-hardware.nixosModules.microsoft-surface-pro-intel
   ];
 
+  nixpkgs.hostPlatform = {
+    # gcc.arch = "x86-64-v3";
+    # gcc.tune = "alderlake";
+    system = "x86_64-linux";
+  };
+
   boot = {
     initrd = {
       availableKernelModules = [
@@ -42,8 +48,6 @@
   };
 
   swapDevices = [ { device = "/dev/disk/by-uuid/9538ea6d-604e-47fe-918b-f903dab4e79d"; } ];
-
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
   hardware = {
     enableAllFirmware = true;
