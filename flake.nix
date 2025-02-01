@@ -9,7 +9,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    deploy-rs.url = "github:serokell/deploy-rs";
+    deploy-rs = {
+      url = "github:serokell/deploy-rs";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     flake-utils.url = "github:numtide/flake-utils";
     flake-parts.url = "github:hercules-ci/flake-parts";
@@ -38,6 +41,7 @@
     agenix = {
       url = "github:ryantm/agenix";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
     };
 
     nixvim = {
@@ -79,9 +83,26 @@
           }
           // inputs
           // sysdef;
+
+        deployPkgs =
+          pkgs: system:
+          import inputs.nixpkgs {
+            system = "x86_64-linux";
+            overlays = [
+              inputs.deploy-rs.overlay # or deploy-rs.overlays.default
+              (self: super: {
+                deploy-rs = {
+                  inherit (pkgs) deploy-rs;
+                  lib = super.deploy-rs.lib;
+                };
+              })
+            ];
+          };
       in
       {
         flake = {
+          overlays.default = import ./overlay.nix;
+
           nixosConfigurations =
             let
               makeSystem =
@@ -91,8 +112,8 @@
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
                     modules = [
-                      "${./.}/platforms/${name}.nix"
                       ./modules
+                      "${./.}/platforms/${name}.nix"
                     ];
                   }
                 );
@@ -111,20 +132,21 @@
               nextcloud = makeSystem "nextcloud";
             };
 
-          templates.default = {
-            path = ./.;
-            description = "The default template for Mitch's nixflakes.";
-          };
-
-          formatter.x86_64-linux = inputs.nixpkgs.legacyPackages.x86_64-linux.nixfmt;
-
           deploy.nodes =
             let
+              # TODO: dont hard-code system here
+              pkgs = import inputs.nixpkgs {
+                system = "x86_64-linux";
+                overlays = [ self.overlays.default ];
+              };
               homedeploy = name: extra: {
                 hostname = "${name}.home.pleunetowne.com";
                 profiles.system = {
                   sshUser = "root";
-                  path = inputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.${name};
+                  # TODO: dont hard-code system here
+                  path =
+                    (deployPkgs pkgs "x86_64-linux").deploy-rs.lib.activate.nixos
+                      self.nixosConfigurations.${name};
                 } // extra;
               };
             in
@@ -141,9 +163,10 @@
               };
             };
 
-          checks = builtins.mapAttrs (
-            system: deployLib: deployLib.deployChecks self.deploy
-          ) inputs.deploy-rs.lib;
+          templates.default = {
+            path = ./.;
+            description = "The default template for Mitch's nixflakes.";
+          };
         };
 
         systems = [ "x86_64-linux" ];
@@ -155,6 +178,11 @@
             ...
           }@ctx:
           {
+            _module.args.pkgs = import self.inputs.nixpkgs {
+              inherit system;
+              overlays = [ self.overlays.default ];
+            };
+
             packages = {
               mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
                 import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
@@ -173,11 +201,14 @@
             };
 
             devShells.default = pkgs.mkShell {
-              buildInputs = with inputs'; [
-                deploy-rs.packages.default
-                agenix.packages.default
+              buildInputs = [
+                pkgs.deploy-rs
+                pkgs.agenix-cli
               ];
             };
+
+            checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
+            formatter = inputs'.nixpkgs.legacyPackages.nixfmt-rfc-style;
           };
       }
     );

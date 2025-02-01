@@ -41,3 +41,6 @@ nix flake update
 # builds and deploys to every nix host
 nix develop . -c deploy
 ```
+
+## Errata
+`nix build --rebuild nixpkgs#gitMinimal` tests sometimes randomly fail when process disk priority is low (2/10 in incus container settings)
