@@ -150,20 +150,23 @@
       labels = [
         "nix:docker://alpine:latest"
       ];
-      settings.runner.envs = {
-        NIX_REMOTE = "daemon";
-        PATH = "/nix/var/nix/profiles/system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${pkgs.nodejs}/bin:${pkgs.podman}/bin";
-        NIX_PATH = "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos/nixpkgs";
-        NIX_SSL_CERT_FILE = "/nix/var/nix/profiles/system/etc/ssl/certs/ca-bundle.crt";
-      };
-      settings.container = {
-        options = "--mount type=bind,src=/nix,dst=/nix,ro --mount type=bind,src=/etc/containers,dst=/etc/containers,ro --mount type=bind,src=/etc/nix,dst=/etc/nix,ro --mount type=bind,src=/etc/static,dst=/etc/static,ro";
-        valid_volumes = [
-          "/nix"
-          "/etc/containers"
-          "/etc/nix"
-          "/etc/static"
-        ];
+      settings = {
+        runnter.timeout = "24h";
+        runner.envs = {
+          NIX_REMOTE = "daemon";
+          PATH = "/nix/var/nix/profiles/system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${pkgs.nodejs}/bin:${pkgs.podman}/bin";
+          NIX_PATH = "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos/nixpkgs";
+          NIX_SSL_CERT_FILE = "/nix/var/nix/profiles/system/etc/ssl/certs/ca-bundle.crt";
+        };
+        container = {
+          options = "--mount type=bind,src=/nix,dst=/nix,ro --mount type=bind,src=/etc/containers,dst=/etc/containers,ro --mount type=bind,src=/etc/nix,dst=/etc/nix,ro --mount type=bind,src=/etc/static,dst=/etc/static,ro --cap-add=sys_nice";
+          valid_volumes = [
+            "/nix"
+            "/etc/containers"
+            "/etc/nix"
+            "/etc/static"
+          ];
+        };
       };
     };
   };
