@@ -14,6 +14,7 @@ with lib;
       enable = true;
       defaultEditor = true;
       vimdiffAlias = true;
+      nixpkgs.useGlobalPackages = true;
     } // (import ./options.nix { inherit pkgs; });
   };
 }
