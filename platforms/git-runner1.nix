@@ -11,11 +11,17 @@
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
 
+  # speeds up builds, and also https://github.com/NixOS/nixpkgs/issues/379657
+  boot.tmp = {
+    useTmpfs = true;
+    tmpfsSize = "100G"; # host will compress ram overflow else swap it to nvme
+  };
+
   environment.systemPackages = with pkgs; [ vim ];
 
   nixpkgs.hostPlatform = {
-    # gcc.arch = "x86-64-v3";
-    # gcc.tune = "alderlake";
+    gcc.arch = "alderlake";
+    gcc.tune = "alderlake";
     system = "x86_64-linux";
   };
 
@@ -151,7 +157,7 @@
         "nix:docker://alpine:latest"
       ];
       settings = {
-        runnter.timeout = "24h";
+        runnter.timeout = "56h";
         runner.envs = {
           NIX_REMOTE = "daemon";
           PATH = "/nix/var/nix/profiles/system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${pkgs.nodejs}/bin:${pkgs.podman}/bin";

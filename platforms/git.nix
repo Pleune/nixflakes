@@ -12,8 +12,8 @@
   ];
 
   nixpkgs.hostPlatform = {
-    # gcc.arch = "x86-64-v3";
-    # gcc.tune = "alderlake";
+    gcc.arch = "alderlake";
+    gcc.tune = "alderlake";
     system = "x86_64-linux";
   };
 
@@ -82,6 +82,7 @@
         SMTP_ADDR = "email-smtp.us-east-2.amazonaws.com";
         SMTP_PORT = 2465;
       };
+      actions.ENDLESS_TASK_TIMEOUT = "56h";
       session.COOKIE_SECURE = true;
       service = {
         REGISTER_EMAIL_CONFIRM = true;

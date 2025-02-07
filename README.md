@@ -43,4 +43,4 @@ nix develop . -c deploy
 ```
 
 ## Errata
-`nix build --rebuild nixpkgs#gitMinimal` tests sometimes randomly fail when process disk priority is low (2/10 in incus container settings)
+`nix build --rebuild nixpkgs#gitMinimal` tests sometimes randomly fail on ZFS. higher disk priority and higher ulimit seems to help, but does not fix it.

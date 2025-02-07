@@ -25,8 +25,9 @@
   # };
 
   nixpkgs.hostPlatform = {
-    # gcc.arch = "x86-64-v3";
-    # gcc.tune = "alderlake";
+    # https://github.com/NixOS/nixpkgs/issues/381223
+    #gcc.arch = "alderlake";
+    #gcc.tune = "alderlake";
     system = "x86_64-linux";
   };
 
