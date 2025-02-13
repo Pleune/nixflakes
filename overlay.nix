@@ -1,4 +1,5 @@
-final: prev: let
+final: prev:
+let
 
   # https://github.com/LibreOffice/core/blob/a383d7afa4e82bea728ecddf1bc44bbd9fd0eddb/sc/qa/unit/functions_array.cxx#L26
   # ArrayFunctionsTest::testArrayFormulasFODS finished in: 622ms
@@ -31,16 +32,19 @@ final: prev: let
   # make CPPUNIT_TEST_NAME="testXYZ" ...above mentioned params...
   #
   # make[1]: *** [/build/libreoffice-24.2.7.2/solenv/gbuild/CppunitTest.mk:130: /build/libreoffice-24.2.7.2/workdir/CppunitTest/sc_array_functions_test.test] Error 1
-  libreofficeOverrides = libreoffice: libreoffice.override (old: {
-    unwrapped = old.unwrapped.overrideAttrs (oldUW: {
-      postPatch =
-        (oldUW.postPatch or "")
-        + ''
-          sed -i '/CPPUNIT_TEST.testDubiousArrayFormulasFODS/d' sc/qa/unit/functions_array.cxx
-        '';
+  libreofficeOverrides =
+    libreoffice:
+    libreoffice.override (old: {
+      unwrapped = old.unwrapped.overrideAttrs (oldUW: {
+        postPatch =
+          (oldUW.postPatch or "")
+          + ''
+            sed -i '/CPPUNIT_TEST.testDubiousArrayFormulasFODS/d' sc/qa/unit/functions_array.cxx
+          '';
+      });
     });
-  });
-in {
+in
+{
 
   # # random build failures https://github.com/NixOS/nixpkgs/issues/379071
   # gitMinimal = prev.gitMinimal.overrideAttrs { doCheck = false; };
@@ -484,6 +488,24 @@ in {
   libreoffice-qt-fresh = libreofficeOverrides prev.libreoffice-qt-still;
   libreoffice-qt6-fresh = libreofficeOverrides prev.libreoffice-qt6-still;
   libreoffice-collabora = libreofficeOverrides prev.libreoffice-collabora;
+
+  # https://github.com/NixOS/nixpkgs/issues?q=is%3Aissue%20mxnet
+  # https://github.com/NixOS/nixpkgs/commit/b96c7caea612ea494806f109b76e05e81220dcbb
+  mxnet = prev.mxnet.overrideAttrs (old: {
+    meta.broken = false;
+    doCheck = !prev.config.cudaSupport;
+  });
+
+  onnxruntime = prev.onnxruntime.overrideAttrs (old: {
+    postPatch =
+      (old.postPatch or "")
+      # https://github.com/microsoft/onnxruntime/blob/c4f3742bb456a33ee9c826ce4e6939f8b84ce5b0/onnxruntime/core/platform/env.h#L249
+      + ''
+        substituteInPlace onnxruntime/core/platform/env.h --replace-fail \
+          "GetRuntimePath() const { return PathString(); }"              \
+          "GetRuntimePath() const { return PathString(\"$out/lib/\"); }"
+      '';
+  });
 
   pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
     (pyFinal: pyPrev: {
