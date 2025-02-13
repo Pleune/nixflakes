@@ -50,6 +50,17 @@ jobs:
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nextcloud"
 
+  deploy-llm:
+    runs-on: nix
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#llm"
+
   deploy-jump:
     runs-on: nix
     needs: build

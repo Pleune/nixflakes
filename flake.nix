@@ -127,6 +127,7 @@
               git-runner1 = makeSystem "git-runner1";
               immich = makeSystem "immich";
               jump = makeSystem "jump";
+              llm = makeSystem "llm";
               nas = makeSystem "nas";
               nextcloud = makeSystem "nextcloud";
             };
@@ -154,6 +155,7 @@
               git-runner1 = homedeploy "git-runner1" { };
               immich = homedeploy "immich" { };
               jump = homedeploy "jump" { };
+              llm = homedeploy "llm" { };
               nas = homedeploy "nas" { };
               nextcloud = homedeploy "nextcloud" {
                 # cannot downgrade nextcloud!
@@ -178,7 +180,9 @@
           }@ctx:
           {
             _module.args.pkgs = import self.inputs.nixpkgs {
-              inherit system;
+              localSystem = {
+                inherit system;
+              };
               overlays = [ self.overlays.default ];
             };
 
@@ -198,6 +202,8 @@
                 format = "iso";
               };
             };
+
+            legacyPackages = pkgs;
 
             devShells.default = pkgs.mkShell {
               buildInputs = [
