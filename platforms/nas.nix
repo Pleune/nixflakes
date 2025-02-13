@@ -468,6 +468,7 @@
     useDHCP = false;
     hostId = "177ad6ac";
     nftables.enable = true;
+    tempAddresses = "disabled";
     firewall.allowedTCPPorts = [
       8443 # Incus
       config.services.prometheus.port
