@@ -44,3 +44,7 @@ nix develop . -c deploy
 
 ## Errata
 `nix build --rebuild nixpkgs#gitMinimal` tests sometimes randomly fail on ZFS. higher disk priority and higher ulimit seems to help, but does not fix it.
+
+## TODO
+
+- Change VMs to be very swappy since most times swap will be ram-compressed-cached and very fast
