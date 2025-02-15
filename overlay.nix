@@ -45,6 +45,29 @@ let
     });
 in
 {
+  # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
+  # https://github.com/ggml-org/llama.cpp/issues/9473
+  # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
+  llama-cpp = prev.llama-cpp.overrideAttrs (old: {
+    postPatch =
+      (old.postPatch or "")
+      + ''
+        substituteInPlace ggml/src/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
+        substituteInPlace ggml/src/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
+      '';
+  });
+
+  # same as above
+  ollama = prev.ollama.overrideAttrs (old: {
+    postPatch =
+      (old.postPatch or "")
+      + ''
+        substituteInPlace llama/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
+        substituteInPlace llama/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
+      '';
+  });
+
+  #cudaPackages = prev.cudaPackages_12_6;
 
   # # random build failures https://github.com/NixOS/nixpkgs/issues/379071
   # gitMinimal = prev.gitMinimal.overrideAttrs { doCheck = false; };
@@ -489,11 +512,14 @@ in
   libreoffice-qt6-fresh = libreofficeOverrides prev.libreoffice-qt6-still;
   libreoffice-collabora = libreofficeOverrides prev.libreoffice-collabora;
 
+  # fixed by https://github.com/NixOS/nixpkgs/pull/382891
   # https://github.com/NixOS/nixpkgs/issues?q=is%3Aissue%20mxnet
   # https://github.com/NixOS/nixpkgs/commit/b96c7caea612ea494806f109b76e05e81220dcbb
+  # It's possible to get mxnet to compile with cuda 11, but this will be removed from nix very soon, so just turn off cuda completely.
+  # However, leave cudaSupport = true, so opencv can still compile with cuda enabled.
   mxnet = prev.mxnet.overrideAttrs (old: {
     meta.broken = false;
-    doCheck = !prev.config.cudaSupport;
+    cmakeFlags = old.cmakeFlags ++ [ "-DUSE_CUDA=OFF" ];
   });
 
   onnxruntime = prev.onnxruntime.overrideAttrs (old: {
@@ -507,8 +533,19 @@ in
       '';
   });
 
+  # fixed by https://github.com/NixOS/nixpkgs/pull/382896
+  # https://github.com/NixOS/nixpkgs/issues/352113
+  immich-machine-learning = prev.immich-machine-learning.overrideAttrs (old: {
+    disabledTests = (old.disabledTests or [ ]) ++ [
+      # This tries to setup a GPU context
+      "test_sets_default_sess_options"
+    ];
+  });
+
   pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
     (pyFinal: pyPrev: {
+      #opencv4 = pyPrev.toPythonModule (prev.opencv4.override { enablePython = true; python3Packages = pyPrev; });
+
       # https://github.com/NixOS/nixpkgs/pull/380245
       # In LXC container, this is cheking different things.
       # Traceback (most recent call last):
@@ -559,6 +596,34 @@ in
       #       "tests/test_testclient.py"
       #     ];
       # });
+
+      # fixed by https://github.com/NixOS/nixpkgs/pull/382903
+      # the non-python package patched the lib search path to inside itself. But, the python package does not
+      # hold a runtime buildInputs dep on the non-python version, so that path may not exist.
+      # Just ensure python-onnxruntime pulls down the non-python one as well,
+      # and don'y worry about the duplicated files for now.
+      onnxruntime =
+        let
+          onnxruntime = final.onnxruntime.override {
+            python3Packages = pyPrev;
+            pythonSupport = true;
+          };
+        in
+        (pyPrev.onnxruntime.override { inherit onnxruntime; }).overridePythonAttrs (old: {
+          buildInputs = old.buildInputs ++ [ onnxruntime ];
+        });
+
+
+      # fixed by https://github.com/NixOS/nixpkgs/pull/382920
+      # These tests attempt to use the GPU, and segfault when one is not availaible
+      rapidocr-onnxruntime = pyPrev.rapidocr-onnxruntime.overridePythonAttrs (old: {
+        disabledTests =
+          old.disabledTests
+          ++ [
+            "test_ort_cuda_warning"
+            "test_ort_dml_warning"
+          ];
+      });
     })
   ];
 }

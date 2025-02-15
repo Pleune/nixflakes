@@ -181,8 +181,15 @@
           {
             _module.args.pkgs = import self.inputs.nixpkgs {
               localSystem = {
+                # gcc.arch = "alderlake";
+                # gcc.tune = "alderlake";
                 inherit system;
               };
+              config = {
+                cudaSupport = true;
+                allowUnfree = true;
+              };
+
               overlays = [ self.overlays.default ];
             };
 

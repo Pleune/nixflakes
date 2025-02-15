@@ -28,6 +28,28 @@
   i18n.defaultLocale = "en_US.UTF-8";
   networking.timeServers = [ "time.windows.com" ];
 
+  nix = {
+    settings = {
+      auto-optimise-store = true;
+
+      # Just allow nix to build with all gcc.arch. We don't know what system wsl will be used on
+      system-features = [
+        "gccarch-alderlake"
+        "gccarch-broadwell"
+        "gccarch-haswell"
+        "gccarch-ivybridge"
+        "gccarch-sandybridge"
+        "gccarch-silvermont"
+        "gccarch-skylake"
+        "gccarch-x86-64-v2"
+        "gccarch-x86-64-v3"
+        "gccarch-x86-64-v3"
+        "big-parallel"
+        "kvm"
+      ];
+    };
+  };
+
   hardware.graphics = {
     enable = true;
 
