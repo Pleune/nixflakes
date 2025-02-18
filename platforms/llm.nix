@@ -16,8 +16,8 @@ in
 
   nixpkgs = {
     hostPlatform = {
-      gcc.arch = "alderlake";
-      gcc.tune = "alderlake";
+      #gcc.arch = "alderlake";
+      #gcc.tune = "alderlake";
       system = "x86_64-linux";
     };
     config.cudaSupport = true;
@@ -33,7 +33,7 @@ in
     dhcpcd.enable = false;
     useDHCP = false;
     useHostResolvConf = false;
-    firewall.allowedTCPPorts = [ 443 ];
+    firewall.allowedTCPPorts = [ 443 8081 ];
   };
 
   systemd.network = {
@@ -86,6 +86,15 @@ in
 
   services.ollama.enable = true;
   services.tika.enable = true;
+  services.searx = {
+    enable = true;
+    settings.server = {
+      port = 8081;
+    secret_key = "superdupersecret";
+    bind_address = "0.0.0.0";
+    };
+    settings.search.formats = [ "json" "html" ];
+  };
 
   services.open-webui = {
     enable = true;

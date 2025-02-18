@@ -48,55 +48,44 @@ in
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
-  llama-cpp = prev.llama-cpp.overrideAttrs (old: {
-    postPatch =
-      (old.postPatch or "")
-      + ''
-        substituteInPlace ggml/src/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
-        substituteInPlace ggml/src/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
-      '';
-  });
+  # TODO: submit PR / issue
+  # llama-cpp = prev.llama-cpp.overrideAttrs (old: {
+  #   postPatch =
+  #     (old.postPatch or "")
+  #     + ''
+  #       substituteInPlace ggml/src/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
+  #       substituteInPlace ggml/src/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
+  #     '';
+  # });
+  #
+  # # same as above
+  # ollama = prev.ollama.overrideAttrs (old: {
+  #   postPatch =
+  #     (old.postPatch or "")
+  #     + ''
+  #       substituteInPlace llama/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
+  #       substituteInPlace llama/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
+  #     '';
+  # });
 
-  # same as above
   ollama = prev.ollama.overrideAttrs (old: {
-    postPatch =
-      (old.postPatch or "")
-      + ''
-        substituteInPlace llama/ggml-impl.h --replace-fail 'defined(__F16C__)' '0'
-        substituteInPlace llama/ggml.c --replace-fail '// FIXME: required here for quantization functions' '#include <immintrin.h>'
-      '';
+    version = "0.5.11";
+    src = final.fetchFromGitHub {
+      owner = "ollama";
+      repo = "ollama";
+      tag = "v0.5.11";
+      hash = "sha256-DW7gHNyW1ML8kqgMFsqTxS/30bjNlWmYmeov2/uZn00=";
+      fetchSubmodules = true;
+    };
   });
-
-  #cudaPackages = prev.cudaPackages_12_6;
 
   # # random build failures https://github.com/NixOS/nixpkgs/issues/379071
   # gitMinimal = prev.gitMinimal.overrideAttrs { doCheck = false; };
 
   # https://github.com/NixOS/nixpkgs/pull/380285
-  # [----------] Global test environment tear-down
-  # [==========] 132 tests from 28 test suites ran. (2 ms total)
-  # [  PASSED  ] 131 tests.
-  # [  FAILED  ] 1 test, listed below:
-  # [  FAILED  ] CORE.known_uarch
-  #
-  #  1 FAILED TEST
-  #
-  # 3/3 Test #3: brand-string-test ................   Passed    0.01 sec
-  #
-  # 67% tests passed, 1 tests failed out of 3
-  #
-  # Total Test time (real) =   0.01 sec
-  #
-  # The following tests FAILED:
-  #           1 - init-test (Failed)
-  # Errors while running CTest
-  # make: *** [Makefile:71: test] Error 8
-
   cpuinfo = prev.cpuinfo.overrideAttrs { doCheck = false; };
 
-  # Fix bcachefs bug causing libuv package test failure until
-  # https://github.com/koverstreet/bcachefs/commit/a3ed1cc4136df01e74a8b6df8c562db69e752bad is availaible
-  # Fix requirement to not have thread affinity set https://github.com/NixOS/nixpkgs/issues/378438
+  # fixed by
   libuv = prev.libuv.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -106,7 +95,7 @@ in
       '';
   });
 
-  # https://github.com/NixOS/nixpkgs/pull/380253
+  # fixed by https://github.com/NixOS/nixpkgs/pull/380253
   pulseaudio = prev.pulseaudio.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -130,6 +119,7 @@ in
   # make: *** [tests/Makefile:310: fate-vsynth1-huffyuvbgra] Error 1
   # make: *** Waiting for unfinished jobs....
   # https://github.com/jellyfin/jellyfin-ffmpeg/blob/9ce0bcc6feb7f6d2ede7e476933f1705aeaf2b21/tests/fate/vcodec.mak#L210
+  # TODO: submit PR / issue
   jellyfin-ffmpeg = prev.jellyfin-ffmpeg.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -236,6 +226,7 @@ in
   # FAILED: Index: 29 - Values: -1.09394491 and: -1.09394503 - Threshold: 1.00000001e-07
   # /build/source/tests/cpu/ops/gamma/GammaOpCPU_tests.cpp:699:
   # FAILED: Index: 30 - Values: -1.84183896 and: -1.84183872 - Threshold: 1.00000001e-07
+  # TODO: submit PR / issue
   opencolorio = prev.opencolorio.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -493,6 +484,7 @@ in
   #          12 - line-test (Failed)
   #          19 - polynomial-test (Failed)
   # Errors while running CTest
+  # TODO: submit PR / issue
   lib2geom = prev.lib2geom.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -513,15 +505,12 @@ in
   libreoffice-collabora = libreofficeOverrides prev.libreoffice-collabora;
 
   # fixed by https://github.com/NixOS/nixpkgs/pull/382891
-  # https://github.com/NixOS/nixpkgs/issues?q=is%3Aissue%20mxnet
-  # https://github.com/NixOS/nixpkgs/commit/b96c7caea612ea494806f109b76e05e81220dcbb
-  # It's possible to get mxnet to compile with cuda 11, but this will be removed from nix very soon, so just turn off cuda completely.
-  # However, leave cudaSupport = true, so opencv can still compile with cuda enabled.
   mxnet = prev.mxnet.overrideAttrs (old: {
     meta.broken = false;
     cmakeFlags = old.cmakeFlags ++ [ "-DUSE_CUDA=OFF" ];
   });
 
+  # fixed by https://github.com/NixOS/nixpkgs/pull/357656
   onnxruntime = prev.onnxruntime.overrideAttrs (old: {
     postPatch =
       (old.postPatch or "")
@@ -534,7 +523,6 @@ in
   });
 
   # fixed by https://github.com/NixOS/nixpkgs/pull/382896
-  # https://github.com/NixOS/nixpkgs/issues/352113
   immich-machine-learning = prev.immich-machine-learning.overrideAttrs (old: {
     disabledTests = (old.disabledTests or [ ]) ++ [
       # This tries to setup a GPU context
@@ -613,16 +601,13 @@ in
           buildInputs = old.buildInputs ++ [ onnxruntime ];
         });
 
-
       # fixed by https://github.com/NixOS/nixpkgs/pull/382920
       # These tests attempt to use the GPU, and segfault when one is not availaible
       rapidocr-onnxruntime = pyPrev.rapidocr-onnxruntime.overridePythonAttrs (old: {
-        disabledTests =
-          old.disabledTests
-          ++ [
-            "test_ort_cuda_warning"
-            "test_ort_dml_warning"
-          ];
+        disabledTests = old.disabledTests ++ [
+          "test_ort_cuda_warning"
+          "test_ort_dml_warning"
+        ];
       });
     })
   ];
