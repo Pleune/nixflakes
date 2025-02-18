@@ -16,8 +16,9 @@ in
 
   nixpkgs = {
     hostPlatform = {
-      #gcc.arch = "alderlake";
-      #gcc.tune = "alderlake";
+      #breaks ollama
+      # gcc.arch = "alderlake";
+      # gcc.tune = "alderlake";
       system = "x86_64-linux";
     };
     config.cudaSupport = true;

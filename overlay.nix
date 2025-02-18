@@ -74,9 +74,47 @@ in
       owner = "ollama";
       repo = "ollama";
       tag = "v0.5.11";
-      hash = "sha256-DW7gHNyW1ML8kqgMFsqTxS/30bjNlWmYmeov2/uZn00=";
+      hash = "sha256-Yc/FwIoPvzYSxlrhjkc6xFL5iCunDYmZkG16MiWVZck=";
       fetchSubmodules = true;
     };
+    # Build only the arches supported by nix cudaPackages
+    # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
+    postPatch =
+      let
+        removePrefix =
+          str:
+          let
+            matched = builtins.match "sm_(.*)" str;
+          in
+          if matched == null then str else builtins.head matched;
+        arches = builtins.map removePrefix final.cudaPackages.cudaFlags.realArches;
+      in
+      (old.postPatch or "")
+      + ''
+        substituteInPlace CMakeLists.txt --replace-fail native "${builtins.concatStringsSep ";" arches}"
+      '';
+    # /lib/libggml-cpu-skylakex.so contains a forbidden reference to /build/
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.autoPatchelfHook ];
+    preBuild = ''
+      cmake -B build -DCMAKE_SKIP_BUILD_RPATH=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH_USE_LINK_RPATH=ON
+      cmake --build build
+      ls -alh build
+    '';
+
+    # https://github.com/ollama/ollama/blob/b86c0a1500279a79484135a41c9ef4bd3798ae9e/docs/development.md#library-detection
+    postInstall =
+      final.lib.optionalString (prev.stdenv.hostPlatform.isx86 || old.enableRocm || old.enableCuda)
+        ''
+          # copy libggml_*.so and runners into lib
+          # https://github.com/ollama/ollama/blob/v0.4.4/llama/make/gpu.make#L90
+          mkdir -p $out/lib
+          #cp -r build/ml/backend/ggml/ggml/src/ggml-cuda/lib/* $out/lib/
+          # needs build/source/build/lib/ollama/libggml-cuda.so
+          ls -alh build/lib/ollama
+          cp -r build/lib/ollama $out/lib/
+        '';
+
+    vendorHash = "sha256-wtmtuwuu+rcfXsyte1C4YLQA4pnjqqxFmH1H18Fw75g=";
   });
 
   # # random build failures https://github.com/NixOS/nixpkgs/issues/379071
