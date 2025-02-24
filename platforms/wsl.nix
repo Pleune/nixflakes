@@ -16,7 +16,6 @@
   wsl = {
     enable = true;
     defaultUser = "${username}";
-    nativeSystemd = true;
     useWindowsDriver = true;
     startMenuLaunchers = true;
   };
