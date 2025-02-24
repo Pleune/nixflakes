@@ -68,79 +68,8 @@ in
   #     '';
   # });
 
-  ollama = prev.ollama.overrideAttrs (old: {
-    version = "0.5.11";
-    src = final.fetchFromGitHub {
-      owner = "ollama";
-      repo = "ollama";
-      tag = "v0.5.11";
-      hash = "sha256-Yc/FwIoPvzYSxlrhjkc6xFL5iCunDYmZkG16MiWVZck=";
-      fetchSubmodules = true;
-    };
-    # Build only the arches supported by nix cudaPackages
-    # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
-    postPatch =
-      let
-        removePrefix =
-          str:
-          let
-            matched = builtins.match "sm_(.*)" str;
-          in
-          if matched == null then str else builtins.head matched;
-        arches = builtins.map removePrefix final.cudaPackages.cudaFlags.realArches;
-      in
-      (old.postPatch or "")
-      + ''
-        substituteInPlace CMakeLists.txt --replace-fail native "${builtins.concatStringsSep ";" arches}"
-      '';
-    # /lib/libggml-cpu-skylakex.so contains a forbidden reference to /build/
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.autoPatchelfHook ];
-    preBuild = ''
-      cmake -B build -DCMAKE_SKIP_BUILD_RPATH=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH_USE_LINK_RPATH=ON
-      cmake --build build
-      ls -alh build
-    '';
-
-    # https://github.com/ollama/ollama/blob/b86c0a1500279a79484135a41c9ef4bd3798ae9e/docs/development.md#library-detection
-    postInstall =
-      final.lib.optionalString (prev.stdenv.hostPlatform.isx86 || old.enableRocm || old.enableCuda)
-        ''
-          # copy libggml_*.so and runners into lib
-          # https://github.com/ollama/ollama/blob/v0.4.4/llama/make/gpu.make#L90
-          mkdir -p $out/lib
-          #cp -r build/ml/backend/ggml/ggml/src/ggml-cuda/lib/* $out/lib/
-          # needs build/source/build/lib/ollama/libggml-cuda.so
-          ls -alh build/lib/ollama
-          cp -r build/lib/ollama $out/lib/
-        '';
-
-    vendorHash = "sha256-wtmtuwuu+rcfXsyte1C4YLQA4pnjqqxFmH1H18Fw75g=";
-  });
-
   # # random build failures https://github.com/NixOS/nixpkgs/issues/379071
   # gitMinimal = prev.gitMinimal.overrideAttrs { doCheck = false; };
-
-  # https://github.com/NixOS/nixpkgs/pull/380285
-  cpuinfo = prev.cpuinfo.overrideAttrs { doCheck = false; };
-
-  # fixed by
-  libuv = prev.libuv.overrideAttrs (old: {
-    postPatch =
-      (old.postPatch or "")
-      + ''
-        sed '/fs_utime_round/d' -i test/test-list.h
-        sed '/thread_affinity/d' -i test/test-list.h
-      '';
-  });
-
-  # fixed by https://github.com/NixOS/nixpkgs/pull/380253
-  pulseaudio = prev.pulseaudio.overrideAttrs (old: {
-    postPatch =
-      (old.postPatch or "")
-      + ''
-        sed -i "/fail_unless(pthread_setaffinity_np.*);/d" src/tests/once-test.c
-      '';
-  });
 
   # --- ./tests/ref/vsynth/vsynth1-huffyuvbgra      1970-01-01 00:00:01.000000000 +0000
   # +++ tests/data/fate/vsynth1-huffyuvbgra 2025-02-11 18:44:32.323861298 +0000
@@ -548,18 +477,6 @@ in
     cmakeFlags = old.cmakeFlags ++ [ "-DUSE_CUDA=OFF" ];
   });
 
-  # fixed by https://github.com/NixOS/nixpkgs/pull/357656
-  onnxruntime = prev.onnxruntime.overrideAttrs (old: {
-    postPatch =
-      (old.postPatch or "")
-      # https://github.com/microsoft/onnxruntime/blob/c4f3742bb456a33ee9c826ce4e6939f8b84ce5b0/onnxruntime/core/platform/env.h#L249
-      + ''
-        substituteInPlace onnxruntime/core/platform/env.h --replace-fail \
-          "GetRuntimePath() const { return PathString(); }"              \
-          "GetRuntimePath() const { return PathString(\"$out/lib/\"); }"
-      '';
-  });
-
   # fixed by https://github.com/NixOS/nixpkgs/pull/382896
   immich-machine-learning = prev.immich-machine-learning.overrideAttrs (old: {
     disabledTests = (old.disabledTests or [ ]) ++ [
@@ -570,30 +487,6 @@ in
 
   pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
     (pyFinal: pyPrev: {
-      #opencv4 = pyPrev.toPythonModule (prev.opencv4.override { enablePython = true; python3Packages = pyPrev; });
-
-      # https://github.com/NixOS/nixpkgs/pull/380245
-      # In LXC container, this is cheking different things.
-      # Traceback (most recent call last):
-      #   File "/nix/store/yhfpis4gxkd8ggdv9f8npam1bgavvv76-python3.12-twisted-24.11.0/lib/python3.12/site-packages/twisted/trial/test/test_script.py", line 542, in test_cpuCount
-      #     self.assertEqual(trial._autoJobs(), os.cpu_count())
-      #   File "/nix/store/yhfpis4gxkd8ggdv9f8npam1bgavvv76-python3.12-twisted-24.11.0/lib/python3.12/site-packages/twisted/trial/_synctest.py", line 444, in assertEqual
-      #     super().assertEqual(first, second, msg)
-      #   File "/nix/store/qrc496n6fsqp4p5m5h8wmw5d5jwyw5mr-python3-3.12.8/lib/python3.12/unittest/case.py", line 885, in assertEqual
-      #     assertion_func(first, second, msg=msg)
-      #   File "/nix/store/qrc496n6fsqp4p5m5h8wmw5d5jwyw5mr-python3-3.12.8/lib/python3.12/unittest/case.py", line 878, in _baseAssertEqual
-      #     raise self.failureException(msg)
-      # twisted.trial.unittest.FailTest: 10 != 12
-      #
-      # twisted.trial.test.test_script.AutoJobsTests.test_cpuCount
-      twisted = pyPrev.twisted.overrideAttrs (old: {
-        postPatch =
-          (old.postPatch or "")
-          + ''
-            echo 'AutoJobsTests.test_cpuCount.skip = ""' >> src/twisted/trial/test/test_script.py
-          '';
-      });
-
       # numpy tests fail when optimized with gcc.arch
       # https://github.com/NixOS/nixpkgs/issues/275626
       # https://github.com/numpy/numpy/issues/27460
@@ -613,31 +506,6 @@ in
             "hyp2f1_test_case42"
           ];
       });
-
-      # # testclient test hangs forever ? sometimes?
-      # starlette = pyPrev.starlette.overridePythonAttrs (old: {
-      #   disabledTestPaths =
-      #     (old.disabledTestPaths or [ ])
-      #     ++ final.lib.optionals (final.stdenv.hostPlatform ? gcc.arch) [
-      #       "tests/test_testclient.py"
-      #     ];
-      # });
-
-      # fixed by https://github.com/NixOS/nixpkgs/pull/382903
-      # the non-python package patched the lib search path to inside itself. But, the python package does not
-      # hold a runtime buildInputs dep on the non-python version, so that path may not exist.
-      # Just ensure python-onnxruntime pulls down the non-python one as well,
-      # and don'y worry about the duplicated files for now.
-      onnxruntime =
-        let
-          onnxruntime = final.onnxruntime.override {
-            python3Packages = pyPrev;
-            pythonSupport = true;
-          };
-        in
-        (pyPrev.onnxruntime.override { inherit onnxruntime; }).overridePythonAttrs (old: {
-          buildInputs = old.buildInputs ++ [ onnxruntime ];
-        });
 
       # fixed by https://github.com/NixOS/nixpkgs/pull/382920
       # These tests attempt to use the GPU, and segfault when one is not availaible
