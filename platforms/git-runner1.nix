@@ -51,8 +51,7 @@
 
   nix = {
     settings = {
-      # minimize memory usage
-      max-jobs = 1;
+      max-jobs = "auto"; # 1 seems to cause infrequent deadlocks
       cores = 10;
       max-substitution-jobs = 3;
 
