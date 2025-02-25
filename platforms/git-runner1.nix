@@ -184,6 +184,7 @@
     package = pkgs.nix-serve-ng;
     openFirewall = true;
     secretKeyFile = config.age.secrets."nix-serve.key".path;
+    extraParams = "--quiet";
   };
 
   nixflakes.makeUser = false;
