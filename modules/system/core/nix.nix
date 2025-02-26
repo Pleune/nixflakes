@@ -1,11 +1,13 @@
 {
-  system,
   pkgs,
   lib,
   inputs,
   self,
   ...
 }:
+let
+  inputsPublic = (builtins.removeAttrs inputs [ "private" ]);
+in
 {
   # system = {
   #   extraSystemBuilderCmds = ''
@@ -17,14 +19,14 @@
   environment.etc = lib.mapAttrs' (name: flake: {
     name = "nix/inputs/${name}";
     value.source = flake.outPath;
-  }) inputs;
+  }) inputsPublic;
   nix.nixPath = [ "/etc/nix/inputs" ];
 
   nix = {
     package = pkgs.nixVersions.latest;
 
     # put all inputs in flake registry
-    registry = lib.mapAttrs (n: flake: { inherit flake; }) inputs;
+    registry = lib.mapAttrs (n: flake: { inherit flake; }) inputsPublic;
     #nixPath = [ "nixpkgs=/run/current-system/nixpkgs" ];
     #registry.nixpkgs.flake = nixpkgs;
 
@@ -34,7 +36,10 @@
         "flakes"
       ];
       auto-optimise-store = true;
-      allowed-users = [ "*" "@users" ];
+      allowed-users = [
+        "*"
+        "@users"
+      ];
       trusted-users = [ "@wheel" ];
     };
 

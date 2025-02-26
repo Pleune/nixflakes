@@ -2,7 +2,8 @@
   description = "Mitch's flake";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # TODO: track unstable again
+    nixpkgs.url = "github:NixOS/nixpkgs/master";
 
     nix = {
       url = "github:/nixos/nix?ref=2.16.1"; # using nix 2.16.1
