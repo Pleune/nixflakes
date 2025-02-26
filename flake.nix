@@ -131,6 +131,7 @@
               llm = makeSystem "llm";
               nas = makeSystem "nas";
               nextcloud = makeSystem "nextcloud";
+              notes = makeSystem "notes";
             };
 
           deploy.nodes =
@@ -163,6 +164,7 @@
                 autoRollback = false;
                 magicRollback = false;
               };
+              notes = homedeploy "notes" { };
             };
 
           templates.default = {
