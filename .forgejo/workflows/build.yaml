@@ -99,7 +99,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas"
+          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas --boot"
 
   deploy-git-runner1:
     runs-on: nix
