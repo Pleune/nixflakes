@@ -24,7 +24,12 @@ in
     #nvidia_x11.bin
   ];
 
-  networking.firewall.allowedTCPPorts = [ config.services.forgejo.settings.server.HTTP_PORT ];
+  networking.firewall.allowedTCPPorts = [
+    config.services.forgejo.settings.server.HTTP_PORT
+    12345
+    8080
+    8888
+  ];
 
   networking = {
     dhcpcd.enable = false;
@@ -37,7 +42,7 @@ in
     networks."50-eth0" = {
       matchConfig.Name = "eth0";
       networkConfig = {
-        DHCP = "ipv4";
+        DHCP = "yes";
         IPv6AcceptRA = true;
       };
       linkConfig.RequiredForOnline = "routable";
@@ -53,6 +58,13 @@ in
       nvidia_x11.out
       vpl-gpu-rt
     ];
+  };
+
+  services.openssh = {
+    enable = true;
+    # TODO: deploy as non-root
+    # DenyUsers = "root";
+
   };
 
   nixflakes.makeUser = true;
