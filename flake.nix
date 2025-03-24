@@ -221,7 +221,9 @@
               ];
             };
 
-            checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
+            # This causes basically the entire system to be built at once
+            # checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
+
             formatter = inputs'.nixpkgs.legacyPackages.nixfmt-rfc-style;
           };
       }

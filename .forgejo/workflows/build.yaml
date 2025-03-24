@@ -5,8 +5,16 @@ on:
       - main
 
 jobs:
-  build:
+  check:
     runs-on: nix
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nix flake check
+
+  build-devshell:
+    runs-on: nix
+    needs: check
     steps:
       - name: deploy key
         run: |
@@ -17,19 +25,191 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Check
-        run: nix flake check
-      - name: Builds
+      - run: nix develop -c "true"
+
+  build-mitchvim:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
         run: |
-          nix develop -c "true"
-          nix build .#mitchvim
-          nixos-rebuild build --flake .#wsl
-          nixos-rebuild build --flake .#lxc
-          nixos-rebuild build --flake .#surface
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nix build .#mitchvim
+
+  build-os-wsl:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#wsl
+
+  build-os-lxc:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#lxc
+
+  build-os-surface:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#surface
+
+  build-os-git:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#git
+
+  build-os-git-runner1:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#git-runner1
+
+  build-os-immich:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#immich
+
+  build-os-nextcloud:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#nextcloud
+
+  build-os-llm:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#llm
+
+  build-os-jump:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#jump
+
+  build-os-notes:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#notes
+
+  build-os-nas:
+    runs-on: nix
+    needs: check
+    steps:
+      - name: deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PUB }}" > ~/.ssh/id_ed25519.pub && chmod 666 ~/.ssh/id_ed25519.pub
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+      - name: Checkout
+        uses: actions/checkout@v3
+      - run: nixos-rebuild build --flake .#nas
 
   deploy-git:
     runs-on: nix
-    needs: build
+    needs: build-os-git
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -40,7 +220,7 @@ jobs:
 
   deploy-immich:
     runs-on: nix
-    needs: build
+    needs: build-os-immich
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -51,7 +231,7 @@ jobs:
 
   deploy-nextcloud:
     runs-on: nix
-    needs: build
+    needs: build-os-nextcloud
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -62,7 +242,7 @@ jobs:
 
   deploy-llm:
     runs-on: nix
-    needs: build
+    needs: build-os-llm
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -73,7 +253,7 @@ jobs:
 
   deploy-jump:
     runs-on: nix
-    needs: build
+    needs: build-os-jump
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -84,7 +264,7 @@ jobs:
 
   deploy-notes:
     runs-on: nix
-    needs: build
+    needs: build-os-notes
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -95,7 +275,7 @@ jobs:
 
   deploy-nas:
     runs-on: nix
-    needs: build
+    needs: build-os-nas
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -106,7 +286,7 @@ jobs:
 
   deploy-git-runner1:
     runs-on: nix
-    needs: build
+    needs: build-os-git-runner1
     steps:
       - name: Checkout
         uses: actions/checkout@v3
