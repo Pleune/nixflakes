@@ -45,51 +45,6 @@ let
     });
 in
 {
-  # Fixed by https://github.com/NixOS/nixpkgs/pull/386756
-  open-webui = prev.open-webui.overrideAttrs (old: {
-    makeWrapperArgs =
-      let
-        pyodide = final.fetchurl rec {
-          url = "https://github.com/pyodide/pyodide/releases/download/${version}/pyodide-${version}.tar.bz2";
-          version = "0.27.2"; # keep in sync with package.lock or error when running code in-browser. Also know when testing, this does not work with firefox with "nosniff" enabled (default) (related: https://stackoverflow.com/q/60269909)
-          hash = "sha256-sZ47IxPiL1e12rmpH3Zv2v6L2+1tz/kIrT4uYbng+Ec=";
-        };
-        frontend = final.buildNpmPackage {
-          inherit (old) pname version src;
-
-          npmDepsHash = "sha256-rEV68SizR7NyYsRzlndg/ulvr8BeiDq3MpiBmaCUn2M=";
-
-          # Disabling `pyodide:fetch` as it downloads packages during `buildPhase`
-          # Until this is solved, running python packages from the browser will not work.
-          postPatch = ''
-            substituteInPlace package.json \
-              --replace-fail "npm run pyodide:fetch && vite build" "vite build"
-          '';
-
-          env.CYPRESS_INSTALL_BINARY = "0"; # disallow cypress from downloading binaries in sandbox
-          env.ONNXRUNTIME_NODE_INSTALL_CUDA = "skip";
-
-          env.NODE_OPTIONS = "--max-old-space-size=8192";
-          nativeBuildInputs = [ final.gnutar ];
-          preBuild = ''
-            echo "Extracting pyodide"
-            tar xf ${pyodide} -C static/
-          '';
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p $out/share
-            cp -a build $out/share/open-webui
-
-            runHook postInstall
-          '';
-        };
-      in
-      [ "--set FRONTEND_BUILD_DIR ${frontend}/share/open-webui" ];
-      # TODO: passthrough frontend
-  });
-
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
