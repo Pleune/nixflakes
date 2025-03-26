@@ -76,9 +76,6 @@
       ];
     };
 
-    gc.automatic = false;
-    optimise.automatic = true;
-
     # free 1G of nix store whenever there is less than 20G free
     extraOptions = ''
       min-free = ${toString (20 * 1024 * 1024 * 1024)}
