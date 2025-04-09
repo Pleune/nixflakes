@@ -25,7 +25,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nix develop -c "true"
+      - run: for i in {1..10}; do nix develop -c "true" && break; done
 
   build-mitchvim:
     runs-on: nix
@@ -40,7 +40,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nix build .#mitchvim
+      - run: for i in {1..10}; do nix build .#mitchvim && break; done
 
   build-os-wsl:
     runs-on: nix
@@ -55,7 +55,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#wsl
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#wsl && break; done
 
   build-os-lxc:
     runs-on: nix
@@ -70,7 +70,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#lxc
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#lxc && break; done
 
   build-os-surface:
     runs-on: nix
@@ -85,7 +85,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#surface
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#surface && break; done
 
   build-os-git:
     runs-on: nix
@@ -100,7 +100,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#git
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#git && break; done
 
   build-os-git-runner1:
     runs-on: nix
@@ -115,7 +115,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#git-runner1
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#git-runner1 && break; done
 
   build-os-immich:
     runs-on: nix
@@ -130,7 +130,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#immich
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#immich && break; done
 
   build-os-nextcloud:
     runs-on: nix
@@ -145,7 +145,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#nextcloud
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#nextcloud && break; done
 
   build-os-llm:
     runs-on: nix
@@ -160,7 +160,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#llm
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#llm && break; done
 
   build-os-jump:
     runs-on: nix
@@ -175,7 +175,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#jump
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#jump && break; done
 
   build-os-notes:
     runs-on: nix
@@ -190,7 +190,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#notes
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#notes && break; done
 
   build-os-nas:
     runs-on: nix
@@ -205,7 +205,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nixos-rebuild build --flake .#nas
+      - run: for i in {1..10}; do nixos-rebuild build --flake .#nas && break; done
 
   deploy-git:
     runs-on: nix
