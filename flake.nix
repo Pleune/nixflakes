@@ -2,7 +2,8 @@
   description = "Mitch's flake";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/master";
+    #nixpkgs.url = "github:Pleune/nixpkgs/texpresso-tectonic-update";
 
     nix = {
       url = "github:/nixos/nix?ref=2.16.1"; # using nix 2.16.1
@@ -183,8 +184,8 @@
           {
             _module.args.pkgs = import self.inputs.nixpkgs {
               localSystem = {
-                # gcc.arch = "alderlake";
-                # gcc.tune = "alderlake";
+                gcc.arch = "alderlake";
+                gcc.tune = "alderlake";
                 inherit system;
               };
               config = {

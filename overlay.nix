@@ -45,6 +45,13 @@ let
     });
 in
 {
+  # Fixed by https://github.com/NixOS/nixpkgs/pull/397734
+  re2 = prev.re2.overrideAttrs (old: {
+    cmakeFlags = (old.cmakeFlags or []) ++ [
+      (final.lib.cmakeFeature "CMAKE_CTEST_ARGUMENTS" "--timeout;999999")
+    ];
+  });
+
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
@@ -471,17 +478,14 @@ in
   libreoffice-qt6-fresh = libreofficeOverrides prev.libreoffice-qt6-still;
   libreoffice-collabora = libreofficeOverrides prev.libreoffice-collabora;
 
-  # fixed by https://github.com/NixOS/nixpkgs/pull/382891
-  mxnet = prev.mxnet.overrideAttrs (old: {
-    meta.broken = false;
-    cmakeFlags = old.cmakeFlags ++ [ "-DUSE_CUDA=OFF" ];
-  });
-
   # fixed by https://github.com/NixOS/nixpkgs/pull/382896
   immich-machine-learning = prev.immich-machine-learning.overrideAttrs (old: {
-    disabledTests = (old.disabledTests or [ ]) ++ [
-      # This tries to setup a GPU context
-      "test_sets_default_sess_options"
+    patches = (old.patches or [ ]) ++ [
+      (prev.fetchpatch {
+        name = "fix-sess-test-on-cuda";
+        url = "https://github.com/immich-app/immich/commit/64c0c4f01c695d9fab2ff6bd7c1a2be8f6720ec5.patch";
+        hash = "sha256-/8ZJYB2GamTbgFoIn5CtNEjkPHvVKye5o8+5XLiZBYE=";
+      })
     ];
   });
 
@@ -538,6 +542,39 @@ in
           postHooks+=(hypothesisActivateProfileForCI)
         '';
       });
+
+      # https://github.com/NixOS/nixpkgs/issues/397678
+      # error: builder for '/nix/store/bjjfs0vrhcszaz9illlbdp975sxbamgy-python3.12-watchfiles-1.0.4.drv' failed with exit code 1;
+      #  last 25 log lines:
+      #  > ____________________________ test_await_stop_event _____________________________
+      #  >
+      #  > tmp_path = PosixPath('/build/pytest-of-nixbld/pytest-0/test_await_stop_event0')
+      #  > write_soon = <function write_soon.<locals>.start at 0x7ffff52fe340>
+      #  >
+      #  >     @pytest.mark.filterwarnings('ignore::DeprecationWarning')
+      #  >     async def test_await_stop_event(tmp_path: Path, write_soon):
+      #  >         sleep(0.05)
+      #  >         write_soon(tmp_path / 'foo.txt')
+      #  >         stop_event = anyio.Event()
+      #  >         async for changes in awatch(tmp_path, debounce=50, step=10, watch_filter=None, stop_event=stop_event):
+      #  > >           assert changes == {(Change.added, str(tmp_path / 'foo.txt'))}
+      #  > E           AssertionError: assert {(<Change.add...stop_event0')} == {(<Change.add...nt0/foo.txt')}
+      #  > E
+      #  > E             Extra items in the left set:
+      #  > E             (<Change.modified: 2>, '/build/pytest-of-nixbld/pytest-0/test_await_stop_event0')
+      #  > E             Use -v to get more diff
+      #  >
+      #  > tests/test_watch.py:58: AssertionError
+      #  > ------------------------------ Captured log call -------------------------------
+      #  > watchfiles.main INFO: 2 changes detected
+      #  > =========================== short test summary info ============================
+      #  > FAILED tests/test_force_polling.py::test_watch_polling_not_env - AssertionError: expected call not found.
+      #  > FAILED tests/test_watch.py::test_await_stop_event - AssertionError: assert {(<Change.add...stop_event0')} == {(<Change.add...nt...
+      #  > ============ 2 failed, 149 passed, 3 skipped, 1 deselected in 3.81s ============
+      #  For full logs, run 'nix log /nix/store/bjjfs0vrhcszaz9illlbdp975sxbamgy-python3.12-watchfiles-1.0.4.drv'.
+      # watchfiles = pyPrev.watchfiles.overridePythonAttrs (old: {
+      #   doCheck = false;
+      # });
     })
   ];
 }
