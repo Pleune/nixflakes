@@ -55,9 +55,6 @@
       cores = 10;
       max-substitution-jobs = 3;
 
-      # minimize store duplication immedeately
-      auto-optimise-store = true;
-
       # The gccarch options do not get added until after the hostPlatform is added
       # bootstrap adding them since we know this system is alderlake anyways
       system-features = [
@@ -75,6 +72,8 @@
         "kvm"
       ];
     };
+
+    gc.automatic = false;
 
     # free 1G of nix store whenever there is less than 20G free
     extraOptions = ''
