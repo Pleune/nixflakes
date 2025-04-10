@@ -515,6 +515,29 @@ in
           "test_ort_dml_warning"
         ];
       });
+
+      # fixed by https://github.com/NixOS/nixpkgs/pull/396831 https://nixpk.gs/pr-tracker.html?pr=396831
+      hypothesis = pyPrev.hypothesis.overridePythonAttrs (old: {
+        preCheck =
+          (old.preCheck or "")
+          + ''
+            export HYPOTHESIS_PROFILE=ci
+          '';
+
+        disabledTests = (old.disabledTests or [ ]) ++ [
+          "test_given_does_not_pollute_state"
+          "test_find_does_not_pollute_state"
+          "test_does_print_on_reuse_from_database"
+          "test_prints_seed_only_on_healthcheck"
+        ];
+
+        setupHook = prev.writeText "setup-hook.sh" ''
+          hypothesisActivateProfileForCI() {
+            export CI=1
+          }
+          postHooks+=(hypothesisActivateProfileForCI)
+        '';
+      });
     })
   ];
 }
