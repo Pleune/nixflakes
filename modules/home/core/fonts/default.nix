@@ -12,7 +12,7 @@
       noto-fonts-cjk-sans
       noto-fonts-emoji
       roboto
-      iosevka
+      nerd-fonts.iosevka
     ];
     fonts = {
       fontconfig.defaultFonts = {
@@ -25,7 +25,7 @@
           "Noto Color Emoji"
         ];
         emoji = [ "Noto Color Emoji" ];
-        monospace = [ "Iosevka" ];
+        monospace = [ "Iosevka Nerd Font" ];
       };
     };
   };
