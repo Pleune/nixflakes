@@ -13,7 +13,7 @@
 
   # speeds up builds, and also https://github.com/NixOS/nixpkgs/issues/379657
   boot.tmp = {
-    useTmpfs = true;
+    useTmpfs = false;
     tmpfsSize = "100G"; # host will compress ram overflow else swap it to nvme
   };
 
