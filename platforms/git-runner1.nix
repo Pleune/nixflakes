@@ -51,9 +51,9 @@
 
   nix = {
     settings = {
-      max-jobs = "auto"; # 1 seems to cause infrequent deadlocks
-      cores = 10;
-      max-substitution-jobs = 3;
+      max-jobs = 1;
+      cores = 8;
+      max-substitution-jobs = 2;
 
       # The gccarch options do not get added until after the hostPlatform is added
       # bootstrap adding them since we know this system is alderlake anyways
