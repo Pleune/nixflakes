@@ -54,7 +54,7 @@ in
     config.allowUnfree = true;
   };
 
-  #programs.nix-ld.enable = true;
+  programs.nix-ld.enable = true;
 
   systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkForce 40960;
 
