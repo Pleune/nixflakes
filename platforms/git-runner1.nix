@@ -150,7 +150,7 @@
       url = "https://git.pleunetowne.com/";
       tokenFile = config.age.secrets."forgejo_runner.token".path;
       labels = [
-        "nix:docker://ubuntu:latest"
+        "nix:docker://node:18-bullseye"
       ];
       settings = {
         runner = {
