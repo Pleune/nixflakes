@@ -86,18 +86,20 @@
   networking.networkmanager.enable = true;
 
   services = {
+    displayManager = {
+      gdm = {
+        enable = true;
+        wayland = true;
+      };
+    };
+    desktopManager.gnome.enable = true;
     xserver = {
       enable = true;
       displayManager = {
-        gdm = {
-          enable = true;
-          wayland = true;
-        };
         setupCommands = ''
           if [ $XDG_SESSION_TYPE == "wayland" ]; then export QT_QPA_PLAYFORM="wayland"; fi
         '';
       };
-      desktopManager.gnome.enable = true;
 
       xkb = {
         layout = "us";

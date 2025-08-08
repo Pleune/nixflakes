@@ -13,7 +13,7 @@
     };
     services.gpg-agent = {
       enable = true;
-      pinentryPackage = lib.mkDefault pkgs.pinentry-tty;
+      pinentry.package = lib.mkDefault pkgs.pinentry-tty;
     };
     programs.git.signing = {
       signByDefault = true;

@@ -144,7 +144,7 @@
                 import inputs.nixpkgs {
                   system = "x86_64-linux";
                   overlays = [
-                    inputs.deploy-rs.overlay # or deploy-rs.overlays.default
+                    inputs.deploy-rs.overlays.default
                     (self: super: {
                       deploy-rs = {
                         inherit (pkgs) deploy-rs;

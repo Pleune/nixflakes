@@ -24,18 +24,16 @@
       enable = true;
       user = username;
     };
+    desktopManager.gnome.enable = true;
+    displayManager = {
+      gdm = {
+        enable = true;
+        autoSuspend = false;
+        wayland = true;
+      };
+    };
     xserver = {
       enable = true;
-      displayManager = {
-        gdm = {
-          enable = true;
-          autoSuspend = false;
-          wayland = true;
-        };
-      };
-
-      desktopManager.gnome.enable = true;
-
       xkb = {
         layout = "us";
         variant = "";

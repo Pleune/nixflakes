@@ -88,6 +88,6 @@
         palenight-theme
       ];
 
-      services.gpg-agent.pinentryPackage = lib.mkForce pkgs.pinentry-gnome3;
+      services.gpg-agent.pinentry.package = lib.mkForce pkgs.pinentry-gnome3;
     };
 }
