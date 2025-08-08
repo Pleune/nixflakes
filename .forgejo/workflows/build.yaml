@@ -217,6 +217,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-git
+          git push origin deploy-git --force
 
   deploy-immich:
     runs-on: nix
@@ -228,6 +234,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#immich"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-immich
+          git push origin deploy-immich --force
 
   deploy-nextcloud:
     runs-on: nix
@@ -239,6 +251,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nextcloud"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-nextcloud
+          git push origin deploy-nextcloud --force
 
   deploy-llm:
     runs-on: nix
@@ -250,6 +268,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#llm"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-llm
+          git push origin deploy-llm --force
 
   deploy-jump:
     runs-on: nix
@@ -261,6 +285,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#jump"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-jump
+          git push origin deploy-jump --force
 
   deploy-notes:
     runs-on: nix
@@ -272,6 +302,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#notes"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-notes
+          git push origin deploy-notes --force
 
   deploy-nas:
     runs-on: nix
@@ -283,6 +319,12 @@ jobs:
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas --boot"
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-nas
+          git push origin deploy-nas --force
 
   deploy-git-runner1:
     runs-on: nix
@@ -295,3 +337,17 @@ jobs:
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
           nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git-runner1 --boot"
           ssh -i deploy.key -o StrictHostKeychecking=no git-runner1.home.pleunetowne.com 'systemctl reboot --when="+1 hour"'
+      - name: Tag deploy
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+          git tag -f deploy-git-runner1
+          git push origin deploy-git-runner1 --force
+          ssh -i deploy.key -o StrictHostKeychecking=no git-runner1.home.pleunetowne.com 'systemctl reboot --when="+1 hour"'
+      - name: Tag deploy
+        run: |
+          git config user.name "CI"
+          git config user.email "ci@example.com"
+          tag="deploy-git-runner1-$(date +'%Y%m%d%H%M%S')"
+          git tag "$tag"
+          git push origin "$tag"
