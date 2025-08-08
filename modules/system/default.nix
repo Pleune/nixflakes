@@ -4,9 +4,8 @@
     ./agenix
     ./core
     ./lanzaboote
-    ./networkmanager
+    ./network
     ./printing
     ./services
-    ./ssl
   ];
 }
