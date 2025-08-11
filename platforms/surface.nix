@@ -128,7 +128,9 @@
   nixflakes = {
     secureboot.enable = true;
     pleunenet.enable = true;
-    printing.enable = true;
+
+    # TODO: build hang https://github.com/NixOS/nixpkgs/issues/431528#issuecomment-3175651671
+    #printing.enable = true;
   };
   home-manager.users.${username}.nixflakes = {
     theme = "gnome";
