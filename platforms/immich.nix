@@ -16,8 +16,9 @@ in
 
   nixpkgs = {
     hostPlatform = {
-      gcc.arch = "alderlake";
-      gcc.tune = "alderlake";
+      # TODO: something is wrong with pgvecto-rs when compiling with alderlake. Idk about other arch. I think it tried to use avx512? but that cant happen. Maybe x86-64-v3 would work. but it is depricated so maybe in the future it will be fixed
+      # gcc.arch = "alderlake";
+      # gcc.tune = "alderlake";
       system = "x86_64-linux";
     };
     config.cudaSupport = true;
