@@ -83,15 +83,29 @@
           // sysdef;
 
         makePkgs =
-          system: march:
+          system: march: mtune:
           import self.inputs.nixpkgs {
-            localSystem = {
-              gcc = lib.mkIf (march != null) {
-                arch = march;
-                tune = march;
-              };
-              inherit system;
-            };
+            localSystem =
+              {
+                inherit system;
+              }
+              // (
+                if march != null then
+                  {
+                    gcc.arch = march;
+                  }
+                else
+                  { }
+              )
+              // (
+                if mtune != null then
+                  {
+                    gcc.tune = mtune;
+                  }
+                else
+                  { }
+              );
+
             config = {
               cudaSupport = true;
               allowUnfree = true;
@@ -138,30 +152,27 @@
           deploy.nodes =
             let
               # TODO: dont hard-code system here
-              pkgs = makePkgs "x86_64-linux" null;
+              pkgs = makePkgs "x86_64-linux" null null;
 
-              deployPkgs =
-                import inputs.nixpkgs {
-                  system = "x86_64-linux";
-                  overlays = [
-                    inputs.deploy-rs.overlays.default
-                    (self: super: {
-                      deploy-rs = {
-                        inherit (pkgs) deploy-rs;
-                        lib = super.deploy-rs.lib;
-                      };
-                    })
-                  ];
-                };
+              deployPkgs = import inputs.nixpkgs {
+                system = "x86_64-linux";
+                overlays = [
+                  inputs.deploy-rs.overlays.default
+                  (self: super: {
+                    deploy-rs = {
+                      inherit (pkgs) deploy-rs;
+                      lib = super.deploy-rs.lib;
+                    };
+                  })
+                ];
+              };
 
               homedeploy = name: extra: {
                 hostname = "${name}.home.pleunetowne.com";
                 profiles.system = {
                   sshUser = "root";
                   # TODO: dont hard-code system here
-                  path =
-                    deployPkgs.deploy-rs.lib.activate.nixos
-                      self.nixosConfigurations.${name};
+                  path = deployPkgs.deploy-rs.lib.activate.nixos self.nixosConfigurations.${name};
                 } // extra;
               };
             in
@@ -195,7 +206,7 @@
             ...
           }@ctx:
           {
-            _module.args.pkgs = makePkgs system null;
+            _module.args.pkgs = makePkgs system null null;
 
             packages = {
               mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
@@ -215,8 +226,8 @@
             };
 
             legacyPackages = pkgs // {
-              alderlake = makePkgs system "alderlake";
-              skylake = makePkgs system "skylake";
+              alderlake = makePkgs system "alderlake" "alderlake"; # for nas systems
+              skylake = makePkgs system "skylake" "skylake"; # for surface
             };
 
             devShells.default = pkgs.mkShell {
