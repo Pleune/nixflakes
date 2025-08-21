@@ -26,6 +26,9 @@ in
 
   environment.systemPackages = with pkgs; [
     vim
+    sqlite
+    open-webui
+    apacheHttpd # for password reset htpassword command
     #nvidia_x11.bin
   ];
   time.timeZone = "America/Detroit";
@@ -34,7 +37,10 @@ in
     dhcpcd.enable = false;
     useDHCP = false;
     useHostResolvConf = false;
-    firewall.allowedTCPPorts = [ 443 8081 ];
+    firewall.allowedTCPPorts = [
+      443
+      8081
+    ];
   };
 
   systemd.network = {
@@ -85,22 +91,59 @@ in
     };
   };
 
-  services.ollama.enable = true;
-  services.tika.enable = true;
+  services.ollama = {
+    enable = true;
+
+    # open up for trilium
+    host = "0.0.0.0";
+    openFirewall = true;
+  };
+  #services.tika.enable = true;
+  services.docling-serve = {
+    enable = true;
+    port = 8082;
+    package = pkgs.docling-serve.override {
+      #withUI = true;
+      #withRapidocr = true;
+      withTesserocr = true;
+      withCPU = true;
+    };
+    environment = {
+      DOCLING_SERVE_ENABLE_UI = "False";
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES = "True";
+      DOCLING_SERVE_LOAD_MODELS_AT_BOOT = "False";
+    };
+    openFirewall = true;
+  };
   services.searx = {
     enable = true;
     settings.server = {
       port = 8081;
-    secret_key = "superdupersecret";
-    bind_address = "0.0.0.0";
+      secret_key = "superdupersecret";
+      bind_address = "0.0.0.0";
     };
-    settings.search.formats = [ "json" "html" ];
+    settings.search.formats = [
+      "json"
+      "html"
+    ];
   };
 
   services.open-webui = {
     enable = true;
     host = "0.0.0.0";
     openFirewall = true;
+    environment = {
+      ENABLE_WEB_SEARCH = "True";
+      WEB_SEARCH_ENGINE = "searxng";
+      WEB_SEARCH_RESULT_COUNT = "3";
+      WEB_SEARCH_CONCURRENT_REQUESTS = "10";
+      SEARXNG_QUERY_URL = "http://localhost:8081/search?q=<query>";
+
+      CONTENT_EXTRACTION_ENGINE = "docling";
+      DOCLING_OCR_ENGINE = "tesserocr";
+      DOCLING_OCR_LANG = "eng";
+      DOCLING_SERVER_URL = "http://localhost:8082";
+    };
   };
 
   users.users.${config.services.ollama.user}.extraGroups = [
