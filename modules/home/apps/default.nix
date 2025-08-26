@@ -26,7 +26,7 @@
         discord
         prismlauncher
         spotify
-        trilium-desktop
+        trilium-next-desktop
         xournalpp
         signal-desktop
         krita
@@ -35,9 +35,9 @@
         vscode
       ];
 
-      services.syncthing = {
+      services.nextcloud-client = {
         enable = true;
-        tray.enable = config.nixflakes.gui;
+        startInBackground = true;
       };
 
       programs = {

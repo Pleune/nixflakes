@@ -48,3 +48,11 @@ nix develop . -c deploy
 ## TODO
 
 - Change VMs to be very swappy since most times swap will be ram-compressed-cached and very fast
+
+# Notes
+
+If font is broken after an update:
+```bash
+rm -r ~/.cache/fontconfig
+fc-cache -vr
+```
