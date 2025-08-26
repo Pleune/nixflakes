@@ -99,7 +99,7 @@ in {
       service = {
         REGISTER_EMAIL_CONFIRM = true;
         ENABLE_NOTIFY_MAIL = true;
-        DISABLE_REGISTRATION = false;
+        DISABLE_REGISTRATION = true;
       };
       "repository.pull-request".DEFAULT_MERGE_STYLE = "rebase";
       "repository.upload".FILE_MAX_SIZE = 60000;
