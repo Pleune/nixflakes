@@ -434,16 +434,16 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1755615617,
-        "narHash": "sha256-HMwfAJBdrr8wXAkbGhtcby1zGFvs+StOp19xNsbqdOg=",
-        "owner": "NixOS",
+        "lastModified": 1757083239,
+        "narHash": "sha256-UhIRGGgKHRGeZKHGntOJb098ATCrGkLJv4scMr9++9Q=",
+        "owner": "Pleune",
         "repo": "nixpkgs",
-        "rev": "20075955deac2583bb12f07151c2df830ef346b4",
+        "rev": "223ff3a9e2bb542e8b5ef94557f804b788ecb336",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
-        "ref": "nixos-unstable",
+        "owner": "Pleune",
+        "ref": "testing-vectorchord-backport-gcc-arch-fix",
         "repo": "nixpkgs",
         "type": "github"
       }
