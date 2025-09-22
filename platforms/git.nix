@@ -5,8 +5,14 @@
   private,
   ...
 }:
-
-{
+let
+  jupyter = pkgs.python3.withPackages (
+    ps: with ps; [
+      ipywidgets
+      jupyterlab
+      nbconvert
+    ]);
+in {
   imports = [
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
@@ -81,6 +87,12 @@
         PROTOCOL = "smtps";
         SMTP_ADDR = "email-smtp.us-east-2.amazonaws.com";
         SMTP_PORT = 2465;
+      };
+      "markup.jupyter" = {
+        ENABLED = true;
+        FILE_EXTENSIONS = ".ipynb";
+        RENDER_COMMAND = "${jupyter}/bin/jupyter nbconvert --stdout --to html --template full";
+        IS_INPUT_FILE = true;
       };
       actions.ENDLESS_TASK_TIMEOUT = "56h";
       session.COOKIE_SECURE = true;
