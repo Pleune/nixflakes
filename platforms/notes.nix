@@ -15,8 +15,8 @@ in
   ];
 
   nixpkgs.hostPlatform = {
-    gcc.arch = "alderlake";
-    gcc.tune = "alderlake";
+    # gcc.arch = "alderlake";
+    # gcc.tune = "alderlake";
     system = "x86_64-linux";
   };
 
