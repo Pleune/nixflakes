@@ -60,6 +60,7 @@
     };
     cpu.intel.updateMicrocode = true;
     enableRedistributableFirmware = true;
+    microsoft-surface.kernelVersion = "stable";
   };
 
   environment.sessionVariables = {
@@ -75,6 +76,7 @@
       alsa.enable = true;
       alsa.support32Bit = true;
       pulse.enable = true;
+      jack.enable = true;
     };
   };
 
@@ -115,7 +117,11 @@
   };
 
   environment = {
-    systemPackages = with pkgs; [ cheese ];
+    systemPackages = with pkgs; [
+      cheese
+      pavucontrol # PulseAudio Volume Control
+      pamixer # Command-line mixer for PulseAudio
+    ];
     gnome.excludePackages = with pkgs; [ snapshot ];
   };
   users.users.${username}.extraGroups = [
