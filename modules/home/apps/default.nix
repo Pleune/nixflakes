@@ -36,7 +36,7 @@
       ];
 
       services.nextcloud-client = {
-        enable = true;
+        enable = false; # TODO: does not compile march
         startInBackground = true;
       };
 
