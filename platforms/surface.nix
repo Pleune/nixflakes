@@ -12,8 +12,8 @@
   ];
 
   nixpkgs.hostPlatform = {
-    gcc.arch = "skylake";
-    gcc.tune = "skylake";
+    # gcc.arch = "skylake";
+    # gcc.tune = "skylake";
     system = "x86_64-linux";
   };
 
