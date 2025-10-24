@@ -105,13 +105,16 @@ in
     package = pkgs.docling-serve.override {
       #withUI = true;
       #withRapidocr = true;
-      withTesserocr = true;
+      #withTesserocr = true;
       withCPU = true;
     };
     environment = {
       DOCLING_SERVE_ENABLE_UI = "False";
       DOCLING_SERVE_ENABLE_REMOTE_SERVICES = "True";
       DOCLING_SERVE_LOAD_MODELS_AT_BOOT = "False";
+
+      # TODO: remove https://github.com/NixOS/nixpkgs/issues/411914#issuecomment-2917861802
+      HOME = "/var/lib/docling-serve";
     };
     openFirewall = true;
   };
@@ -143,7 +146,15 @@ in
       DOCLING_OCR_ENGINE = "tesserocr";
       DOCLING_OCR_LANG = "eng";
       DOCLING_SERVER_URL = "http://localhost:8082";
+
+      # TODO: remove https://github.com/NixOS/nixpkgs/issues/411914#issuecomment-2917861802
+      HOME = "/var/lib/open-webui";
     };
+  };
+  
+  nixflakes.services.wake-on-lan-api = {
+    enable = true;
+    port = 8083;
   };
 
   users.users.${config.services.ollama.user}.extraGroups = [

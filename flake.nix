@@ -213,6 +213,7 @@
                 import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
               );
               incus-backup-rustic = pkgs.callPackage ./pkgs/incus-backup-rustic { };
+              wol_api = pkgs.callPackage ./pkgs/wake-on-lan-api { };
               live-iso = inputs.nixos-generators.nixosGenerate {
                 inherit system;
                 specialArgs = specialArgs ctx "nixflakes-live";
