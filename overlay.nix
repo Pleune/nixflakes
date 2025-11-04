@@ -66,4 +66,17 @@ in
   libreoffice-qt-fresh = libreofficeOverrides prev.libreoffice-qt-still;
   libreoffice-qt6-fresh = libreofficeOverrides prev.libreoffice-qt6-still;
   libreoffice-collabora = libreofficeOverrides prev.libreoffice-collabora;
+
+  pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+    (pyFinal: pyPrev: {
+
+      # TODO: resubmit my patch as mentioned https://github.com/NixOS/nixpkgs/issues/439898#issuecomment-3441105166
+      rapidocr-onnxruntime = pyPrev.rapidocr-onnxruntime.overridePythonAttrs (old: {
+        disabledTests = old.disabledTests ++ [
+          "test_ort_cuda_warning"
+          "test_ort_dml_warning"
+        ];
+      });
+    })
+  ];
 }
