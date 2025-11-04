@@ -12,7 +12,7 @@ with lib;
   config = mkIf config.nixflakes.agenix.enable (mkMerge [
     {
       services.openssh.enable = true;
-      environment.systemPackages = [ agenix.packages.${pkgs.system}.default ];
+      environment.systemPackages = [ agenix.packages.${pkgs.stdenv.hostPlatform.system}.default ];
     }
   ]);
 }

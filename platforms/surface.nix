@@ -68,7 +68,7 @@
   }; # Force intel-media-driver
 
   services = {
-    logind.lidSwitch = "hibernate";
+    logind.settings.Login.HandleLidSwitch = "hibernate";
     pulseaudio.enable = false;
 
     pipewire = {

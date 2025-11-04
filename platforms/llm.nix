@@ -100,7 +100,7 @@ in
   };
   #services.tika.enable = true;
   services.docling-serve = {
-    enable = true;
+    enable = false; # FIXME: marked broken
     port = 8082;
     package = pkgs.docling-serve.override {
       #withUI = true;

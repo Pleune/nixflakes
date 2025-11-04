@@ -364,14 +364,16 @@
     };
     neo-tree = {
       enable = true;
-      closeIfLastWindow = true;
-      enableGitStatus = true;
-      enableModifiedMarkers = true;
-      enableRefreshOnWrite = true;
-      buffers = {
-        bindToCwd = false;
-        followCurrentFile = {
-          enabled = true;
+      settings = {
+        close_if_last_window = true;
+        enable_git_status = true;
+        enable_modified_markers = true;
+        enable_refresh_on_write = true;
+        buffers = {
+          bind_to_cwd = false;
+          follow_current_file = {
+            enabled = true;
+          };
         };
       };
     };

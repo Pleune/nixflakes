@@ -9,14 +9,20 @@
     git = {
       enable = true;
       lfs.enable = true;
-      userName = userFullName;
-      userEmail = userEmail;
-      delta = {
-        enable = true;
-        options = {
-          navigate = true;
-          side-by-side = true;
+      settings = {
+        user = {
+          name = userFullName;
+          email = userEmail;
         };
+      };
+    };
+
+    delta = {
+      enable = true;
+      enableGitIntegration = true;
+      options = {
+        navigate = true;
+        side-by-side = true;
       };
     };
 
