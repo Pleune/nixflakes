@@ -46,6 +46,9 @@ with lib;
         wants = [
           "network-online.target"
         ];
+        wantedBy = [
+          "multi-user.target"
+        ];
         serviceConfig = {
           Type = "simple";
           User = cfg.user;
