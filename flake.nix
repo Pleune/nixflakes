@@ -142,6 +142,7 @@
               git = makeSystem "git";
               git-runner1 = makeSystem "git-runner1";
               immich = makeSystem "immich";
+              jellyfin = makeSystem "jellyfin";
               jump = makeSystem "jump";
               llm = makeSystem "llm";
               nas = makeSystem "nas";
@@ -180,6 +181,7 @@
               git = homedeploy "git" { };
               git-runner1 = homedeploy "git-runner1" { };
               immich = homedeploy "immich" { };
+              jellyfin = homedeploy "jellyfin" { };
               jump = homedeploy "jump" { };
               llm = homedeploy "llm" { };
               nas = homedeploy "nas" { };
