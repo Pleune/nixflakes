@@ -62,7 +62,12 @@
   };
 
   outputs =
-    inputs@{ self, flake-parts, ... }:
+    inputs@{
+      self,
+      flake-parts,
+      deploy-rs,
+      ...
+    }:
     flake-parts.lib.mkFlake { inherit self inputs; } (
       { withSystem, lib, ... }:
       let
@@ -111,7 +116,9 @@
               allowUnfree = true;
             };
 
-            overlays = [ self.overlays.default ];
+            overlays = [
+              self.overlays.default
+            ];
           };
       in
       {
@@ -152,28 +159,12 @@
 
           deploy.nodes =
             let
-              # TODO: dont hard-code system here
-              pkgs = makePkgs "x86_64-linux" null null;
-
-              deployPkgs = import inputs.nixpkgs {
-                system = "x86_64-linux";
-                overlays = [
-                  inputs.deploy-rs.overlays.default
-                  (self: super: {
-                    deploy-rs = {
-                      inherit (pkgs) deploy-rs;
-                      lib = super.deploy-rs.lib;
-                    };
-                  })
-                ];
-              };
-
               homedeploy = name: extra: {
                 hostname = "${name}.home.pleunetowne.com";
                 profiles.system = {
                   sshUser = "root";
                   # TODO: dont hard-code system here
-                  path = deployPkgs.deploy-rs.lib.activate.nixos self.nixosConfigurations.${name};
+                  path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.${name};
                 } // extra;
               };
             in
@@ -235,12 +226,12 @@
 
             devShells.default = pkgs.mkShell {
               buildInputs = [
-                pkgs.deploy-rs
+                deploy-rs.packages."${system}".deploy-rs
                 pkgs.agenix-cli
               ];
             };
 
-            # This causes basically the entire system to be built at once
+            # for deploy-rs from pkgs
             # checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
 
             formatter = inputs'.nixpkgs.legacyPackages.nixfmt-rfc-style;
