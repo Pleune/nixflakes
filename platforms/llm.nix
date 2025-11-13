@@ -98,7 +98,10 @@ in
     host = "0.0.0.0";
     openFirewall = true;
   };
-  #services.tika.enable = true;
+  services.tika = {
+    enable = true;
+    port = 9998;
+  };
   services.docling-serve = {
     enable = false; # FIXME: marked broken
     port = 8082;
@@ -142,16 +145,18 @@ in
       WEB_SEARCH_CONCURRENT_REQUESTS = "10";
       SEARXNG_QUERY_URL = "http://localhost:8081/search?q=<query>";
 
-      CONTENT_EXTRACTION_ENGINE = "docling";
+      CONTENT_EXTRACTION_ENGINE = "tika";
+      TIKA_SERVER_URL = "http://localhost:9998";
       DOCLING_OCR_ENGINE = "tesserocr";
       DOCLING_OCR_LANG = "eng";
       DOCLING_SERVER_URL = "http://localhost:8082";
+
 
       # TODO: remove https://github.com/NixOS/nixpkgs/issues/411914#issuecomment-2917861802
       HOME = "/var/lib/open-webui";
     };
   };
-  
+
   nixflakes.services.wake-on-lan-api = {
     enable = true;
     port = 8083;
