@@ -6,15 +6,39 @@ let
     libreoffice:
     libreoffice.override (old: {
       unwrapped = old.unwrapped.overrideAttrs (oldUW: {
-        postPatch =
-          (oldUW.postPatch or "")
-          + ''
-            sed -i '/CPPUNIT_TEST.testDubiousArrayFormulasFODS/d' sc/qa/unit/functions_array.cxx
-          '';
+        postPatch = (oldUW.postPatch or "") + ''
+          sed -i '/CPPUNIT_TEST.testDubiousArrayFormulasFODS/d' sc/qa/unit/functions_array.cxx
+        '';
       });
     });
 in
 {
+  zed-editor =
+    (prev.zed-editor.overrideAttrs (
+      finalAttrs: prevAttrs: rec {
+        version = "ollama_completions_55d9d35";
+        src = prev.fetchFromGitHub {
+          owner = "romantolkachyov";
+          repo = "zed";
+          rev = "ollama-inline-completions";
+          hash = "sha256-3pwYZpbUi357da9csIldvKCPiXJp4wOUal36W4l8d1I=";
+        };
+        cargoDeps = final.rustPlatform.fetchCargoVendor ({
+          inherit src;
+          hash = "sha256-kZM/pMcnwtrbIVh8L8+E3nzgp4HvlAoHqjG4db9OQKg=";
+          # upstream zed-editor package has this. No way to pass it through :(
+          postBuild = ''
+            rm -r $out/git/*/candle-book/
+          '';
+        });
+        postPatch = (prevAttrs.postPatch or "") + ''
+          substituteInPlace script/licenses/zed-licenses.toml \
+            --replace 'accepted = [' 'accepted = ["CDLA-Permissive-2.0",'
+        '';
+      }
+    )).override
+      { withGLES = true; };
+
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
