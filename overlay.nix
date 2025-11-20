@@ -37,7 +37,8 @@ in
         '';
       }
     )).override
-      { withGLES = true; };
+      # https://github.com/zed-industries/zed/issues/26520
+      { withGLES = false; };
 
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
