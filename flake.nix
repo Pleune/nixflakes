@@ -155,6 +155,7 @@
               nas = makeSystem "nas";
               nextcloud = makeSystem "nextcloud";
               notes = makeSystem "notes";
+              paperless = makeSystem "paperless";
             };
 
           deploy.nodes =
@@ -182,6 +183,7 @@
                 magicRollback = false;
               };
               notes = homedeploy "notes" { };
+              paperless = homedeploy "paperless" { };
             };
 
           templates.default = {
