@@ -104,4 +104,6 @@ in
       });
     })
   ];
+
+  paperless-gpt = final.callPackage ./pkgs/paperless-gpt { };
 }

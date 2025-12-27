@@ -25,7 +25,7 @@
     useDHCP = false;
     useHostResolvConf = false;
     # Open SSH/SFTP (22) for SFTP ingest and HTTPS (443) for the web UI
-    firewall.allowedTCPPorts = [ 22 443 ];
+    firewall.allowedTCPPorts = [ 22 443 8080 ];
   };
 
   systemd.network = {
@@ -56,27 +56,30 @@
 
   services = {
     nginx = {
-      enable = true;
-      recommendedProxySettings = true;
-      recommendedTlsSettings = true;
+      # enable = true;
+      # recommendedProxySettings = true;
+      # recommendedTlsSettings = true;
       virtualHosts."paperless.pleunetowne.com" = {
-        forceSSL = true;
+        # forceSSL = true;
         sslCertificate = config.age.secrets."ssl.crt".path;
         sslCertificateKey = config.age.secrets."ssl.key".path;
-        locations."/" = {
-          proxyPass = "http://127.0.0.1:${toString config.services.paperless.port}";
-          proxyWebsockets = true;
-          extraConfig = ''
-            client_max_body_size 50000M;
-          '';
-        };
+        # locations."/" = {
+        #   proxyPass = "http://127.0.0.1:${toString config.services.paperless.port}";
+        #   proxyWebsockets = true;
+        #   extraConfig = ''
+        #     client_max_body_size 50000M;
+        #   '';
+        # };
       };
     };
 
     paperless = {
       enable = true;
+      domain = "paperless.pleunetowne.com";
       consumptionDirIsPublic = true;
       passwordFile = config.age.secrets."paperless-admin-pass".path;
+      configureNginx = true;
+      database.createLocally = true;
       settings = {
         # PAPERLESS_OCR_LANGUAGE = "deu+eng";
         PAPERLESS_OCR_USER_ARGS = {
@@ -87,58 +90,61 @@
         PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.home.pleunetowne.com";
       };
     };
+  };
 
-    # Enable OpenSSH so we can provide an SFTP ingest endpoint.
-    # We restrict the ingest user to internal-sftp and a chrooted directory.
-    openssh = {
-      enable = true;
-      permitRootLogin = "no";
-      # Keep global password auth disabled for security; we enable it only
-      # for the Match block below so an admin can set a local password if desired.
-      passwordAuthentication = false;
-      extraConfig = ''
-        Subsystem sftp internal-sftp
-
-        Match User paperless-sftp
-          ChrootDirectory /var/lib/paperless/consume/sftp
-          ForceCommand internal-sftp
-          # Allow password auth for this Match so the operator can set a password
-          # If you prefer key-based auth, remove or change this and configure keys.
-          PasswordAuthentication yes
-          AllowTcpForwarding no
-          X11Forwarding no
-      '';
+  systemd.services.paperless-gpt = {
+    description = "paperless-gpt (assistant / ingestion integration for Paperless)";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" "paperless.service" ];
+    wants = [ "paperless.service" "network-online.target" ];
+    serviceConfig = {
+      User = "paperless-gpt";
+      Group = "paperless-gpt";
+      WorkingDirectory = config.users.users.paperless-gpt.home;
+      # Use the environment file managed by agenix/age.secrets.
+      #EnvironmentFile = "${config.age.secrets.\"paperless-gpt.env\".path}";
+      Environment = [
+        "PAPERLESS_BASE_URL=https://${config.services.paperless.domain}"
+        "PAPERLESS_API_TOKEN=xxxxxx"
+        "LLM_PROVIDER=openai"
+        "OPENAI_BASE_URL=https://ai.pleunetowne.com/api/v1"
+        "LLM_MODEL=gpt_oss_20b"
+        "VISION_LLM_PROVIDER=openai"
+        #"VISION_LLM_MODEL=qwen3-vl:4b"
+        "VISION_LLM_MODEL=qwen2.5vl:3b"
+        "OPENAI_API_KEY=sk-xxxxxx"
+        "LISTEN_INTERFACE=0.0.0.0:8080"
+        "PDF_UPLOAD=true"
+        "TOKEN_LIMIT=1000"
+        "LLM_LANGUAGE=English"
+        "OCR_LIMIT_PAGES=0"
+        "LOG_LEVEL=info"
+        "PDF_OCR_TAGGING=true"
+        "PDF_OCR_COMPLETE_TAG=paperless-gpt-ocr-complete"
+        "CREATE_LOCAL_HOCR=true"
+        "CREATE_LOCAL_PDF=true"
+        "LOCAL_HOCR_PATH=${config.users.users.paperless-gpt.home}/hocr"
+        "LOCAL_PDF_PATH=${config.users.users.paperless-gpt.home}/pdf"
+        "AUTO_GENERATE_TAGS=false"
+      ];
+      ExecStartPre = [
+        ''${pkgs.coreutils}/bin/chmod -R u+w default_prompts''
+        ''${pkgs.coreutils}/bin/cp -rf ${pkgs.paperless-gpt}/default_prompts .''
+      ];
+      ExecStart = "${pkgs.paperless-gpt}/bin/paperless-gpt";
+      Restart = "on-failure";
+      RestartSec = "5s";
     };
   };
 
-  # Local system user for SFTP ingest into the Paperless consumption directory.
-  # This user is restricted to SFTP via the sshd Match block above.
-  users.users.paperless-sftp = {
+  users.groups.paperless-gpt = {};
+  users.users.paperless-gpt = {
     isSystemUser = true;
-    description = "Paperless SFTP ingest user";
-    # We do not create a writable home here because for a chroot the top-level
-    # chroot directory must be owned by root. The actual incoming directory is
-    # owned by the Paperless user so Paperless can consume uploaded files.
-    createHome = false;
-    home = "/var/lib/paperless/consume/sftp";
-    # Put the user in the same group as the paperless service user so uploaded
-    # files can be read/consumed. The paperless module defines its user name at
-    # `config.services.paperless.user`.
-    extraGroups = [ config.services.paperless.user ];
-    # Do not set a password here; set it securely on the machine (or use keys).
+    description = "Paperless-GPT service user";
+    home = "/var/lib/paperless-gpt";
+    createHome = true;
+    group = "paperless-gpt";
   };
-
-  # Ensure the consumption directories exist with the correct ownership/permissions.
-  # The chroot directory must be owned by root and not writable by others.
-  # The inner directory is owned by the paperless user so it can consume files.
-  systemd.tmpfiles.rules = [
-    # ensure base consumption dir exists and owned by paperless
-    "d /var/lib/paperless/consume 0750 ${toString config.services.paperless.user} ${toString config.services.paperless.user} - -"
-    # chroot dir must be owned by root (required by OpenSSH), not writable by others
-    "d /var/lib/paperless/consume/sftp 0751 root ${toString config.services.paperless.user} - -"
-    # place an 'incoming' directory writable by the paperless user
-    "d /var/lib/paperless/consume/sftp/incoming 0750 ${toString config.services.paperless.user} ${toString config.services.paperless.user} - -"
-  ];
 
   nixflakes.makeUser = false;
   system.stateVersion = "25.11";
