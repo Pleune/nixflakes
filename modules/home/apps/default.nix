@@ -35,11 +35,6 @@
         vscode
       ];
 
-      services.nextcloud-client = {
-        enable = false; # TODO: does not compile march
-        startInBackground = true;
-      };
-
       programs = {
         thunderbird = {
           enable = true;

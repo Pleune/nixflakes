@@ -90,26 +90,25 @@
         makePkgs =
           system: march: mtune:
           import self.inputs.nixpkgs {
-            localSystem =
-              {
-                inherit system;
-              }
-              // (
-                if march != null then
-                  {
-                    gcc.arch = march;
-                  }
-                else
-                  { }
-              )
-              // (
-                if mtune != null then
-                  {
-                    gcc.tune = mtune;
-                  }
-                else
-                  { }
-              );
+            localSystem = {
+              inherit system;
+            }
+            // (
+              if march != null then
+                {
+                  gcc.arch = march;
+                }
+              else
+                { }
+            )
+            // (
+              if mtune != null then
+                {
+                  gcc.tune = mtune;
+                }
+              else
+                { }
+            );
 
             config = {
               cudaSupport = true;
@@ -166,7 +165,8 @@
                   sshUser = "root";
                   # TODO: dont hard-code system here
                   path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.${name};
-                } // extra;
+                }
+                // extra;
               };
             in
             {
@@ -185,6 +185,9 @@
               notes = homedeploy "notes" { };
               paperless = homedeploy "paperless" { };
             };
+
+          homeConfigurations."mitch@surface" =
+            self.nixosConfigurations.surface.config.home-manager.users.mitch.home;
 
           templates.default = {
             path = ./.;
