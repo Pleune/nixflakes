@@ -198,9 +198,12 @@
     openssh.enable = true;
     grafana = {
       enable = true;
-      settings.server = {
-        http_addr = "0.0.0.0";
-        http_port = 2342;
+      settings = {
+        security.secret_key = "$__file{${config.age.secrets."grafana-secret-key".path}}";
+        server = {
+          http_addr = "0.0.0.0";
+          http_port = 2342;
+        };
       };
 
       provision = {
@@ -485,6 +488,11 @@
     "rustic-restore"
   ];
   nixflakes.agenix.enable = true;
+  age.secrets."grafana-secret-key" = {
+    file = "${private.secrets}/nextcloud_admin_password.age";
+    group = config.services.grafana.group;
+    mode = "660";
+  };
   age.secrets."rustic.toml" = {
     file = "${private.secrets}/nas_backup_rustic_config.age";
     group = "rustic";

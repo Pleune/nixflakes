@@ -49,11 +49,6 @@
       inputs.flake-parts.follows = "flake-parts";
     };
 
-    nixos-generators = {
-      url = "github:nix-community/nixos-generators";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     private = {
       url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
@@ -140,6 +135,8 @@
                 );
             in
             {
+              live-iso = makeSystem "live";
+
               lxc = makeSystem "lxc";
               surface = makeSystem "surface";
               wsl = makeSystem "wsl";
@@ -212,16 +209,6 @@
               );
               incus-backup-rustic = pkgs.callPackage ./pkgs/incus-backup-rustic { };
               wol_api = pkgs.callPackage ./pkgs/wake-on-lan-api { };
-              live-iso = inputs.nixos-generators.nixosGenerate {
-                inherit system;
-                specialArgs = specialArgs ctx "nixflakes-live";
-                modules = [
-                  "${inputs.nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-base.nix"
-                  ./platforms/live.nix
-                  ./modules
-                ];
-                format = "iso";
-              };
             };
 
             legacyPackages = pkgs // {
@@ -239,7 +226,7 @@
             # for deploy-rs from pkgs
             # checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
 
-            formatter = inputs'.nixpkgs.legacyPackages.nixfmt-rfc-style;
+            formatter = inputs'.nixpkgs.legacyPackages.nixfmt;
           };
       }
     );

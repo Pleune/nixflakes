@@ -140,7 +140,7 @@
     curl
     grc
     nix-tree
-    nixfmt-rfc-style
+    nixfmt
     ripgrep
     tldr
     todoist

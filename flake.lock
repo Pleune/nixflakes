@@ -310,42 +310,6 @@
         "type": "github"
       }
     },
-    "nixlib": {
-      "locked": {
-        "lastModified": 1736643958,
-        "narHash": "sha256-tmpqTSWVRJVhpvfSN9KXBvKEXplrwKnSZNAoNPf/S/s=",
-        "owner": "nix-community",
-        "repo": "nixpkgs.lib",
-        "rev": "1418bc28a52126761c02dd3d89b2d8ca0f521181",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "nixpkgs.lib",
-        "type": "github"
-      }
-    },
-    "nixos-generators": {
-      "inputs": {
-        "nixlib": "nixlib",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1769813415,
-        "narHash": "sha256-nnVmNNKBi1YiBNPhKclNYDORoHkuKipoz7EtVnXO50A=",
-        "owner": "nix-community",
-        "repo": "nixos-generators",
-        "rev": "8946737ff703382fda7623b9fab071d037e897d5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "nixos-generators",
-        "type": "github"
-      }
-    },
     "nixos-hardware": {
       "locked": {
         "lastModified": 1771423359,
@@ -466,11 +430,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1766453807,
-        "narHash": "sha256-oufZ3MlBmx1YPDoF8o1Ue97SJORpaBLuhKNb9VjfHRw=",
+        "lastModified": 1771993633,
+        "narHash": "sha256-V0M+NsS/NI6k+EYdVH9iJmQmUF/JIrl3sj6bLBIcK6w=",
         "ref": "refs/heads/main",
-        "rev": "6831f0cc327eb574e4e8b149f6c13ea119d56aff",
-        "revCount": 15,
+        "rev": "cc2f763386ee9739d588453efeaed9ff2a9c6f91",
+        "revCount": 16,
         "type": "git",
         "url": "ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git"
       },
@@ -489,7 +453,6 @@
         "home-manager": "home-manager",
         "lanzaboote": "lanzaboote",
         "nix": "nix",
-        "nixos-generators": "nixos-generators",
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs",
         "nixvim": "nixvim",
