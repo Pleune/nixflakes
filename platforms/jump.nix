@@ -69,7 +69,7 @@ in
 
   nixflakes.makeUser = true;
   nixuserflakes = {
-    theme = "none";
+    theme.name = "none";
     gui = false;
     daily = false;
   };

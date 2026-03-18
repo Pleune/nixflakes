@@ -13,6 +13,7 @@
       noto-fonts-color-emoji
       roboto
       nerd-fonts.iosevka
+      nerd-fonts.iosevka-term
     ];
     fonts = {
       fontconfig.defaultFonts = {

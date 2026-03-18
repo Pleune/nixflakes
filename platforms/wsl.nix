@@ -65,7 +65,7 @@
     home.file.".vscode-server/server-env-setup".text = "PATH=$PATH:/run/current-system/sw/bin/";
 
     nixflakes = {
-      theme = "wsl";
+      theme.name = "wsl";
       gui = false;
       daily = false;
     };

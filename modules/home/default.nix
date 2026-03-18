@@ -9,10 +9,10 @@ with lib; {
 
   config = {
     nixflakes = {
-      gui = mkDefault true;
-      daily = mkDefault true;
-      programs.mitchvim.enable = mkDefault true;
-      gpg = mkDefault true;
+      gui = mkDefault false;
+      daily = mkDefault false;
+      programs.mitchvim.enable = mkDefault false;
+      gpg = mkDefault false;
     };
   };
 

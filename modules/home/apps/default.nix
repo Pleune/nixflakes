@@ -5,6 +5,10 @@
   ...
 }:
 {
+  imports = [
+    ./neovim
+  ];
+
   config = lib.mkMerge [
     (lib.mkIf config.nixflakes.games {
       home.packages = with pkgs; [
@@ -26,7 +30,7 @@
         discord
         prismlauncher
         spotify
-        trilium-next-desktop
+        trilium-desktop
         xournalpp
         signal-desktop
         krita
@@ -46,7 +50,6 @@
         awscli.enable = true;
         firefox = {
           enable = true;
-          nativeMessagingHosts = [ pkgs.gnome-browser-connector ];
         };
       };
     })

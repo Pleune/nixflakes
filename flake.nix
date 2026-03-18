@@ -64,13 +64,15 @@
       ...
     }:
     flake-parts.lib.mkFlake { inherit self inputs; } (
-      { withSystem, lib, ... }:
+      { withSystem, ... }:
       let
         sysdef = {
           username = "mitch";
           userFullName = "Mitchell Pleune";
           userEmail = "mitchpleune@gmail.com";
         };
+
+        # Used in makeSystem, and the live iso
         specialArgs =
           ctx: hostName:
           {
@@ -84,7 +86,7 @@
 
         makePkgs =
           system: march: mtune:
-          import self.inputs.nixpkgs {
+          import inputs.nixpkgs {
             localSystem = {
               inherit system;
             }
@@ -122,8 +124,8 @@
           nixosConfigurations =
             let
               makeSystem =
-                name:
-                withSystem "x86_64-linux" (
+                system: name:
+                withSystem system (
                   ctx:
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
@@ -135,23 +137,23 @@
                 );
             in
             {
-              live-iso = makeSystem "live";
+              live-iso = makeSystem "x86_64-linux" "live";
 
-              lxc = makeSystem "lxc";
-              surface = makeSystem "surface";
-              wsl = makeSystem "wsl";
+              lxc = makeSystem "x86_64-linux" "lxc";
+              surface = makeSystem "x86_64-linux" "surface";
+              wsl = makeSystem "x86_64-linux" "wsl";
 
               # homelab
-              git = makeSystem "git";
-              git-runner1 = makeSystem "git-runner1";
-              immich = makeSystem "immich";
-              jellyfin = makeSystem "jellyfin";
-              jump = makeSystem "jump";
-              llm = makeSystem "llm";
-              nas = makeSystem "nas";
-              nextcloud = makeSystem "nextcloud";
-              notes = makeSystem "notes";
-              paperless = makeSystem "paperless";
+              git = makeSystem "x86_64-linux" "git";
+              git-runner1 = makeSystem "x86_64-linux" "git-runner1";
+              immich = makeSystem "x86_64-linux" "immich";
+              jellyfin = makeSystem "x86_64-linux" "jellyfin";
+              jump = makeSystem "x86_64-linux" "jump";
+              llm = makeSystem "x86_64-linux" "llm";
+              nas = makeSystem "x86_64-linux" "nas";
+              nextcloud = makeSystem "x86_64-linux" "nextcloud";
+              notes = makeSystem "x86_64-linux" "notes";
+              paperless = makeSystem "x86_64-linux" "paperless";
             };
 
           deploy.nodes =
@@ -205,7 +207,7 @@
 
             packages = {
               mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
-                import ./modules/home/core/terminal/nvim/options.nix { inherit pkgs; }
+                import ./modules/home/apps/neovim/options.nix { inherit pkgs; }
               );
             };
 

@@ -11,6 +11,10 @@
       enableFishIntegration = true;
     };
 
+    ripgrep-all = {
+      enable = true;
+    };
+
     bash = {
       enable = true;
       enableCompletion = true;
@@ -33,6 +37,14 @@
       interactiveShellInit = ''
         set fish_greeting # Disable greeting
         set sponge_regex_patterns '(?:\d{1,3}\.){3}\d{1,3}'
+
+        # don't add to history
+        set -l history_blocklist \
+          '^\s*(rm|reboot|shutdown|poweroff|halt|dd|ls)\b' \
+          'of=/dev' \
+          '/dev/sd' \
+          '/dev/nvme' \
+          '\brm\b.*\b-rf\b'
       '';
       shellAliases = {
         # cd = "z";
@@ -111,6 +123,40 @@
             end
             command colcon $argv
           '';
+        };
+
+        fish_should_add_to_history = {
+          description = "Filter fish history using a list of regexes (skip dangerous/noisy commands)";
+          body = ''
+            for r in $history_blocklist
+              if string match -rq -- "$r" -- "$argv"
+                return 1
+              end
+            end
+            return 0
+          '';
+        };
+
+        rgai = {
+          description = "ripgrep-all + fzf + open in vim";
+          body = ''
+            set -l initial_query (string join " " -- $argv)
+            set -l rg_prefix "rga --column --line-number --no-heading --color=always --smart-case "
+
+            fzf --ansi --disabled --query "$initial_query" \
+              --bind "start:reload:$rg_prefix {q} || true" \
+              --bind "change:reload:sleep 0.1; $rg_prefix {q} || true" \
+              --delimiter : \
+              --preview "bat --color=always {1} --highlight-line {2}" \
+              --preview-window "up,60%,border-bottom,+{2}+3/3,~3" \
+              --bind "enter:become(vim {1} +{2})"
+          '';
+        };
+      };
+
+      binds = {
+        "ctrl-g" = {
+          command = "rgai";
         };
       };
     };

@@ -6,7 +6,26 @@
 }:
 {
   config =
-    lib.mkIf (config.nixflakes.theme == "gnome") {
+    let
+      extensions = with pkgs.gnomeExtensions; [
+        user-themes
+        tray-icons-reloaded
+        vitals
+        sound-output-device-chooser
+        space-bar
+        x11-gestures
+        wireless-hid
+        rounded-window-corners-reborn
+        alphabetical-app-grid
+        blur-my-shell
+        clipboard-indicator
+        gsconnect
+        hide-top-bar
+        home-assistant-extension
+        drop-down-terminal
+      ];
+    in
+    lib.mkIf (config.nixflakes.theme.name == "gnome") {
       gtk = {
         enable = true;
 
@@ -45,49 +64,21 @@
           color-scheme = "prefer-dark";
         };
 
-        "org/gnome/shell" = {
+        "org/gnome/shell" = lib.mkIf config.nixflakes.theme.installGnomeExtensions {
           disable-user-extensions = false;
-
-          # `gnome-extensions list` for a list
-          enabled-extensions = [
-            "user-theme@gnome-shell-extensions.gcampax.github.com"
-            "trayIconsReloaded@selfmade.pl"
-            "Vitals@CoreCoding.com"
-            "sound-output-device-chooser@kgshank.net"
-            "space-bar@luchrioh"
-            #"rounded-window-corners@yilozt"
-            "wireless-hid@chlumskyvaclav.gmail.com"
-            "x11gestures@joseexposito.github.io"
-            "AlphabeticalAppGrid@stuarthayhurst"
-            "blur-my-shell@aunetx"
-            "clipboard-indicator@tudmotu.com"
-            "gsconnect@andyholmes.github.io"
-            "hidetopbar@mathieu.bidon.ca"
-            "hass-gshell@geoph9-on-github"
-          ];
+          enabled-extensions = lib.map (ext: ext.extensionUuid) extensions;
         };
       };
 
-      home.packages = with pkgs; [
-        gnomeExtensions.user-themes
-        gnomeExtensions.tray-icons-reloaded
-        gnomeExtensions.vitals
-        gnomeExtensions.sound-output-device-chooser
-        gnomeExtensions.space-bar
-        gnomeExtensions.x11-gestures
-        gnomeExtensions.wireless-hid
-        #gnomeExtensions.rounded-window-corners
-        gnomeExtensions.alphabetical-app-grid
-        gnomeExtensions.blur-my-shell
-        gnomeExtensions.clipboard-indicator
-        gnomeExtensions.gsconnect
-        gnomeExtensions.hide-top-bar
-        gnomeExtensions.home-assistant-extension
-
-        gnome-tweaks
-        palenight-theme
-      ];
+      home.packages =
+        with pkgs;
+        [
+          gnome-tweaks
+          palenight-theme
+        ]
+        ++ lib.optionals config.nixflakes.theme.installGnomeExtensions extensions;
 
       services.gpg-agent.pinentry.package = lib.mkForce pkgs.pinentry-gnome3;
+      programs.firefox.nativeMessagingHosts = [ pkgs.gnome-browser-connector ];
     };
 }

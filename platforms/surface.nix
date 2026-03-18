@@ -139,7 +139,7 @@
     #printing.enable = true;
   };
   home-manager.users.${username}.nixflakes = {
-    theme = "gnome";
+    theme.name = "gnome";
   };
 
   programs.steam.enable = true;

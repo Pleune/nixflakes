@@ -54,7 +54,7 @@
 
   home-manager.users.${username} = {
     nixflakes = {
-      theme = "gnome";
+      theme.name = "gnome";
       gui = true;
       daily = false;
     };

@@ -17,7 +17,7 @@
 
   home-manager.users.${username} = {
     nixflakes = {
-      theme = "none";
+      theme.name = "none";
       gui = false;
       daily = false;
     };

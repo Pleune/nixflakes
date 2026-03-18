@@ -14,6 +14,7 @@
           name = userFullName;
           email = userEmail;
         };
+        push.autoSetupRemote = true;
       };
     };
 
