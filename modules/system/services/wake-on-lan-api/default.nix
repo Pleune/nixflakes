@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  packages,
   pkgs,
   ...
 }:
@@ -54,7 +53,7 @@ with lib;
           User = cfg.user;
         };
         script = ''
-          ${packages.wol_api}/bin/wol_api --port ${toString cfg.port}
+          ${pkgs.wol_api}/bin/wol_api --port ${toString cfg.port}
         '';
       };
     };

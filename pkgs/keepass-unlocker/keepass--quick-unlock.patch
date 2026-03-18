@@ -1,0 +1,380 @@
+From f22d2a2f0933f80e1dc2d1b4785120558fdab91c Mon Sep 17 00:00:00 2001
+From: Philipp <philipp@f1ndus.de>
+Date: Sat, 12 Apr 2025 00:18:31 +0200
+Subject: [PATCH 1/4] Added new cli flag to enable quick unlock even when
+ --pw-stdin is enabled
+
+---
+ src/gui/DatabaseOpenWidget.cpp |  4 ++--
+ src/gui/DatabaseOpenWidget.h   |  2 +-
+ src/gui/DatabaseTabWidget.cpp  |  5 +++--
+ src/gui/DatabaseTabWidget.h    |  3 ++-
+ src/gui/DatabaseWidget.cpp     | 11 +++++++----
+ src/gui/DatabaseWidget.h       |  7 +++++--
+ src/gui/MainWindow.cpp         |  7 +++++--
+ src/gui/MainWindow.h           |  9 ++++++---
+ src/main.cpp                   |  5 ++++-
+ 9 files changed, 35 insertions(+), 18 deletions(-)
+
+diff --git a/src/gui/DatabaseOpenWidget.cpp b/src/gui/DatabaseOpenWidget.cpp
+index 7cf5dcb151..8506189d4e 100644
+--- a/src/gui/DatabaseOpenWidget.cpp
++++ b/src/gui/DatabaseOpenWidget.cpp
+@@ -326,7 +326,7 @@ QString DatabaseOpenWidget::filename()
+     return m_filename;
+ }
+ 
+-void DatabaseOpenWidget::enterKey(const QString& pw, const QString& keyFile)
++void DatabaseOpenWidget::enterKey(const QString& pw, const QString& keyFile, bool explicitQuickUnlock)
+ {
+     if (unlockingDatabase()) {
+         qWarning("Ignoring unlock request for %s because of running unlock action.", qPrintable(m_filename));
+@@ -335,7 +335,7 @@ void DatabaseOpenWidget::enterKey(const QString& pw, const QString& keyFile)
+ 
+     m_ui->editPassword->setText(pw);
+     m_ui->keyFileLineEdit->setText(keyFile);
+-    m_blockQuickUnlock = true;
++    m_blockQuickUnlock = !explicitQuickUnlock;
+     openDatabase();
+ }
+ 
+diff --git a/src/gui/DatabaseOpenWidget.h b/src/gui/DatabaseOpenWidget.h
+index d730634b30..37cfb2fc07 100644
+--- a/src/gui/DatabaseOpenWidget.h
++++ b/src/gui/DatabaseOpenWidget.h
+@@ -49,7 +49,7 @@ class DatabaseOpenWidget : public DialogyWidget
+     void load(const QString& filename);
+     QString filename();
+     void clearForms();
+-    void enterKey(const QString& pw, const QString& keyFile);
++    void enterKey(const QString& pw, const QString& keyFile, bool explicitQuickUnlock);
+     QSharedPointer<Database> database();
+     bool unlockingDatabase();
+     void showMessage(const QString& text, MessageWidget::MessageType type, int autoHideTimeout);
+diff --git a/src/gui/DatabaseTabWidget.cpp b/src/gui/DatabaseTabWidget.cpp
+index 2bf18071dc..a20bf34d43 100644
+--- a/src/gui/DatabaseTabWidget.cpp
++++ b/src/gui/DatabaseTabWidget.cpp
+@@ -156,7 +156,8 @@ void DatabaseTabWidget::openDatabase()
+ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
+                                        bool inBackground,
+                                        const QString& password,
+-                                       const QString& keyfile)
++                                       const QString& keyfile,
++                                       bool explicitQuickUnlock)
+ {
+     QString cleanFilePath = QDir::toNativeSeparators(filePath);
+     QFileInfo fileInfo(cleanFilePath);
+@@ -173,7 +174,7 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
+         Q_ASSERT(dbWidget);
+         if (dbWidget
+             && dbWidget->database()->canonicalFilePath().compare(canonicalFilePath, FILE_CASE_SENSITIVE) == 0) {
+-            dbWidget->performUnlockDatabase(password, keyfile);
++            dbWidget->performUnlockDatabase(password, keyfile, explicitQuickUnlock);
+             if (!inBackground) {
+                 // switch to existing tab if file is already open
+                 setCurrentIndex(indexOf(dbWidget));
+diff --git a/src/gui/DatabaseTabWidget.h b/src/gui/DatabaseTabWidget.h
+index a5074a84c4..51a3f913e4 100644
+--- a/src/gui/DatabaseTabWidget.h
++++ b/src/gui/DatabaseTabWidget.h
+@@ -53,7 +53,8 @@ public slots:
+     void addDatabaseTab(const QString& filePath,
+                         bool inBackground = false,
+                         const QString& password = {},
+-                        const QString& keyfile = {});
++                        const QString& keyfile = {},
++                        bool explicitQuickUnlock = false);
+     void addDatabaseTab(DatabaseWidget* dbWidget, bool inBackground = false);
+     bool closeDatabaseTab(int index);
+     bool closeDatabaseTab(DatabaseWidget* dbWidget);
+diff --git a/src/gui/DatabaseWidget.cpp b/src/gui/DatabaseWidget.cpp
+index 2afde49fee..74d4c4e889 100644
+--- a/src/gui/DatabaseWidget.cpp
++++ b/src/gui/DatabaseWidget.cpp
+@@ -1632,10 +1632,13 @@ void DatabaseWidget::switchToOpenDatabase(const QString& filePath)
+     setCurrentWidget(m_databaseOpenWidget);
+ }
+ 
+-void DatabaseWidget::switchToOpenDatabase(const QString& filePath, const QString& password, const QString& keyFile)
++void DatabaseWidget::switchToOpenDatabase(const QString& filePath,
++                                          const QString& password,
++                                          const QString& keyFile,
++                                          bool explicitQuickUnlock)
+ {
+     switchToOpenDatabase(filePath);
+-    m_databaseOpenWidget->enterKey(password, keyFile);
++    m_databaseOpenWidget->enterKey(password, keyFile, explicitQuickUnlock);
+ }
+ 
+ void DatabaseWidget::switchToEntryEdit()
+@@ -1720,7 +1723,7 @@ void DatabaseWidget::removePasskeyFromEntry()
+ }
+ #endif
+ 
+-void DatabaseWidget::performUnlockDatabase(const QString& password, const QString& keyfile)
++void DatabaseWidget::performUnlockDatabase(const QString& password, const QString& keyfile, bool explicitQuickUnlock)
+ {
+     if (password.isEmpty() && keyfile.isEmpty()) {
+         return;
+@@ -1728,7 +1731,7 @@ void DatabaseWidget::performUnlockDatabase(const QString& password, const QStrin
+ 
+     if (!m_db->isInitialized() || isLocked()) {
+         switchToOpenDatabase();
+-        m_databaseOpenWidget->enterKey(password, keyfile);
++        m_databaseOpenWidget->enterKey(password, keyfile, explicitQuickUnlock);
+     }
+ }
+ 
+diff --git a/src/gui/DatabaseWidget.h b/src/gui/DatabaseWidget.h
+index d624a7e613..3dc2f52d85 100644
+--- a/src/gui/DatabaseWidget.h
++++ b/src/gui/DatabaseWidget.h
+@@ -243,8 +243,11 @@ public slots:
+ #endif
+     void switchToOpenDatabase();
+     void switchToOpenDatabase(const QString& filePath);
+-    void switchToOpenDatabase(const QString& filePath, const QString& password, const QString& keyFile);
+-    void performUnlockDatabase(const QString& password, const QString& keyfile = {});
++    void switchToOpenDatabase(const QString& filePath,
++                              const QString& password,
++                              const QString& keyFile,
++                              bool explicitQuickUnlock);
++    void performUnlockDatabase(const QString& password, const QString& keyfile = {}, bool explicitQuickUnlock = false);
+     void emptyRecycleBin();
+ 
+     // Search related slots
+diff --git a/src/gui/MainWindow.cpp b/src/gui/MainWindow.cpp
+index 25b96c5ae7..f3851230f2 100644
+--- a/src/gui/MainWindow.cpp
++++ b/src/gui/MainWindow.cpp
+@@ -887,9 +887,12 @@ void MainWindow::clearLastDatabases()
+     }
+ }
+ 
+-void MainWindow::openDatabase(const QString& filePath, const QString& password, const QString& keyfile)
++void MainWindow::openDatabase(const QString& filePath,
++                              const QString& password,
++                              const QString& keyfile,
++                              bool explicitQuickUnlock)
+ {
+-    m_ui->tabWidget->addDatabaseTab(filePath, false, password, keyfile);
++    m_ui->tabWidget->addDatabaseTab(filePath, false, password, keyfile, explicitQuickUnlock);
+ }
+ 
+ void MainWindow::updateMenuActionState()
+diff --git a/src/gui/MainWindow.h b/src/gui/MainWindow.h
+index 8effd06f43..52237a714e 100644
+--- a/src/gui/MainWindow.h
++++ b/src/gui/MainWindow.h
+@@ -63,14 +63,17 @@ class MainWindow : public QMainWindow
+         PasswordGeneratorScreen = 3
+     };
+ 
+-signals:
++    signals:
+     void databaseUnlocked(DatabaseWidget* dbWidget);
+     void databaseLocked(DatabaseWidget* dbWidget);
+     void activeDatabaseChanged(DatabaseWidget* dbWidget);
+     void databaseUnlockDialogFinished(bool accepted, DatabaseWidget* dbWidget);
+ 
+-public slots:
+-    void openDatabase(const QString& filePath, const QString& password = {}, const QString& keyfile = {});
++    public slots:
++        void openDatabase(const QString& filePath,
++            const QString& password = {},
++            const QString& keyfile = {},
++            bool explicitQuickUnlock = false);
+     void appExit();
+     bool isHardwareKeySupported();
+     bool refreshHardwareKeys();
+diff --git a/src/main.cpp b/src/main.cpp
+index 2c4da4c1f6..8a7e6e6f8a 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -82,6 +82,7 @@ int main(int argc, char** argv)
+     QCommandLineOption lockOption("lock", QObject::tr("lock all open databases"));
+     QCommandLineOption keyfileOption("keyfile", QObject::tr("key file of the database"), "keyfile");
+     QCommandLineOption pwstdinOption("pw-stdin", QObject::tr("read password of the database from stdin"));
++    QCommandLineOption explicitQuickUnlockOption("quick-unlock", QObject::tr("enable quick unlock also when --pw-stdin is set"));
+     QCommandLineOption allowScreenCaptureOption("allow-screencapture",
+                                                 QObject::tr("allow screenshots and app recording (Windows/macOS)"));
+     QCommandLineOption startMinimized("minimized", QObject::tr("start minimized to the system tray"));
+@@ -97,6 +98,7 @@ int main(int argc, char** argv)
+     parser.addOption(debugInfoOption);
+     parser.addOption(allowScreenCaptureOption);
+     parser.addOption(startMinimized);
++    parser.addOption(explicitQuickUnlockOption);
+ 
+     parser.process(app);
+ 
+@@ -196,6 +198,7 @@ int main(int argc, char** argv)
+     mainWindow.setAllowScreenCapture(parser.isSet(allowScreenCaptureOption));
+ 
+     const bool pwstdin = parser.isSet(pwstdinOption);
++    const bool explicitQuickUnlock = parser.isSet(explicitQuickUnlockOption);
+     for (const QString& filename : fileNames) {
+         QString password;
+         if (pwstdin) {
+@@ -205,7 +208,7 @@ int main(int argc, char** argv)
+             out << QObject::tr("Database password: ") << Qt::flush;
+             password = Utils::getPassword();
+         }
+-        mainWindow.openDatabase(filename, password, parser.value(keyfileOption));
++        mainWindow.openDatabase(filename, password, parser.value(keyfileOption), explicitQuickUnlock);
+     }
+ 
+     // start minimized if configured
+
+From 4661dac0f7ce0cd480246cab856eedaf5c3e25bd Mon Sep 17 00:00:00 2001
+From: Philipp <philipp@f1ndus.de>
+Date: Sat, 12 Apr 2025 00:54:02 +0200
+Subject: [PATCH 2/4] Added new cli flag to enable quick unlock even when
+ --pw-stdin is enabled
+
+---
+ share/translations/keepassxc_en.ts |  6 +++++-
+ src/gui/MainWindow.h               | 12 ++++++------
+ src/main.cpp                       |  3 ++-
+ 3 files changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/share/translations/keepassxc_en.ts b/share/translations/keepassxc_en.ts
+index f974db170b..b3696a21c6 100644
+--- a/share/translations/keepassxc_en.ts
++++ b/share/translations/keepassxc_en.ts
+@@ -4192,7 +4192,7 @@ Error: %1</source>
+         <translation type="unfinished"></translation>
+     </message>
+     <message>
+-        <source>Attachment &quot;%1&quot; already exists. 
++        <source>Attachment &quot;%1&quot; already exists.
+ Would you like to overwrite the existing attachment?</source>
+         <translation type="unfinished"></translation>
+     </message>
+@@ -9433,6 +9433,10 @@ This option is deprecated, use --set-key-file instead.</source>
+         <source>Confirm Replace Entry References</source>
+         <translation type="unfinished"></translation>
+     </message>
++    <message>
++        <source>enable quick unlock also when --pw-stdin is set</source>
++        <translation type="unfinished"></translation>
++    </message>
+ </context>
+ <context>
+     <name>QtIOCompressor</name>
+diff --git a/src/gui/MainWindow.h b/src/gui/MainWindow.h
+index 52237a714e..2ff93fda9c 100644
+--- a/src/gui/MainWindow.h
++++ b/src/gui/MainWindow.h
+@@ -63,17 +63,17 @@ class MainWindow : public QMainWindow
+         PasswordGeneratorScreen = 3
+     };
+ 
+-    signals:
++signals:
+     void databaseUnlocked(DatabaseWidget* dbWidget);
+     void databaseLocked(DatabaseWidget* dbWidget);
+     void activeDatabaseChanged(DatabaseWidget* dbWidget);
+     void databaseUnlockDialogFinished(bool accepted, DatabaseWidget* dbWidget);
+ 
+-    public slots:
+-        void openDatabase(const QString& filePath,
+-            const QString& password = {},
+-            const QString& keyfile = {},
+-            bool explicitQuickUnlock = false);
++public slots:
++    void openDatabase(const QString& filePath,
++                      const QString& password = {},
++                      const QString& keyfile = {},
++                      bool explicitQuickUnlock = false);
+     void appExit();
+     bool isHardwareKeySupported();
+     bool refreshHardwareKeys();
+diff --git a/src/main.cpp b/src/main.cpp
+index 8a7e6e6f8a..ae5e215243 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -82,7 +82,8 @@ int main(int argc, char** argv)
+     QCommandLineOption lockOption("lock", QObject::tr("lock all open databases"));
+     QCommandLineOption keyfileOption("keyfile", QObject::tr("key file of the database"), "keyfile");
+     QCommandLineOption pwstdinOption("pw-stdin", QObject::tr("read password of the database from stdin"));
+-    QCommandLineOption explicitQuickUnlockOption("quick-unlock", QObject::tr("enable quick unlock also when --pw-stdin is set"));
++    QCommandLineOption explicitQuickUnlockOption("quick-unlock",
++                                                 QObject::tr("enable quick unlock also when --pw-stdin is set"));
+     QCommandLineOption allowScreenCaptureOption("allow-screencapture",
+                                                 QObject::tr("allow screenshots and app recording (Windows/macOS)"));
+     QCommandLineOption startMinimized("minimized", QObject::tr("start minimized to the system tray"));
+
+From ff4c1974dda0d6e946d4289622ed7ce575d805cd Mon Sep 17 00:00:00 2001
+From: Mitchell Pleune <mitchpleune@gmail.com>
+Date: Thu, 19 Feb 2026 20:55:05 +0000
+Subject: [PATCH 3/4] expose --quick-unlock to dbus
+
+---
+ src/gui/org.keepassxc.KeePassXC.MainWindow.xml | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/gui/org.keepassxc.KeePassXC.MainWindow.xml b/src/gui/org.keepassxc.KeePassXC.MainWindow.xml
+index 6510181494..2265b3b3fc 100644
+--- a/src/gui/org.keepassxc.KeePassXC.MainWindow.xml
++++ b/src/gui/org.keepassxc.KeePassXC.MainWindow.xml
+@@ -1,6 +1,12 @@
+ <!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+ <node>
+   <interface name="org.keepassxc.KeePassXC.MainWindow">
++    <method name="openDatabase">
++      <arg name="fileName" type="s" direction="in"/>
++      <arg name="pw" type="s" direction="in"/>
++      <arg name="keyFile" type="s" direction="in"/>
++      <arg name="enableQuickUnlock" type="b" direction="in"/>
++    </method>
+     <method name="openDatabase">
+       <arg name="fileName" type="s" direction="in"/>
+       <arg name="pw" type="s" direction="in"/>
+
+From bbb02c2c2093edcfc8404f1c3cdef4cbe36193e6 Mon Sep 17 00:00:00 2001
+From: Mitchell Pleune <mitchpleune@gmail.com>
+Date: Thu, 19 Feb 2026 21:45:33 +0000
+Subject: [PATCH 4/4] don't ask quickunlock for password if password text is
+ not empty
+
+---
+ src/gui/DatabaseOpenWidget.cpp | 4 +++-
+ src/gui/DatabaseTabWidget.cpp  | 2 +-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/gui/DatabaseOpenWidget.cpp b/src/gui/DatabaseOpenWidget.cpp
+index 8506189d4e..bb6f8f5915 100644
+--- a/src/gui/DatabaseOpenWidget.cpp
++++ b/src/gui/DatabaseOpenWidget.cpp
+@@ -345,6 +345,8 @@ void DatabaseOpenWidget::openDatabase()
+     bool blockQuickUnlock = m_blockQuickUnlock || isOnQuickUnlockScreen();
+     m_blockQuickUnlock = false;
+ 
++
++
+     setUserInteractionLock(true);
+     m_ui->editPassword->setShowPassword(false);
+     m_ui->messageWidget->hide();
+@@ -434,7 +436,7 @@ QSharedPointer<CompositeKey> DatabaseOpenWidget::buildDatabaseKey()
+ {
+     auto databaseKey = QSharedPointer<CompositeKey>::create();
+ 
+-    if (!m_db.isNull() && canPerformQuickUnlock()) {
++    if (!m_db.isNull() && canPerformQuickUnlock() && m_ui->editPassword->text().isEmpty() && m_ui->keyFileLineEdit->text().isEmpty()) {
+         // try to retrieve the stored password using Windows Hello
+         QByteArray keyData;
+         if (!getQuickUnlock()->getKey(m_db->publicUuid(), keyData)) {
+diff --git a/src/gui/DatabaseTabWidget.cpp b/src/gui/DatabaseTabWidget.cpp
+index a20bf34d43..84728777a0 100644
+--- a/src/gui/DatabaseTabWidget.cpp
++++ b/src/gui/DatabaseTabWidget.cpp
+@@ -185,7 +185,7 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
+ 
+     auto* dbWidget = new DatabaseWidget(QSharedPointer<Database>::create(cleanFilePath), this);
+     addDatabaseTab(dbWidget, inBackground);
+-    dbWidget->performUnlockDatabase(password, keyfile);
++    dbWidget->performUnlockDatabase(password, keyfile, explicitQuickUnlock);
+     updateLastDatabases(dbWidget->database());
+ }
+ 

@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  packages,
   pkgs,
   ...
 }:
@@ -78,7 +77,7 @@ with lib;
           User = cfg.user;
         };
         script = ''
-          ${packages.incus-backup-rustic}/bin/incus-backup-rustic \
+          ${pkgs.incus-backup-rustic}/bin/incus-backup-rustic \
             --incus ${config.virtualisation.incus.package}/bin/incus \
             --rustic ${pkgs.rustic}/bin/rustic \
             --mount ${pkgs.util-linux}/bin/mount \

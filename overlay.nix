@@ -13,6 +13,10 @@ let
     });
 in
 {
+  incus-backup-rustic = prev.callPackage ./pkgs/incus-backup-rustic { };
+  keepass-unlocker = prev.callPackage ./pkgs/keepass-unlocker { };
+  wol_api = prev.callPackage ./pkgs/wake-on-lan-api { };
+
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283
