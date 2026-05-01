@@ -45,7 +45,9 @@ with lib;
     home-manager = mkIf config.nixflakes.home-manager.enable {
       useUserPackages = true;
       useGlobalPkgs = true;
-      extraSpecialArgs = inputs // sysdef;
+      extraSpecialArgs = inputs // sysdef // {
+        nixosStateVersion = config.system.stateVersion;
+      };
       users.${username} = "${self}/modules/home";
     };
   };

@@ -72,7 +72,6 @@
           userEmail = "mitchpleune@gmail.com";
         };
 
-        # Used in makeSystem, and the live iso
         specialArgs =
           ctx: hostName:
           {
@@ -201,7 +200,7 @@
             pkgs,
             inputs',
             ...
-          }@ctx:
+          }:
           {
             _module.args.pkgs = makePkgs system null null;
 
