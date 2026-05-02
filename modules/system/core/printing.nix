@@ -9,7 +9,6 @@ with lib;
   options.nixflakes.printing.enable = mkEnableOption "all printing stuff";
   config = mkIf config.nixflakes.printing.enable (mkMerge [
     {
-
       environment.systemPackages = with pkgs; [ system-config-printer ];
       services.printing = {
         enable = true;

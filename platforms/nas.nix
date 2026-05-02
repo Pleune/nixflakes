@@ -3,7 +3,6 @@
   lib,
   config,
   private,
-  packages,
   username,
   ...
 }:
@@ -339,42 +338,44 @@
       ];
 
     };
-    promtail = {
-      enable = true;
-      configuration = {
-        server = {
-          http_listen_port = 3031;
-          grpc_listen_port = 0;
-        };
-        positions = {
-          filename = "/tmp/positions.yaml";
-        };
-        clients = [
-          {
-            url = "http://localhost:${toString config.services.loki.configuration.server.http_listen_port}/loki/api/v1/push";
-          }
-        ];
-        scrape_configs = [
-          {
-            job_name = "journal";
-            journal = {
-              max_age = "12h";
-              labels = {
-                job = "systemd-journal";
-                host = config.networking.hostName;
-              };
-            };
-            relabel_configs = [
-              {
-                source_labels = [ "__journal__systemd_unit" ];
-                target_label = "unit";
 
-              }
-            ];
-          }
-        ];
-      };
-    };
+    # FIXME: promtail is removed, migrate to grafana-alloy or fluent-bit
+    # promtail = {
+    #   enable = true;
+    #   configuration = {
+    #     server = {
+    #       http_listen_port = 3031;
+    #       grpc_listen_port = 0;
+    #     };
+    #     positions = {
+    #       filename = "/tmp/positions.yaml";
+    #     };
+    #     clients = [
+    #       {
+    #         url = "http://localhost:${toString config.services.loki.configuration.server.http_listen_port}/loki/api/v1/push";
+    #       }
+    #     ];
+    #     scrape_configs = [
+    #       {
+    #         job_name = "journal";
+    #         journal = {
+    #           max_age = "12h";
+    #           labels = {
+    #             job = "systemd-journal";
+    #             host = config.networking.hostName;
+    #           };
+    #         };
+    #         relabel_configs = [
+    #           {
+    #             source_labels = [ "__journal__systemd_unit" ];
+    #             target_label = "unit";
+
+    #           }
+    #         ];
+    #       }
+    #     ];
+    #   };
+    # };
 
     zfs = {
       autoScrub.enable = true;
@@ -490,7 +491,7 @@
   nixflakes.agenix.enable = true;
   age.secrets."grafana-secret-key" = {
     file = "${private.secrets}/nextcloud_admin_password.age";
-    group = config.services.grafana.group;
+    group = "grafana";
     mode = "660";
   };
   age.secrets."rustic.toml" = {
@@ -509,7 +510,7 @@
   };
   environment.systemPackages = [
     pkgs.awscli2 # needed for rustic warmup
-    packages.incus-backup-rustic
+    pkgs.incus-backup-rustic
     pkgs.pciutils
   ];
 

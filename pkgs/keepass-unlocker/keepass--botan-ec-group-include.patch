@@ -1,0 +1,12 @@
+diff --git a/src/sshagent/OpenSSHKeyGen.cpp b/src/sshagent/OpenSSHKeyGen.cpp
+index 580c795e64..b00f76aa2c 100644
+--- a/src/sshagent/OpenSSHKeyGen.cpp
++++ b/src/sshagent/OpenSSHKeyGen.cpp
+@@ -23,6 +23,7 @@
+ #include "crypto/Random.h"
+ 
+ #include <botan/ecdsa.h>
++#include <botan/ec_group.h>
+ #include <botan/ed25519.h>
+ #include <botan/rsa.h>
+ 

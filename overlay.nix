@@ -72,6 +72,22 @@ in
   pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
     (pyFinal: pyPrev: {
 
+      # fakeredis = pyPrev.fakeredis.overridePythonAttrs (old: {
+      #   postPatch =
+      #     (old.postPatch or "")
+      #     + ''
+      #       substituteInPlace fakeredis/commands_mixins/scripting_mixin.py \
+      #         --replace-fail '"5.1": "lupa.lua51"' '"5.1": "lupa.lua"' \
+      #         --replace-fail '"5.2": "lupa.lua52"' '"5.2": "lupa.lua"' \
+      #         --replace-fail '"5.3": "lupa.lua53"' '"5.3": "lupa.lua"' \
+      #         --replace-fail '"5.4": "lupa.lua54"' '"5.4": "lupa.lua"'
+      #     '';
+      # });
+
+      fastmcp = pyPrev.fastmcp.overridePythonAttrs (old: {
+        doCheck = false;
+      });
+
       # TODO: resubmit my patch as mentioned https://github.com/NixOS/nixpkgs/issues/439898#issuecomment-3441105166
       rapidocr-onnxruntime = pyPrev.rapidocr-onnxruntime.overridePythonAttrs (old: {
         disabledTests = old.disabledTests ++ [

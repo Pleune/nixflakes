@@ -138,8 +138,38 @@
     # TODO: build hang https://github.com/NixOS/nixpkgs/issues/431528#issuecomment-3175651671
     #printing.enable = true;
   };
-  home-manager.users.${username}.nixflakes = {
-    theme.name = "gnome";
+  home-manager.users.${username} = {
+    home.packages = with pkgs; [
+      parsec-bin
+      moonlight-qt
+      discord
+      prismlauncher
+      spotify
+      trilium-desktop
+      xournalpp
+      signal-desktop
+      krita
+      libreoffice
+      vscode
+    ];
+
+    programs.thunderbird = {
+      enable = true;
+      profiles.default = {
+        isDefault = true;
+        withExternalGnupg = true;
+      };
+    };
+
+    programs.awscli.enable = true;
+
+    nixflakes = {
+      theme.name = "gnome";
+      programs = {
+        firefox.enable = true;
+        keepassxc.enable = true;
+      };
+    };
   };
 
   programs.steam.enable = true;

@@ -129,14 +129,14 @@
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
                     modules = [
-                      ./modules
-                      "${./.}/platforms/${name}.nix"
+                      ./modules/system
+                      (./platforms + "/${name}.nix")
                     ];
                   }
                 );
             in
             {
-              live-iso = makeSystem "x86_64-linux" "live";
+              # live-iso = makeSystem "x86_64-linux" "live";
 
               lxc = makeSystem "x86_64-linux" "lxc";
               surface = makeSystem "x86_64-linux" "surface";
@@ -205,9 +205,10 @@
             _module.args.pkgs = makePkgs system null null;
 
             packages = {
-              mitchvim = inputs'.nixvim.legacyPackages.makeNixvim (
-                import ./modules/home/apps/neovim/options.nix { inherit pkgs; }
-              );
+              mitchvim = inputs'.nixvim.legacyPackages.makeNixvimWithModule {
+                inherit pkgs;
+                module = ./config/nixvim.nix;
+              };
             };
 
             legacyPackages = pkgs // {
@@ -222,9 +223,7 @@
               ];
             };
 
-            # for deploy-rs from pkgs
-            # checks = (deployPkgs pkgs system).deploy-rs.lib.deployChecks self.deploy;
-
+            checks = deploy-rs.lib.${system}.deployChecks self.deploy;
             formatter = inputs'.nixpkgs.legacyPackages.nixfmt;
           };
       }

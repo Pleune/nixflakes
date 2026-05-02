@@ -346,15 +346,14 @@
     };
     treesitter = {
       enable = true;
+      highlight.enable = true;
+      indent.enable = true;
+      highlight.disable = [ "latex" ];
       settings = {
-        indent.enable = true;
         ensure_installed = "all";
         highlight = {
-          enable = true;
-
           # prefer vimtex highlighting over treesitter,
           # even though it uses the legacy system
-          disable = [ "latex" ];
           additional_vim_regex_highlighting = [
             "latex"
             "markdown"
@@ -408,7 +407,7 @@
         # automatically applying them, however snippets require
         # enter to expand.
         #snippet.expand = ''function(args) require('snippy').expand_snippet(args.body); end'';
-        snippet.expand = ''function(args) require'luasnip'.lsp_expand(args.body); end'';
+        snippet.expand = "function(args) require'luasnip'.lsp_expand(args.body); end";
         mapping = {
           "<C-p>" = "cmp.mapping.select_prev_item()";
           "<C-n>" = "cmp.mapping.select_next_item()";

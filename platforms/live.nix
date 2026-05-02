@@ -56,7 +56,6 @@
     nixflakes = {
       theme.name = "gnome";
       gui = true;
-      daily = false;
     };
   };
 

@@ -1,4 +1,5 @@
 {
+  hostName,
   pkgs,
   lib,
   inputs,
@@ -6,7 +7,7 @@
   ...
 }:
 let
-  inputsPublic = (builtins.removeAttrs inputs [ "private" ]);
+  inputsPublic = (removeAttrs inputs [ "private" ]);
 in
 {
   # system = {
@@ -14,6 +15,8 @@ in
   #     ln -sv ${pkgs.path} $out/nixpkgs
   #   '';
   # };
+
+  networking.hostName = "${hostName}";
 
   # put all inputs on nix_path
   environment.etc = lib.mapAttrs' (name: flake: {
@@ -41,6 +44,27 @@ in
         "@users"
       ];
       trusted-users = [ "@wheel" ];
+
+      extra-substituters = [
+        "https://nix.pleunetowne.com"
+        "https://nix-community.cachix.org"
+        "https://cuda-maintainers.cachix.org"
+        "https://numtide.cachix.org"
+      ];
+      trusted-substituters = [
+        "https://nix.pleunetowne.com"
+        "https://nix-community.cachix.org"
+        "https://cuda-maintainers.cachix.org"
+        "https://numtide.cachix.org"
+        "https://ros.cachix.org"
+      ];
+      extra-trusted-public-keys = [
+        "git-runner1:uBsNvsIl85z2ApqcH88hIhc4F0uGl5vFmt5ohr3NZDA="
+        "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+        "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
+        "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+        "ros.cachix.org-1:dSyZxI8geDCJrwgvCOHDoAfOm5sV1wCPjBkKL+38Rvo="
+      ];
     };
 
     gc = {
@@ -52,6 +76,14 @@ in
 
   nixpkgs = {
     config.allowUnfree = true;
+    overlays = [ self.overlays.default ];
+
+
+    # FIXME: remove once incus hits 7.0
+    # see https://github.com/NixOS/nixpkgs/issues/490996 https://github.com/lxc/incus/issues/2956
+    config.permittedInsecurePackages = [
+      "minio-2025-10-15T17-29-55Z"
+    ];
   };
 
   programs.nix-ld.enable = true;

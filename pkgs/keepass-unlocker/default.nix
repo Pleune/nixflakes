@@ -30,6 +30,7 @@ stdenv.mkDerivation {
         hash = "sha256-tFCs+a8RHgk/Z9QiTa0+kpQihGnEgztQgTmW08Up0fo=";
       };
       patches = (old.patches or [ ]) ++ [
+        ./keepass--botan-ec-group-include.patch
         ./keepass--quick-unlock.patch
       ];
       buildInputs = (old.buildInputs or [ ]) ++ [

@@ -71,7 +71,6 @@ in
   nixuserflakes = {
     theme.name = "none";
     gui = false;
-    daily = false;
   };
   system.stateVersion = "24.11";
 }

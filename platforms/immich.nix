@@ -109,8 +109,6 @@ in
     openFirewall = true;
     host = "::";
     secretsFile = "${config.services.immich.mediaLocation}/env";
-    database.enableVectors = false; # old, fails with -march
-    database.enableVectorChord = true;
 
     # TODO: remove once https://nixpk.gs/pr-tracker.html?pr=444330
     machine-learning.environment.HF_XET_CACHE = "/var/cache/immich/huggingface-xet";

@@ -19,7 +19,6 @@
     nixflakes = {
       theme.name = "none";
       gui = false;
-      daily = false;
     };
   };
 

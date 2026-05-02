@@ -67,7 +67,6 @@
     nixflakes = {
       theme.name = "wsl";
       gui = false;
-      daily = false;
     };
   };
 
