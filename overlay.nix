@@ -13,9 +13,24 @@ let
     });
 in
 {
-  incus-backup-rustic = prev.callPackage ./pkgs/incus-backup-rustic { };
-  keepass-unlocker = prev.callPackage ./pkgs/keepass-unlocker { };
-  wol_api = prev.callPackage ./pkgs/wake-on-lan-api { };
+  pi-agent = final.callPackage ./pkgs/pi-agent { };
+  context-mode = final.callPackage ./pkgs/context-mode { };
+  code-review-graph = final.callPackage ./pkgs/code-review-graph { };
+  pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };
+  pi-subagents = final.callPackage ./pkgs/pi-subagents { };
+  pi-ask = final.callPackage ./pkgs/pi-ask { };
+  pi-memory = final.callPackage ./pkgs/pi-memory { };
+  pi-hermes-memory = final.callPackage ./pkgs/pi-hermes-memory { };
+  pi-quotas = final.callPackage ./pkgs/pi-quotas { };
+  pi-token-burden = final.callPackage ./pkgs/pi-token-burden { };
+  rpiv-ask-user-question = final.callPackage ./pkgs/rpiv-mono/rpiv-ask-user-question { };
+  rpiv-btw = final.callPackage ./pkgs/rpiv-mono/rpiv-btw { };
+  incus-backup-rustic = final.callPackage ./pkgs/incus-backup-rustic { };
+  keepass-unlocker = final.callPackage ./pkgs/keepass-unlocker { };
+  wol_api = final.callPackage ./pkgs/wake-on-lan-api { };
+  rpiv-todo = final.callPackage ./pkgs/rpiv-mono/rpiv-todo { };
+  rpiv-voice = final.callPackage ./pkgs/rpiv-mono/rpiv-voice { };
+  rpiv-warp = final.callPackage ./pkgs/rpiv-mono/rpiv-warp { };
 
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473

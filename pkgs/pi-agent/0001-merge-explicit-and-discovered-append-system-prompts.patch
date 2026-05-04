@@ -1,0 +1,61 @@
+From e3f4d32c18db55d4ded0b54020c4b4fe48380d2c Mon Sep 17 00:00:00 2001
+From: Pi Agent <pi@example.invalid>
+Date: Thu, 14 May 2026 14:20:22 -0400
+Subject: [PATCH] Merge explicit and discovered append system prompts
+
+---
+ .../coding-agent/src/core/resource-loader.ts  |  8 +++++---
+ .../coding-agent/test/resource-loader.test.ts | 19 +++++++++++++++++++
+ 2 files changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
+index 338daf7..c857bd2 100644
+--- a/packages/coding-agent/src/core/resource-loader.ts
++++ b/packages/coding-agent/src/core/resource-loader.ts
+@@ -464,9 +464,11 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 		);
+ 		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
+ 
+-		const appendSources =
+-			this.appendSystemPromptSource ??
+-			(this.discoverAppendSystemPromptFile() ? [this.discoverAppendSystemPromptFile()!] : []);
++		const discoveredAppendSystemPrompt = this.discoverAppendSystemPromptFile();
++		const appendSources = [
++			...(this.appendSystemPromptSource ?? []),
++			...(discoveredAppendSystemPrompt ? [discoveredAppendSystemPrompt] : []),
++		];
+ 		const baseAppend = appendSources
+ 			.map((s) => resolvePromptInput(s, "append system prompt"))
+ 			.filter((s): s is string => s !== undefined);
+diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
+index 01adc9b..5acf7e5 100644
+--- a/packages/coding-agent/test/resource-loader.test.ts
++++ b/packages/coding-agent/test/resource-loader.test.ts
+@@ -338,6 +338,25 @@ Content`,
+ 
+ 			expect(loader.getAppendSystemPrompt()).toContain("Additional instructions.");
+ 		});
++
++		it("should merge explicit append system prompts with discovered APPEND_SYSTEM.md", async () => {
++			const piDir = join(cwd, ".pi");
++			mkdirSync(piDir, { recursive: true });
++			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Discovered instructions.");
++
++			const loader = new DefaultResourceLoader({
++				cwd,
++				agentDir,
++				appendSystemPrompt: ["Explicit instructions.", "More explicit instructions."],
++			});
++			await loader.reload();
++
++			expect(loader.getAppendSystemPrompt()).toEqual([
++				"Explicit instructions.",
++				"More explicit instructions.",
++				"Discovered instructions.",
++			]);
++		});
+ 	});
+ 
+ 	describe("extendResources", () => {
+-- 
+2.53.0

@@ -43,6 +43,10 @@
       inputs.home-manager.follows = "home-manager";
     };
 
+    jail-nix = {
+      url = "sourcehut:~alexdavid/jail.nix";
+    };
+
     nixvim = {
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -129,7 +133,8 @@
                   inputs.nixpkgs.lib.nixosSystem {
                     specialArgs = specialArgs ctx name;
                     modules = [
-                      ./modules/system
+                      ./modules/nixos
+                      ./config/nixos
                       (./platforms + "/${name}.nix")
                     ];
                   }
@@ -204,12 +209,34 @@
           {
             _module.args.pkgs = makePkgs system null null;
 
-            packages = {
-              mitchvim = inputs'.nixvim.legacyPackages.makeNixvimWithModule {
-                inherit pkgs;
-                module = ./config/nixvim.nix;
+            packages =
+              let
+                jailLib = import ./lib/jail {
+                  inherit pkgs;
+                  jail-nix = inputs.jail-nix;
+                };
+                piAgentLib = import ./lib/pi-agent { lib = pkgs.lib; };
+                mitchpiProfile = import ./config/pi-agent/profile.nix { inherit pkgs; };
+                mitchpiInventory = piAgentLib.inventoryFromProfile {
+                  inherit pkgs;
+                  profile = mitchpiProfile;
+                };
+                jail = jailLib.extend;
+              in
+              {
+                mitchvim = inputs'.nixvim.legacyPackages.makeNixvimWithModule {
+                  inherit pkgs;
+                  module = import ./config/nixvim/options.nix { inherit pkgs; };
+                };
+
+                # Sandboxed pi-agent with network access and write access to current directory only
+                mitchpi = jail "pi" pkgs.pi-agent (
+                  piAgentLib.jailProfile {
+                    inherit jail;
+                    inventory = mitchpiInventory;
+                  }
+                );
               };
-            };
 
             legacyPackages = pkgs // {
               alderlake = makePkgs system "alderlake" "alderlake"; # for nas systems
