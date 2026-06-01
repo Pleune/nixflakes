@@ -20,6 +20,7 @@ with lib;
   };
 
   imports = [
+    ../../modules/home-manager
     ./core/nix
     ./core/gpg
     ./services/apt-cacher-ng
