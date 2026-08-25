@@ -1,12 +1,12 @@
 { lib, config, ... }:
 with lib;
 {
-  options.nixflakes.local_gitea.enable = mkEnableOption "Local git server";
-  config = mkIf config.nixflakes.local_gitea.enable (mkMerge [
+  options.nixflakes.services.localGit.enable = mkEnableOption "Local git server";
+  config = mkIf config.nixflakes.services.localGit.enable (mkMerge [
     {
-      services.gitea = {
+      services.forgejo = {
         enable = true;
-        appName = "Local Gitea";
+        appName = "Local Forgejo";
         lfs.enable = true;
         settings.server = {
           DOMAIN = "localhost";
@@ -14,7 +14,6 @@ with lib;
           HTTP_PORT = 3001;
         };
       };
-
     }
   ]);
 }

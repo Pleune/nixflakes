@@ -10,6 +10,6 @@
     ./network/mdns
     ./network/networkmanager
     ./network/ssl
-    ./services/local-gitea
+    ./services/local-git
   ];
 }
