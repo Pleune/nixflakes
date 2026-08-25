@@ -16,6 +16,7 @@ in
   #pi-agent = final.callPackage ./pkgs/pi-agent { };
   context-mode = final.callPackage ./pkgs/context-mode { };
   code-review-graph = final.callPackage ./pkgs/code-review-graph { };
+  trilium-git-sync = final.callPackage ./pkgs/trilium-git-sync { };
   pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };
   pi-subagents = final.callPackage ./pkgs/pi-subagents { };
   pi-ask = final.callPackage ./pkgs/pi-ask { };

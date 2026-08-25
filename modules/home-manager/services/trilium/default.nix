@@ -14,7 +14,7 @@ let
     noAuthentication=${lib.boolToString cfg.noAuthentication}
 
     [Network]
-    host=${cfg.host}
+    host=${cfg.bindAddress}
     port=${toString cfg.port}
     https=false
   '';
@@ -72,11 +72,11 @@ in
       '';
     };
 
-    host = mkOption {
+    bindAddress = mkOption {
       type = types.str;
       default = "127.0.0.1";
       description = ''
-        Host address for the Trilium server to bind to.
+        Address for the Trilium server to bind to.
       '';
     };
 
