@@ -9,13 +9,13 @@
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pi-token-burden";
-  version = "0.6.3";
+  version = "0.6.5";
 
   src = fetchFromGitHub {
     owner = "Whamp";
     repo = "pi-token-burden";
     rev = "v${finalAttrs.version}";
-    hash = "sha256-4gkrzr4VF72BY8wdiT1CwevVdTqA4f790KIf17tQJKQ=";
+    hash = "sha256-huH4RpCNWXsOInW/HLhK7daW5Lv6zdychVRrXJicJvQ=";
   };
 
   pnpmDeps = fetchPnpmDeps {
@@ -23,7 +23,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     pnpm = pnpm_10;
     fetcherVersion = 3;
     pnpmInstallFlags = [ "--prod" ];
-    hash = "sha256-C7GPdmwUXyLOyQSW7oJr3engRhzf1kIt8mXshKMRP7E=";
+    hash = "sha256-MUcQSMEE8Qb5naNOFtsqiuEEecPkXUycTzn3gIA7KYo=";
   };
 
   pnpmInstallFlags = [ "--prod" ];

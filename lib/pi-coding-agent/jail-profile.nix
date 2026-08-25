@@ -10,7 +10,7 @@ let
   managedDirArgs = lib.concatMapStrings (entry: "      --dir ${agentHome}/${entry.targetRelativePath}\n") managedDirEntries;
   managedBindArgs = lib.concatMapStrings (
     entry:
-    "      --ro-bind ${lib.escapeShellArg (toString entry.source)} ${lib.escapeShellArg "${agentHome}/${entry.targetRelativePath}"}\n"
+    "      --ro-bind ${lib.escapeShellArg "${entry.source}"} ${lib.escapeShellArg "${agentHome}/${entry.targetRelativePath}"}\n"
   ) inventory.managedEntries;
   statePathIsFile = statePath: lib.any (suffix: lib.hasSuffix suffix statePath) [ ".json" ".jsonl" ];
   hostStatePath = relativePath: "\"$" + hostHomeVar + "/${relativePath}\"";

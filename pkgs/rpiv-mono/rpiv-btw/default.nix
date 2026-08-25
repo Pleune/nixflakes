@@ -1,13 +1,9 @@
 {
-  lib,
-  stdenvNoCC,
-  fetchFromGitHub,
+  callPackage,
 }:
 let
-  rpivMono = import ../src.nix { inherit fetchFromGitHub; };
-  mkRpivPackage = import ../mk-rpiv-package.nix {
-    inherit lib stdenvNoCC;
-  };
+  rpivMono = callPackage ../src.nix { };
+  mkRpivPackage = callPackage ../mk-rpiv-package.nix { };
 in
 mkRpivPackage {
   pname = "rpiv-btw";

@@ -17,27 +17,31 @@ let
     substring
     ;
 
-  hasPrefix = prefix: value:
+  hasPrefix =
+    prefix: value:
     let
       prefixLength = stringLength prefix;
       valueLength = stringLength value;
     in
     valueLength >= prefixLength && substring 0 prefixLength value == prefix;
 
-  hasSuffix = suffix: value:
+  hasSuffix =
+    suffix: value:
     let
       suffixLength = stringLength suffix;
       valueLength = stringLength value;
     in
     valueLength >= suffixLength && substring (valueLength - suffixLength) suffixLength value == suffix;
 
-  removePrefix = prefix: value:
+  removePrefix =
+    prefix: value:
     if hasPrefix prefix value then
       substring (stringLength prefix) (stringLength value - stringLength prefix) value
     else
       value;
 
-  isPattern = value:
+  isPattern =
+    value:
     hasPrefix "!" value
     || hasPrefix "+" value
     || hasPrefix "-" value
@@ -47,13 +51,15 @@ let
   isSkillMarkdown = name: hasSuffix ".md" name && name != "README.md";
   isPromptMarkdown = name: hasSuffix ".md" name;
   isThemeJson = name: hasSuffix ".json" name;
-  isExtensionFile = name:
+  isExtensionFile =
+    name:
     hasSuffix ".ts" name || hasSuffix ".js" name || hasSuffix ".mjs" name || hasSuffix ".cjs" name;
 
   readDirIfExists = path: if pathExists path then readDir path else { };
   readJsonIfExists = path: if pathExists path then fromJSON (readFile path) else { };
 
-  topLevelEntries = dir: predicate:
+  topLevelEntries =
+    dir: predicate:
     let
       entries = readDirIfExists dir;
     in
@@ -72,52 +78,90 @@ let
     targetRelativePath = builtins.unsafeDiscardStringContext targetRelativePath;
   };
 
-  collectRootEntries = tier: root:
+  collectRootEntries =
+    tier: root:
     let
-      skillDirNames = topLevelEntries (root + "/skills") (_name: type: type == "directory" || type == "symlink");
-      skillFileNames = topLevelEntries (root + "/skills") (name: type: type == "regular" && isSkillMarkdown name);
-      extensionDirNames = topLevelEntries (root + "/extensions") (_name: type: type == "directory" || type == "symlink");
-      extensionFileNames = topLevelEntries (root + "/extensions") (name: type: type == "regular" && isExtensionFile name);
-      promptNames = topLevelEntries (root + "/prompts") (name: type: (type == "regular" || type == "symlink") && isPromptMarkdown name);
-      themeNames = topLevelEntries (root + "/themes") (name: type: (type == "regular" || type == "symlink") && isThemeJson name);
+      skillDirNames = topLevelEntries (root + "/skills") (
+        _name: type: type == "directory" || type == "symlink"
+      );
+      skillFileNames = topLevelEntries (root + "/skills") (
+        name: type: type == "regular" && isSkillMarkdown name
+      );
+      extensionDirNames = topLevelEntries (root + "/extensions") (
+        _name: type: type == "directory" || type == "symlink"
+      );
+      extensionFileNames = topLevelEntries (root + "/extensions") (
+        name: type: type == "regular" && isExtensionFile name
+      );
+      promptNames = topLevelEntries (root + "/prompts") (
+        name: type: (type == "regular" || type == "symlink") && isPromptMarkdown name
+      );
+      themeNames = topLevelEntries (root + "/themes") (
+        name: type: (type == "regular" || type == "symlink") && isThemeJson name
+      );
     in
-    (lib.optionals (pathExists (root + "/AGENTS.md")) [ (mkEntry tier "file" (root + "/AGENTS.md") "AGENTS.md") ])
-    ++ (lib.optionals (pathExists (root + "/APPEND_SYSTEM.md")) [ (mkEntry tier "file" (root + "/APPEND_SYSTEM.md") "APPEND_SYSTEM.md") ])
-    ++ map (name: mkEntry tier "dir" (root + "/extensions/${name}") "extensions/${name}") extensionDirNames
-    ++ map (name: mkEntry tier "file" (root + "/extensions/${name}") "extensions/${name}") extensionFileNames
+    (lib.optionals (pathExists (root + "/AGENTS.md")) [
+      (mkEntry tier "file" (root + "/AGENTS.md") "AGENTS.md")
+    ])
+    ++ (lib.optionals (pathExists (root + "/APPEND_SYSTEM.md")) [
+      (mkEntry tier "file" (root + "/APPEND_SYSTEM.md") "APPEND_SYSTEM.md")
+    ])
+    ++ map (
+      name: mkEntry tier "dir" (root + "/extensions/${name}") "extensions/${name}"
+    ) extensionDirNames
+    ++ map (
+      name: mkEntry tier "file" (root + "/extensions/${name}") "extensions/${name}"
+    ) extensionFileNames
     ++ map (name: mkEntry tier "dir" (root + "/skills/${name}") "skills/${name}") skillDirNames
     ++ map (name: mkEntry tier "file" (root + "/skills/${name}") "skills/${name}") skillFileNames
     ++ map (name: mkEntry tier "file" (root + "/prompts/${name}") "prompts/${name}") promptNames
     ++ map (name: mkEntry tier "file" (root + "/themes/${name}") "themes/${name}") themeNames;
 
-  packageRootFor = pkg:
-    let
-      nodeModulesDir = pkg + "/lib/node_modules";
-      packageNames = topLevelEntries nodeModulesDir (
-        name: type: (type == "directory" || type == "symlink") && !(hasPrefix "@" name)
-      );
-    in
-    if packageNames == [ ] then null else nodeModulesDir + "/${head packageNames}";
+    packageRootFor = pkg:
+      let
+        nodeModulesDir = pkg + "/lib/node_modules";
+    
+        packageNames = topLevelEntries nodeModulesDir (
+          name: type:
+          (type == "directory" || type == "symlink")
+          && !(hasPrefix "@" name)
+        );
+    
+        packageName = lib.getName pkg;
+    
+        exactPackageRoot =
+          nodeModulesDir + "/${packageName}";
+      in
+      if pathExists exactPackageRoot then
+        exactPackageRoot
+      else if packageNames == [ ] then
+        null
+      else
+        nodeModulesDir + "/${head packageNames}";
 
-  manifestFor = packageRoot:
+  manifestFor =
+    packageRoot:
     let
       packageJson = readJsonIfExists (packageRoot + "/package.json");
     in
     if packageJson ? pi then packageJson.pi else { };
 
-  sourceEntriesFor = manifest: key:
+  sourceEntriesFor =
+    manifest: key:
     if hasAttr key manifest then
       filter (entry: !(isPattern entry)) (builtins.getAttr key manifest)
     else
       [ ];
 
-  resolvePackageEntry = packageRoot: entry:
+  resolvePackageEntry =
+    packageRoot: entry:
     let
       cleanEntry = removePrefix "./" entry;
     in
     packageRoot + "/${cleanEntry}";
 
-  collectSkillEntriesFromPath = tier: path:
+  collectSkillEntriesFromPath =
+    tier: path:
     let
       entries = readDirIfExists path;
       names = sort builtins.lessThan (attrNames entries);
@@ -126,19 +170,18 @@ let
         let
           type = builtins.getAttr name entries;
         in
-        !isHidden name && (
-          type == "directory"
-          || type == "symlink"
-          || (type == "regular" && isSkillMarkdown name)
-        )
+        !isHidden name
+        && (type == "directory" || type == "symlink" || (type == "regular" && isSkillMarkdown name))
       ) names;
-      dirNames = filter (name:
+      dirNames = filter (
+        name:
         let
           type = builtins.getAttr name entries;
         in
         type == "directory" || type == "symlink"
       ) filteredNames;
-      fileNames = filter (name:
+      fileNames = filter (
+        name:
         let
           type = builtins.getAttr name entries;
         in
@@ -148,7 +191,8 @@ let
     map (name: mkEntry tier "dir" (path + "/${name}") "skills/${name}") dirNames
     ++ map (name: mkEntry tier "file" (path + "/${name}") "skills/${name}") fileNames;
 
-  collectPromptEntriesFromPath = tier: path:
+  collectPromptEntriesFromPath =
+    tier: path:
     let
       entries = readDirIfExists path;
       names = sort builtins.lessThan (attrNames entries);
@@ -162,7 +206,8 @@ let
     in
     map (name: mkEntry tier "file" (path + "/${name}") "prompts/${name}") fileNames;
 
-  collectThemeEntriesFromPath = tier: path:
+  collectThemeEntriesFromPath =
+    tier: path:
     let
       entries = readDirIfExists path;
       names = sort builtins.lessThan (attrNames entries);
@@ -176,7 +221,8 @@ let
     in
     map (name: mkEntry tier "file" (path + "/${name}") "themes/${name}") fileNames;
 
-  collectPackageEntries = tier: pkgs: packages:
+  collectPackageEntries =
+    tier: pkgs: packages:
     builtins.concatMap (
       pkg:
       let
@@ -188,27 +234,38 @@ let
         let
           manifest = manifestFor packageRoot;
           packageDirName = baseNameOf packageRoot;
-          skillRoots = map (entry: resolvePackageEntry packageRoot entry) (sourceEntriesFor manifest "skills");
-          promptRoots = map (entry: resolvePackageEntry packageRoot entry) (sourceEntriesFor manifest "prompts");
-          themeRoots = map (entry: resolvePackageEntry packageRoot entry) (sourceEntriesFor manifest "themes");
+          skillRoots = map (entry: resolvePackageEntry packageRoot entry) (
+            sourceEntriesFor manifest "skills"
+          );
+          promptRoots = map (entry: resolvePackageEntry packageRoot entry) (
+            sourceEntriesFor manifest "prompts"
+          );
+          themeRoots = map (entry: resolvePackageEntry packageRoot entry) (
+            sourceEntriesFor manifest "themes"
+          );
           extensionRoots = sourceEntriesFor manifest "extensions";
           extensionCount = builtins.length extensionRoots;
 
-          deriveExtensionFeatureId = cleanPath:
+          deriveExtensionFeatureId =
+            cleanPath:
             let
               withoutIndex = lib.removeSuffix "/index.js" (lib.removeSuffix "/index.ts" cleanPath);
               withoutExtension = lib.removeSuffix ".js" (lib.removeSuffix ".ts" withoutIndex);
               strippedCommonPrefix = lib.removePrefix "src/extensions/" (
                 lib.removePrefix "extensions/" (
-                  lib.removePrefix "src/" (
-                    lib.removePrefix "build/" (
-                      lib.removePrefix "dist/" withoutExtension
-                    )
-                  )
+                  lib.removePrefix "src/" (lib.removePrefix "build/" (lib.removePrefix "dist/" withoutExtension))
                 )
               );
               preferredPath =
-                if strippedCommonPrefix == "" || builtins.elem strippedCommonPrefix [ "index" "src" "extension" "pi-extension" ] then
+                if
+                  strippedCommonPrefix == ""
+                  || builtins.elem strippedCommonPrefix [
+                    "index"
+                    "src"
+                    "extension"
+                    "pi-extension"
+                  ]
+                then
                   withoutExtension
                 else
                   strippedCommonPrefix;
@@ -216,17 +273,14 @@ let
             in
             builtins.replaceStrings [ "/" ] [ "-" ] normalizedPath;
 
-          projectExtensionPath = relativePath:
+          projectExtensionPath =
+            relativePath:
             let
               cleanPath = removePrefix "./" relativePath;
               basename = lib.last (lib.splitString "/" cleanPath);
               isFile = lib.hasInfix "." basename;
               featureId = deriveExtensionFeatureId cleanPath;
-              targetName =
-                if extensionCount == 1 then
-                  packageDirName
-                else
-                  "${packageDirName}-${featureId}";
+              targetName = if extensionCount == 1 then packageDirName else "${packageDirName}-${featureId}";
               wrapperFileName = if lib.hasSuffix ".js" cleanPath then "index.js" else "index.ts";
               needsWrapper = !(!isFile || cleanPath == "index.ts" || cleanPath == "index.js");
               projectedRoot =
@@ -240,11 +294,14 @@ let
                       export { default } from "./${cleanPath}";
                       WRAPPER_EOF
                       cat > "$out/${targetName}/package.json" <<'MANIFEST_EOF'
-                      ${builtins.toJSON (readJsonIfExists (packageRoot + "/package.json") // {
-                        pi = manifest // {
-                          extensions = [ "./${wrapperFileName}" ];
-                        };
-                      })}
+                      ${builtins.toJSON (
+                        readJsonIfExists (packageRoot + "/package.json")
+                        // {
+                          pi = manifest // {
+                            extensions = [ "./${wrapperFileName}" ];
+                          };
+                        }
+                      )}
                       MANIFEST_EOF
                     '';
                   in
@@ -264,25 +321,35 @@ let
 
   reverseList = list: foldl' (acc: item: [ item ] ++ acc) [ ] list;
 
-  keepLastByTarget = entries:
+  keepLastByTarget =
+    entries:
     let
-      result = foldl' (
-        acc: entry:
-        if hasAttr entry.targetRelativePath acc.seen then
-          acc
-        else
+      result =
+        foldl'
+          (
+            acc: entry:
+            if hasAttr entry.targetRelativePath acc.seen then
+              acc
+            else
+              {
+                seen = acc.seen // {
+                  ${entry.targetRelativePath} = true;
+                };
+                kept = [ entry ] ++ acc.kept;
+              }
+          )
           {
-            seen = acc.seen // { ${entry.targetRelativePath} = true; };
-            kept = [ entry ] ++ acc.kept;
+            seen = { };
+            kept = [ ];
           }
-      ) {
-        seen = { };
-        kept = [ ];
-      } (reverseList entries);
+          (reverseList entries);
     in
     result.kept;
 in
-{ pkgs ? null, profile }:
+{
+  pkgs ? null,
+  profile,
+}:
 let
   normalizedProfile = {
     resources = {
@@ -297,9 +364,16 @@ let
   };
 
   packageEntries = collectPackageEntries "packages" pkgs normalizedProfile.resources.packages;
-  rootEntries = builtins.concatMap (root: collectRootEntries "roots" root) normalizedProfile.resources.roots;
+  rootEntries = builtins.concatMap (
+    root: collectRootEntries "roots" root
+  ) normalizedProfile.resources.roots;
   managedEntries = keepLastByTarget (packageEntries ++ rootEntries);
 in
 {
-  inherit normalizedProfile packageEntries rootEntries managedEntries;
+  inherit
+    normalizedProfile
+    packageEntries
+    rootEntries
+    managedEntries
+    ;
 }

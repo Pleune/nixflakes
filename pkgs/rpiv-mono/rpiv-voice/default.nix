@@ -1,16 +1,21 @@
 {
   lib,
   buildNpmPackage,
-  fetchFromGitHub,
+  callPackage,
 }:
 let
-  rpivMono = import ../src.nix { inherit fetchFromGitHub; };
+  rpivMono = callPackage ../src.nix { };
 in
 buildNpmPackage {
   pname = "rpiv-voice";
-  inherit (rpivMono) version src npmDepsHash;
 
-  npmDepsFetcherVersion = 2;
+  inherit (rpivMono)
+    version
+    src
+    npmDepsHash
+    npmDepsFetcherVersion
+    ;
+
   npmWorkspace = "packages/rpiv-voice";
 
   dontNpmBuild = true;

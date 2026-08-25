@@ -5,16 +5,37 @@
 }:
 with lib;
 let
+  cfg = config.nixflakes.services.podman;
   aptCacherNgEnabled = config.nixflakes.services.aptCacherNg.enable;
   proxyUrl = "http://host.containers.internal:${toString config.nixflakes.services.aptCacherNg.port}";
 in
 {
-  options.nixflakes.services.podman.enable = mkEnableOption "Podman";
+  options.nixflakes.services.podman = {
+    enable = mkEnableOption "Podman";
 
-  config = mkIf config.nixflakes.services.podman.enable (mkMerge [
+    enableSocket = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Enable the Podman API socket (rootless).
+        Provides a Docker-compatible socket at $XDG_RUNTIME_DIR/podman/podman.sock.
+      '';
+    };
+  };
+
+  config = mkIf cfg.enable (mkMerge [
     {
       services.podman.enable = true;
     }
+    (mkIf cfg.enableSocket {
+      # Expose the package-provided Podman user units to systemd, then enable
+      # the package-provided socket via the normal wants symlink. This avoids
+      # duplicating podman's upstream unit definitions in our config.
+      systemd.user.packages = [ config.services.podman.package ];
+
+      xdg.configFile."systemd/user/sockets.target.wants/podman.socket".source =
+        "${config.services.podman.package}/share/systemd/user/podman.socket";
+    })
     (mkIf aptCacherNgEnabled {
       services.podman.settings.containers = {
         http_proxy = true;
@@ -23,12 +44,6 @@ in
           "https_proxy=${proxyUrl}"
         ];
       };
-
-      programs.fish.functions.podman = ''
-        set -lx http_proxy ${proxyUrl}
-        set -lx https_proxy ${proxyUrl}
-        command podman $argv
-      '';
     })
   ]);
 }

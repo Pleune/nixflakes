@@ -1,0 +1,32 @@
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1071,7 +1071,8 @@
+       },
+       "engines": {
+         "node": ">=22.19.0"
+-      }
++      },
++      "integrity": "sha512-BF9WPhixIFjT6Kp3Iz3H6ugkU+4AWotM8py96XE5pIK0arJbQKMWbR+dXSWWDEmR5yc/aFQODnuyowOEzMGO7Q=="
+     },
+     "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai": {
+       "version": "0.80.2",
+@@ -1096,7 +1097,8 @@
+       },
+       "engines": {
+         "node": ">=22.19.0"
+-      }
++      },
++      "integrity": "sha512-5GNKfdrRJ4uZ5Zd9iudoXggi/BbUcKnD/xfRHtdR+7q4vWqPvfx8auFuaT+ewGBVI8K4wj87eigFQ/iCSuy9RQ=="
+     },
+     "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui": {
+       "version": "0.80.2",
+@@ -1109,7 +1111,8 @@
+       },
+       "engines": {
+         "node": ">=22.19.0"
+-      }
++      },
++      "integrity": "sha512-OvOAMIbXiC9OSse17YMiXIsI9AS5XM/ZV8N/k+UzdlRpPILDQYmLElevgGW92kkXR8qHBClIdzhCjuzlBGvphA=="
+     },
+     "node_modules/@earendil-works/pi-coding-agent/node_modules/@google/genai": {
+       "version": "1.52.0",

@@ -11,7 +11,7 @@ let
 in
 python3.pkgs.buildPythonApplication rec {
   pname = "code-review-graph";
-  version = "2.3.3";
+  version = "2.3.8";
 
   pyproject = true;
 
@@ -19,7 +19,7 @@ python3.pkgs.buildPythonApplication rec {
     owner = "tirth8205";
     repo = "code-review-graph";
     rev = "v${version}";
-    hash = "sha256-ib9ysidaY82It6xEuPxOZ126l8Igrl+/9Cj8jwrYP+E=";
+    hash = "sha256-NhssTYN0McUEpxAlb4bWDrdlCA6jFmXj9Cn9IxdkcUg=";
   };
 
   build-system = with python3.pkgs; [ hatchling ];

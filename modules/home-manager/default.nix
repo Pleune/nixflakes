@@ -2,6 +2,6 @@
 {
   imports = [
     ./services/trilium
-    ./terminal/pi-agent
+    ./terminal/pi-coding-agent
   ];
 }

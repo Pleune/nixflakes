@@ -8,6 +8,7 @@
   src,
   description,
   homepage,
+  rpivDependencies ? [ ],
 }:
 stdenvNoCC.mkDerivation {
   inherit pname version;
@@ -17,18 +18,34 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    # pi-agent.wrap probes lib/node_modules/${pname} first, but runtime imports use the scoped name.
     packageDir="$out/lib/node_modules/${pname}"
+    packageNodeModules="$packageDir/node_modules"
     scopedDir="$out/lib/node_modules/@juicesharp"
-    mkdir -p "$packageDir" "$scopedDir"
+
+    mkdir -p "$packageDir" "$packageNodeModules/@juicesharp" "$scopedDir"
+
+    # Primary package.
     cp -r "${src}/packages/${pname}/." "$packageDir/"
+
+    # Preserve the scoped top-level representation as well.
     ln -s ../${pname} "$scopedDir/${pname}"
+
+    # Install monorepo dependencies where Node will find them when this
+    # package is projected into ~/.pi/agent/extensions/${pname}.
+    ${lib.concatMapStringsSep "\n" (
+      dependency: ''
+        dependencyDir="$packageNodeModules/@juicesharp/${dependency}"
+
+        mkdir -p "$dependencyDir"
+        cp -r "${src}/packages/${dependency}/." "$dependencyDir/"
+      ''
+    ) rpivDependencies}
 
     runHook postInstall
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/@juicesharp/${pname}";
+    packageDir = "${placeholder "out"}/lib/node_modules/${pname}";
   };
 
   meta = {

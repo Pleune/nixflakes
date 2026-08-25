@@ -20,7 +20,7 @@
   ripgrep,
 }:
 let
-  version = "0.74.0";
+  version = "0.80.2";
   runtimeBins = lib.makeBinPath [
     nodejs
     gitMinimal
@@ -32,9 +32,9 @@ let
     owner = "earendil-works";
     repo = "pi";
     rev = "v${version}";
-    hash = "sha256-wEiqOezD8w08vyuenh3Kk+YCYBbQoEq67wATDEKy5XM=";
+    hash = "sha256-aKtgPc3rwHEp856jP3N7nImph0CSG+gsWq9OVci3hmE=";
   };
-  npmDepsHash = "sha256-zu4cTy/DGdGu1BV4VDY5xiHTcAyUMgmroRaRaKis/p4=";
+  npmDepsHash = "sha256-1EGs8lX8XoAnRtS+pw4lBRm24U/vtVB2loVRmZyd4Z8=";
 
   drv = buildNpmPackage {
     pname = "pi-agent";
@@ -76,11 +76,12 @@ let
       done
 
       substituteInPlace packages/coding-agent/src/modes/interactive/interactive-mode.ts \
-        --replace-fail $'\t\tconst action = theme.fg("accent", `''${APP_NAME} update`);\n\t\tconst updateInstruction = theme.fg("muted", `New version ''${newVersion} is available. Run `) + action;' \
-                       $'\t\tconst action = theme.fg("accent", `https://github.com/earendil-works/pi/releases/tag/v''${newVersion}`);\n\t\tconst updateInstruction = theme.fg("muted", `New version ''${newVersion} is available. Run `) + action;'
+        --replace-fail $'\tshowNewVersionNotification(release: LatestPiRelease): void {\n\t\tconst action = theme.fg("accent", `''${APP_NAME} update`);\n\t\tconst updateInstruction = theme.fg("muted", `New version ''${release.version} is available. Run `) + action;' \
+                       $'\tshowNewVersionNotification(release: LatestPiRelease): void {\n\t\tconst action = theme.fg("accent", `https://github.com/earendil-works/pi/releases/tag/v''${release.version}`);\n\t\tconst updateInstruction = theme.fg("muted", `New version ''${release.version} is available. See `) + action;'
 
-      changelogReplacement='`https://github.com/earendil-works/pi/blob/v''${newVersion}/packages/coding-agent/CHANGELOG.md`'
+      changelogReplacement='`https://github.com/earendil-works/pi/blob/v''${release.version}/packages/coding-agent/CHANGELOG.md`'
       for changelogUrl in \
+        '"https://pi.dev/changelog"' \
         '"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"' \
         '"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"'
       do

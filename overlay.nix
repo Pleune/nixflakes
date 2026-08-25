@@ -13,7 +13,7 @@ let
     });
 in
 {
-  pi-agent = final.callPackage ./pkgs/pi-agent { };
+  #pi-agent = final.callPackage ./pkgs/pi-agent { };
   context-mode = final.callPackage ./pkgs/context-mode { };
   code-review-graph = final.callPackage ./pkgs/code-review-graph { };
   pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };

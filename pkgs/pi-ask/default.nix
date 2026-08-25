@@ -4,7 +4,7 @@
   fetchFromGitHub,
 }:
 let
-  version = "0.9.0";
+  version = "1.2.0";
 in
 stdenvNoCC.mkDerivation {
   pname = "pi-ask";
@@ -14,7 +14,7 @@ stdenvNoCC.mkDerivation {
     owner = "eko24ive";
     repo = "pi-ask";
     rev = "v${version}";
-    hash = "sha256-M5+aE+Vx0BAwGtBqE7RNyiayYZutiXGKW12rhjccgIU=";
+    hash = "sha256-lHAJMmtlnZyHU+QYUOyAiwnksm+DBu1FPqXhhr9qPLo=";
   };
 
   installPhase = ''

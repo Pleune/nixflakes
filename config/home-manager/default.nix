@@ -35,7 +35,7 @@ with lib;
     ./terminal/git
     ./terminal/podman
     ./terminal/neovim
-    ./terminal/pi-agent
+    ./terminal/pi-coding-agent
     ./theme/wsl
     ./theme/gnome
   ];
