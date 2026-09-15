@@ -14,6 +14,7 @@ let
 in
 {
   #pi-agent = final.callPackage ./pkgs/pi-agent { };
+  azure-storage-explorer = final.callPackage ./pkgs/azure-storage-explorer { };
   context-mode = final.callPackage ./pkgs/context-mode { };
   code-review-graph = final.callPackage ./pkgs/code-review-graph { };
   trilium-git-sync = final.callPackage ./pkgs/trilium-git-sync { };
