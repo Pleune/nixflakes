@@ -53,6 +53,10 @@
       inputs.flake-parts.follows = "flake-parts";
     };
 
+    pi = {
+      url = "github:lukasl-dev/pi.nix";
+    };
+
     private = {
       url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
@@ -211,17 +215,15 @@
 
             packages =
               let
-                jailLib = import ./lib/jail {
+                mitchpi = inputs.pi.lib.mkCodingAgent {
                   inherit pkgs;
-                  jail-nix = inputs.jail-nix;
+                  modules = [
+                    (import ./config/pi-coding-agent/profile.nix {
+                      inherit pkgs;
+                      lib = pkgs.lib;
+                    })
+                  ];
                 };
-                piAgentLib = import ./lib/pi-agent { lib = pkgs.lib; };
-                mitchpiProfile = import ./config/pi-agent/profile.nix { inherit pkgs; };
-                mitchpiInventory = piAgentLib.inventoryFromProfile {
-                  inherit pkgs;
-                  profile = mitchpiProfile;
-                };
-                jail = jailLib.extend;
               in
               {
                 mitchvim = inputs'.nixvim.legacyPackages.makeNixvimWithModule {
@@ -229,32 +231,7 @@
                   module = import ./config/nixvim/options.nix { inherit pkgs; };
                 };
 
-                # Sandboxed pi-agent with network access and write access to current directory only.
-                # Wrap it once more so sub-processes launched from inside the jail resolve this flake's
-                # mitchpi/pi executable first instead of an unrelated host-profile pi on PATH.
-                mitchpi =
-                  let
-                    base = jail "pi" pkgs.pi-coding-agent (
-                      piAgentLib.jailProfile {
-                        inherit jail;
-                        inventory = mitchpiInventory;
-                      }
-                    );
-                  in
-                  pkgs.symlinkJoin {
-                    name = "mitchpi";
-                    paths = [ base ];
-                    nativeBuildInputs = [ pkgs.makeWrapper ];
-                    postBuild = ''
-                      rm "$out/bin/pi"
-                      makeWrapper ${base}/bin/pi "$out/bin/pi" \
-                        --prefix PATH : "$out/bin"
-                      ln -s pi "$out/bin/mitchpi"
-                    '';
-                    meta = base.meta // {
-                      mainProgram = "pi";
-                    };
-                  };
+                mitchpi = mitchpi.package;
               };
 
             legacyPackages = pkgs // {

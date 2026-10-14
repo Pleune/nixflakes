@@ -21,6 +21,7 @@ in
   pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };
   pi-subagents = final.callPackage ./pkgs/pi-subagents { };
   pi-ask = final.callPackage ./pkgs/pi-ask { };
+  pi-antigravity = final.callPackage ./pkgs/pi-antigravity { };
   pi-memory = final.callPackage ./pkgs/pi-memory { };
   pi-hermes-memory = final.callPackage ./pkgs/pi-hermes-memory { };
   pi-quotas = final.callPackage ./pkgs/pi-quotas { };

@@ -1,6 +1,7 @@
 {
   lib,
   nixosStateVersion ? null,
+  pi,
   ...
 }:
 with lib;
@@ -38,5 +39,6 @@ with lib;
     ./terminal/pi-coding-agent
     ./theme/wsl
     ./theme/gnome
+    pi.homeModules.default
   ];
 }
