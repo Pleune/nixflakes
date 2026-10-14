@@ -40,7 +40,7 @@ let
     hash = "sha256-lTmAXXRH3vK+1cW0rKzCgzYsXoCrxdk0crLzXwy/ha0=";
   };
 in
-stdenvNoCC.mkDerivation {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pi-subagents";
   inherit version src;
 
@@ -86,7 +86,10 @@ stdenvNoCC.mkDerivation {
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/pi-subagents";
+    packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents";
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/index.ts" ];
+    skills = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/skills" ];
+    prompts = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/prompts" ];
   };
 
   meta = {
@@ -96,4 +99,4 @@ stdenvNoCC.mkDerivation {
     mainProgram = "pi-subagents";
     platforms = lib.platforms.all;
   };
-}
+})

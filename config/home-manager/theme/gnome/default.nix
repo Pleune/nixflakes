@@ -11,7 +11,6 @@
         user-themes
         tray-icons-reloaded
         vitals
-        sound-output-device-chooser
         space-bar
         x11-gestures
         wireless-hid
@@ -22,7 +21,6 @@
         gsconnect
         hide-top-bar
         home-assistant-extension
-        drop-down-terminal
       ];
     in
     lib.mkIf (config.nixflakes.theme.name == "gnome") {

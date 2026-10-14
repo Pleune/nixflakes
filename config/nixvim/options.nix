@@ -382,7 +382,7 @@
     vimtex = {
       enable = true;
       settings.view_method = "zathura";
-      texlivePackage = pkgs.texlive.combined.scheme-full; # TODO: replace with medium in flake export
+      texlivePackage = pkgs.texliveFull; # TODO: replace with medium in flake export
     };
 
     intellitab.enable = true;

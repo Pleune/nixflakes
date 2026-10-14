@@ -47,7 +47,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/pi-token-burden";
+    packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-token-burden";
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-token-burden/src/index.ts" ];
   };
 
   meta = {

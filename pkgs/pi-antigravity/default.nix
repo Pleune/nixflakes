@@ -13,7 +13,7 @@ let
     hash = "sha256-nXLFbBetKz1m8AbVOUU3TMDSvGjzIkOUlblyJp9N5rw=";
   };
 in
-stdenvNoCC.mkDerivation {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pi-antigravity";
   inherit version;
 
@@ -40,7 +40,8 @@ stdenvNoCC.mkDerivation {
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/pi-antigravity";
+    packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-antigravity";
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-antigravity/src/index.ts" ];
   };
 
   meta = {
@@ -49,4 +50,4 @@ stdenvNoCC.mkDerivation {
     license = lib.licenses.mit;
     platforms = lib.platforms.all;
   };
-}
+})

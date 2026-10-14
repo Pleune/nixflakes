@@ -10,7 +10,7 @@
   homepage,
   rpivDependencies ? [ ],
 }:
-stdenvNoCC.mkDerivation {
+stdenvNoCC.mkDerivation (finalAttrs: {
   inherit pname version;
 
   dontUnpack = true;
@@ -45,7 +45,8 @@ stdenvNoCC.mkDerivation {
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/${pname}";
+    packageDir = "${finalAttrs.finalPackage}/lib/node_modules/${pname}";
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/${pname}/index.ts" ];
   };
 
   meta = {
@@ -53,4 +54,4 @@ stdenvNoCC.mkDerivation {
     license = lib.licenses.mit;
     platforms = lib.platforms.all;
   };
-}
+})

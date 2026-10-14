@@ -20,7 +20,6 @@
     home.packages = [
       pkgs.dconf
       pkgs.lxappearance
-      pkgs.venta
     ];
   };
 }

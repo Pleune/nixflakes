@@ -17,150 +17,18 @@ let
     + builtins.readFile (resourcesRoot + "/APPEND_SYSTEM.md");
 
   isHidden = name: lib.hasPrefix "." name;
-  isPattern =
-    value:
-    lib.hasPrefix "!" value
-    || lib.hasPrefix "+" value
-    || lib.hasPrefix "-" value
-    || builtins.match ".*[\\*\\?].*" value != null;
-  readDirIfExists = path: if builtins.pathExists path then builtins.readDir path else { };
-  readJsonIfExists = path: if builtins.pathExists path then builtins.fromJSON (builtins.readFile path) else { };
-
-  topLevelEntries = dir: predicate:
-    let
-      entries = readDirIfExists dir;
-    in
-    lib.sort builtins.lessThan (
-      lib.filter (
-        name:
-        let
-          type = builtins.getAttr name entries;
-        in
-        !isHidden name && predicate name type
-      ) (builtins.attrNames entries)
-    );
-
-  packageRootFor = pkg:
-    let
-      nodeModulesDir = pkg + "/lib/node_modules";
-      packageNames = topLevelEntries nodeModulesDir (
-        name: type:
-        (type == "directory" || type == "symlink")
-        && !(lib.hasPrefix "@" name)
-      );
-      packageName = lib.getName pkg;
-      exactPackageRoot = nodeModulesDir + "/${packageName}";
-    in
-    if builtins.pathExists exactPackageRoot then
-      exactPackageRoot
-    else if packageNames == [ ] then
-      null
-    else
-      nodeModulesDir + "/${builtins.head packageNames}";
-
-  manifestFor = packageRoot:
-    let
-      packageJson = readJsonIfExists (packageRoot + "/package.json");
-    in
-    if builtins.hasAttr "pi" packageJson then packageJson.pi else { };
-
-  sourceEntriesFor = manifest: key:
-    if builtins.hasAttr key manifest then
-      lib.filter (entry: !isPattern entry) (builtins.getAttr key manifest)
-    else
-      [ ];
-
-  resolvePackageEntry = packageRoot: entry: packageRoot + "/${lib.removePrefix "./" entry}";
-
-  collectPackageResources = packages:
-    builtins.foldl'
+  extensionFor =
+    pkg:
+    pkg.passthru.extensions or [
       (
-        acc: pkg:
         let
-          packageRoot = packageRootFor pkg;
+          pname = pkg.pname or (lib.getName pkg);
+          packageRoot = "${pkg}/lib/node_modules/${pname}";
+          entry = pkg.passthru.entry or "index.ts";
         in
-        if packageRoot == null || !(builtins.pathExists (packageRoot + "/package.json")) then
-          acc
-        else
-          let
-            manifest = manifestFor packageRoot;
-            packageDirName = builtins.baseNameOf packageRoot;
-            extensionRoots = sourceEntriesFor manifest "extensions";
-            extensionCount = builtins.length extensionRoots;
-
-            deriveExtensionFeatureId =
-              cleanPath:
-              let
-                withoutIndex = lib.removeSuffix "/index.js" (lib.removeSuffix "/index.ts" cleanPath);
-                withoutExtension = lib.removeSuffix ".js" (lib.removeSuffix ".ts" withoutIndex);
-                strippedCommonPrefix = lib.removePrefix "src/extensions/" (
-                  lib.removePrefix "extensions/" (
-                    lib.removePrefix "src/" (lib.removePrefix "build/" (lib.removePrefix "dist/" withoutExtension))
-                  )
-                );
-                preferredPath =
-                  if
-                    strippedCommonPrefix == ""
-                    || builtins.elem strippedCommonPrefix [
-                      "index"
-                      "src"
-                      "extension"
-                      "pi-extension"
-                    ]
-                  then
-                    withoutExtension
-                  else
-                    strippedCommonPrefix;
-                normalizedPath = if preferredPath == "" then "index" else preferredPath;
-              in
-              builtins.replaceStrings [ "/" ] [ "-" ] normalizedPath;
-
-            projectExtensionPath =
-              relativePath:
-              let
-                cleanPath = lib.removePrefix "./" relativePath;
-                basename = builtins.baseNameOf cleanPath;
-                isFile = lib.hasInfix "." basename;
-                featureId = deriveExtensionFeatureId cleanPath;
-                targetName = if extensionCount == 1 then packageDirName else "${packageDirName}-${featureId}";
-                wrapperFileName = if lib.hasSuffix ".js" cleanPath then "index.js" else "index.ts";
-                needsWrapper = !(!isFile || cleanPath == "index.ts" || cleanPath == "index.js");
-                projectedRoot =
-                  if needsWrapper then
-                    let
-                      projection = pkgs.runCommand "pi-extension-${targetName}" { } ''
-                        mkdir -p "$out/${targetName}"
-                        cp -r ${packageRoot}/. "$out/${targetName}/"
-                        chmod -R u+w "$out/${targetName}"
-                        cat > "$out/${targetName}/${wrapperFileName}" <<'WRAPPER_EOF'
-                        export { default } from "./${cleanPath}";
-                        WRAPPER_EOF
-                        cat > "$out/${targetName}/package.json" <<'MANIFEST_EOF'
-                        ${builtins.toJSON (
-                          readJsonIfExists (packageRoot + "/package.json")
-                          // {
-                            pi = manifest // {
-                              extensions = [ "./${wrapperFileName}" ];
-                            };
-                          }
-                        )}
-                        MANIFEST_EOF
-                      '';
-                    in
-                    projection + "/${targetName}"
-                  else
-                    packageRoot;
-              in
-              projectedRoot;
-          in
-          acc // {
-            extensions = acc.extensions ++ map projectExtensionPath extensionRoots;
-          }
+        "${packageRoot}/${entry}"
       )
-      {
-        extensions = [ ];
-      }
-      packages;
+    ];
 
   extensionPackages = [
     pkgs.pi-ask
@@ -171,8 +39,7 @@ let
     pkgs.pi-token-burden
   ];
 
-  packageResources = collectPackageResources extensionPackages;
-
+  extensions = lib.concatMap extensionFor extensionPackages;
 in
 {
   pi.coding-agent = {
@@ -180,7 +47,7 @@ in
     skills = [ (resourcesRoot + "/skills") ];
     promptTemplates = [ (resourcesRoot + "/prompts") ];
     themes = [ (resourcesRoot + "/themes") ];
-    extensions = packageResources.extensions;
+    inherit extensions;
 
     jail.enable = true;
     jail.permissions = combinators:

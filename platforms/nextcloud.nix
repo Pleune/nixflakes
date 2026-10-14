@@ -67,7 +67,7 @@
       hostName = "cloud.pleunetowne.com";
 
       # Need to manually increment with every major upgrade.
-      package = pkgs.nextcloud33;
+      package = pkgs.nextcloud34;
 
       database.createLocally = true;
       maxUploadSize = "200G";

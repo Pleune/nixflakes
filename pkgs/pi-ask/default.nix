@@ -6,7 +6,7 @@
 let
   version = "1.2.0";
 in
-stdenvNoCC.mkDerivation {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pi-ask";
   inherit version;
 
@@ -31,7 +31,9 @@ stdenvNoCC.mkDerivation {
   '';
 
   passthru = {
-    packageDir = "${placeholder "out"}/lib/node_modules/@eko24ive/pi-ask";
+    packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-ask";
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-ask/src/index.ts" ];
+    skills = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-ask/skills" ];
   };
 
   meta = {
@@ -40,4 +42,4 @@ stdenvNoCC.mkDerivation {
     license = lib.licenses.mit;
     platforms = lib.platforms.all;
   };
-}
+})
