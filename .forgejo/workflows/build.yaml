@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - run: nix flake check --no-build
+      - run: nix flake check --accept-flake-config --no-build
 
   build-devshell:
     runs-on: nix
@@ -25,7 +25,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nix develop -c "true" && break; done
+      - run: for i in {1..10}; do nix develop --accept-flake-config -c "true" && break; done
 
   build-mitchvim:
     runs-on: nix
@@ -40,7 +40,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nix build .#mitchvim && break; done
+      - run: for i in {1..10}; do nix build --accept-flake-config .#mitchvim && break; done
 
   build-os-wsl:
     runs-on: nix
@@ -55,7 +55,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#wsl && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#wsl && break; done
 
   build-os-lxc:
     runs-on: nix
@@ -70,7 +70,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#lxc && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#lxc && break; done
 
   build-os-surface:
     runs-on: nix
@@ -85,7 +85,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#surface && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#surface && break; done
 
   build-os-git:
     runs-on: nix
@@ -100,7 +100,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#git && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#git && break; done
 
   build-os-git-runner1:
     runs-on: nix
@@ -115,7 +115,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#git-runner1 && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#git-runner1 && break; done
 
   build-os-immich:
     runs-on: nix
@@ -130,7 +130,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#immich && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#immich && break; done
 
   build-os-nextcloud:
     runs-on: nix
@@ -145,7 +145,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#nextcloud && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#nextcloud && break; done
 
   build-os-llm:
     runs-on: nix
@@ -160,7 +160,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#llm && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#llm && break; done
 
   build-os-jump:
     runs-on: nix
@@ -175,7 +175,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#jump && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#jump && break; done
 
   build-os-notes:
     runs-on: nix
@@ -190,7 +190,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#notes && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#notes && break; done
 
   build-os-nas:
     runs-on: nix
@@ -205,7 +205,7 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
       - name: Checkout
         uses: actions/checkout@v3
-      - run: for i in {1..10}; do nixos-rebuild build --flake .#nas && break; done
+      - run: for i in {1..10}; do nixos-rebuild build --accept-flake-config --flake .#nas && break; done
 
   deploy-git:
     runs-on: nix
@@ -216,7 +216,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -233,7 +233,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#immich"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#immich"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -250,7 +250,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nextcloud"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nextcloud"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -267,7 +267,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#llm"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#llm"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -284,7 +284,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#jump"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#jump"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -301,7 +301,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#notes"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#notes"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -318,7 +318,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas --boot"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#nas --boot"
       - name: Tag deploy
         run: |
           git config user.name "$(git log -1 --pretty=format:'%an')"
@@ -335,7 +335,7 @@ jobs:
       - name: Deploy
         run: |
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy.key && chmod 600 deploy.key
-          nix develop --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git-runner1 --boot"
+          nix develop --accept-flake-config --command bash -c "deploy -s --ssh-opts '-o StrictHostKeychecking=no -i deploy.key' --fast-connection true .#git-runner1 --boot"
           ssh -i deploy.key -o StrictHostKeychecking=no git-runner1.home.pleunetowne.com 'systemctl reboot --when="+1 hour"'
       - name: Tag deploy
         run: |

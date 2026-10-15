@@ -1,6 +1,21 @@
 {
   description = "Mitch's flake";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://nix.pleunetowne.com"
+      "https://nix-community.cachix.org"
+      "https://cache.nixos-cuda.org"
+      "https://numtide.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "git-runner1:uBsNvsIl85z2ApqcH88hIhc4F0uGl5vFmt5ohr3NZDA="
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="
+      "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
