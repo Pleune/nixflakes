@@ -61,7 +61,7 @@
     };
 
     "/boot2" = {
-      device = "/dev/disk/by-id/wwn-0x5000cca253f76ff9-part1";
+      device = "/dev/disk/by-id/wwn-0x5000cca253cb325a-part1";
       fsType = "vfat";
       options = [
         "fmask=0022"
