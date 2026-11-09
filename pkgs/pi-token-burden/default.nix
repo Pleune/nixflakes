@@ -37,18 +37,27 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   dontBuild = true;
 
   installPhase = ''
-    runHook preInstall
+        runHook preInstall
 
-    packageDir="$out/lib/node_modules/pi-token-burden"
-    mkdir -p "$packageDir"
-    cp -r . "$packageDir"
+        packageDir="$out/lib/node_modules/pi-token-burden"
+        mkdir -p "$packageDir"
+        cp -r . "$packageDir"
 
-    runHook postInstall
+        mkdir -p "$packageDir/extensions/pi-token-burden"
+        cat > "$packageDir/extensions/pi-token-burden/index.ts" <<'EOF'
+    import extension from "../../src/index.ts";
+    export default extension;
+    EOF
+        sed -i '/"pi": {/,/^[[:space:]]*},/ { /"extensions": \[/,/^[[:space:]]*\],/ s|"./src/index.ts"|"./extensions/pi-token-burden/index.ts"|; }' "$packageDir/package.json"
+
+        runHook postInstall
   '';
 
   passthru = {
     packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-token-burden";
-    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-token-burden/src/index.ts" ];
+    extensions = [
+      "${finalAttrs.finalPackage}/lib/node_modules/pi-token-burden/extensions/pi-token-burden/index.ts"
+    ];
   };
 
   meta = {

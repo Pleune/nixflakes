@@ -1,3 +1,4 @@
+{ jail-nix }:
 final: prev:
 let
   # https://github.com/LibreOffice/core/blob/a383d7afa4e82bea728ecddf1bc44bbd9fd0eddb/sc/qa/unit/functions_array.cxx#L26
@@ -13,6 +14,7 @@ let
     });
 in
 {
+  agent-sandbox = final.callPackage ./pkgs/agent-sandbox { inherit jail-nix; };
   #pi-agent = final.callPackage ./pkgs/pi-agent { };
   azure-storage-explorer = final.callPackage ./pkgs/azure-storage-explorer { };
   context-mode = final.callPackage ./pkgs/context-mode { };
@@ -22,15 +24,24 @@ in
   pi-subagents = final.callPackage ./pkgs/pi-subagents { };
   pi-ask = final.callPackage ./pkgs/pi-ask { };
   pi-antigravity = final.callPackage ./pkgs/pi-antigravity { };
+  pi-antigravity-bridge = final.callPackage ./pkgs/pi-antigravity-bridge { };
+  pi-web-search = final.callPackage ./pkgs/pi-web-search { };
+  pi-caveman = final.callPackage ./pkgs/pi-caveman { };
+  pi-rtk-optimizer = final.callPackage ./pkgs/pi-rtk-optimizer { };
   pi-memory = final.callPackage ./pkgs/pi-memory { };
   pi-hermes-memory = final.callPackage ./pkgs/pi-hermes-memory { };
   pi-quotas = final.callPackage ./pkgs/pi-quotas { };
+  billion-context = final.callPackage ./pkgs/billion-context { };
   pi-token-burden = final.callPackage ./pkgs/pi-token-burden { };
+  pi-token-speed = final.callPackage ./pkgs/pi-token-speed { };
+  pi-tps = final.callPackage ./pkgs/pi-tps { };
+  pi-pretty = final.callPackage ./pkgs/pi-pretty { };
   rpiv-ask-user-question = final.callPackage ./pkgs/rpiv-mono/rpiv-ask-user-question { };
   rpiv-btw = final.callPackage ./pkgs/rpiv-mono/rpiv-btw { };
   incus-backup-rustic = final.callPackage ./pkgs/incus-backup-rustic { };
   keepass-unlocker = final.callPackage ./pkgs/keepass-unlocker { };
   logseq = final.callPackage ./pkgs/logseq { };
+  logseq-sync = final.callPackage ./pkgs/logseq-sync { };
   wol_api = final.callPackage ./pkgs/wake-on-lan-api { };
   rpiv-todo = final.callPackage ./pkgs/rpiv-mono/rpiv-todo { };
   rpiv-voice = final.callPackage ./pkgs/rpiv-mono/rpiv-voice { };

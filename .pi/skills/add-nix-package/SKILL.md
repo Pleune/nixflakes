@@ -56,6 +56,32 @@ Work repo-first. Before asking questions answerable from the tree, inspect `over
    - For npm workspaces/monorepos, keep `src` at the repo root and prefer `npmWorkspace` plus `npmDepsFetcherVersion = 2`.
    - If several local packages share one monorepo, prefer a shared `src.nix` with common `version`/`src` and any shared `npmDepsHash`.
    - Otherwise prefer a specific helper if one clearly fits; fall back to `stdenv.mkDerivation`
+
+### For Pi Extensions specifically:
+
+Package Pi extensions from source when possible, as this enables proper source-level integration and debugging. However, esbuild-bundled prebuilt `.js` files are acceptable when the source `.ts` files have unresolvable monorepo dependencies.
+
+- **Preferred Strategy** (source-based extensions like pi-ask):
+  - Use GitHub source fetch
+  - Configure `passthru.extensions` to point to `.ts` source file paths (e.g., `src/index.ts` or `src/agent/pi-native.ts`)
+  - Ensure no unresolvable npm dependencies in the source files
+  - Works automatically with pi-agent's source code loading
+
+- **Alternative Strategy** (prebuilt-bundled extensions like billion-context):
+  - If the extension ships as esbuild-bundled `.js` with local monorepo dependencies that can't be resolved:
+    - Fetch both GitHub source (for reference/documentation) and the npm tarball (for prebuilt dist)
+    - Use `stdenvNoCC.mkDerivation` to extract the npm tarball and overlay source via `cp -r`
+    - Configure `passthru.extensions` to point to the bundled `.js` file (e.g., `dist/agent/pi-native.js`)
+    - The bundled .js includes all external dependencies already resolved
+  - This approach avoids complex monorepo builds while keeping source available for reference
+
+- **Never use**:
+  - Compiled `.js` files that aren't esbuild-bundled (they'll fail with missing module errors)
+  - Pre-bundled extensions without including source alongside (reduces debuggability)
+
+- **Always include** `passthru.extensions` and `passthru.packageDir` for proper integration with `pi-agent.wrap`
+- **Test** by rebuilding mitchpi and verifying the extension loads: `pi -p "hello"` should show no extension load errors
+
 4. For Pi/Node modules consumed through `pi-agent.wrap` `extraNodeModules`, inspect `pkgs/pi-agent/wrap.nix` before packaging.
    - If repo helpers expect `lib/node_modules/${pname}` but Node resolution needs the real package name from `package.json`, provide both layouts when necessary.
    - Common case for scoped packages:

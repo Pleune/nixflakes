@@ -18,21 +18,28 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   };
 
   installPhase = ''
-    runHook preInstall
+        runHook preInstall
 
-    # pi-agent.wrap probes lib/node_modules/pi-ask first, but runtime imports use the scoped name.
-    packageDir="$out/lib/node_modules/pi-ask"
-    scopedDir="$out/lib/node_modules/@eko24ive"
-    mkdir -p "$packageDir" "$scopedDir"
-    cp -r ./. "$packageDir/"
-    ln -s ../pi-ask "$scopedDir/pi-ask"
+        # pi-agent.wrap probes lib/node_modules/pi-ask first, but runtime imports use the scoped name.
+        packageDir="$out/lib/node_modules/pi-ask"
+        scopedDir="$out/lib/node_modules/@eko24ive"
+        mkdir -p "$packageDir" "$scopedDir"
+        cp -r ./. "$packageDir/"
+        ln -s ../pi-ask "$scopedDir/pi-ask"
 
-    runHook postInstall
+        mkdir -p "$packageDir/extensions/pi-ask"
+        cat > "$packageDir/extensions/pi-ask/index.ts" <<'EOF'
+    import extension from "../../src/index.ts";
+    export default extension;
+    EOF
+        sed -i '/"pi": {/,/^[[:space:]]*},/ { /"extensions": \[/,/^[[:space:]]*\],/ s|"./src/index.ts"|"./extensions/pi-ask/index.ts"|; }' "$packageDir/package.json"
+
+        runHook postInstall
   '';
 
   passthru = {
     packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-ask";
-    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-ask/src/index.ts" ];
+    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-ask/extensions/pi-ask/index.ts" ];
     skills = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-ask/skills" ];
   };
 

@@ -1,0 +1,445 @@
+--- a/packages/pi-antigravity-bridge/src/acp/setup.ts
++++ b/packages/pi-antigravity-bridge/src/acp/setup.ts
+@@ -56,2 +56,2 @@
+-			/** True when auth was just set to oauth-personal: /agy auth opens
+-			 *  the Google login in the browser. */
++			/** True when the configured method has no matching token/verified
++			 *  state: /agy auth opens the Google login in the browser. */
+@@ -77,4 +77,6 @@
+-	'3. Log in: put {"auth":{"type":"oauth-personal"}} in',
+-	"   ~/.gemini/antigravity-acp/settings.json and run /agy auth, then complete",
+-	"   the Google login that opens in your browser. That login IS your",
+-	"   Antigravity subscription (Google AI Plus/Pro/Ultra).",
++	"3. Run /agy auth and choose Personal (Antigravity subscription) or",
++	"   Gemini Enterprise (licensed business account), then complete Google",
++	"   sign-in and any enterprise license/project selection in your browser.",
++	"   Confirmation clears that method's cached token/keychain and the obsolete",
++	"   Pi antigravity credential; other logins stay intact. If sign-in is",
++	"   cancelled afterward, the cleared login cannot be restored automatically.",
+@@ -102,0 +105,12 @@
++export type AcpOAuthMethod = "oauth-personal" | "oauth-business";
++
++/** Match the server's GEMINI_HOME override without reading credentials. */
++export function acpGeminiDir(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): string {
++	const home = env.HOME || os.homedir();
++	let gemini = env.GEMINI_HOME || path.join(home, ".gemini");
++	if (gemini === "~") gemini = home;
++	else if (gemini.startsWith("~/")) gemini = path.join(home, gemini.slice(2));
++	else if (gemini.startsWith("~")) throw new Error("GEMINI_HOME with ~user is unsupported; use an absolute path before authentication");
++	return path.resolve(cwd, gemini, "antigravity-acp");
++}
++
+@@ -104 +118 @@
+-	return opts.geminiDir ?? path.join(os.homedir(), ".gemini", "antigravity-acp");
++	return opts.geminiDir ?? acpGeminiDir(opts.env);
+@@ -235,6 +249,8 @@
+-/** Token presence WITHOUT reading any credential value: acp_token.json is
+- *  stat()ed, never opened. The token only exists after the browser login
+- *  round-trip, so this is the real proof of a completed login. */
+-function tokenPresent(target: string): boolean {
+-	try {
+-		fs.statSync(path.join(target, "acp_token.json"));
++/** Stat only the selected method's token. A personal token must never
++ *  satisfy enterprise setup (or vice versa); neither file is read. */
++function tokenPresent(target: string, method: string = "oauth-personal"): boolean {
++	const name = method === "oauth-business" ? "acp_business_token.json"
++		: method === "oauth-personal" || method === "token" ? "acp_token.json" : undefined;
++	if (!name) return false;
++	try {
++		fs.statSync(path.join(target, name));
+@@ -248,2 +264,2 @@
+-export function hasAcpToken(dir?: string): boolean {
+-	return tokenPresent(dir ?? path.join(os.homedir(), ".gemini", "antigravity-acp"));
++export function hasAcpToken(dir?: string, method: AcpOAuthMethod = "oauth-personal"): boolean {
++	return tokenPresent(dir ?? acpGeminiDir(), method);
+@@ -264,4 +280,5 @@
+-export function readAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath()): boolean {
+-	try {
+-		const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { verified?: unknown };
+-		return raw.verified === true;
++export function readAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath(), method: string = "oauth-personal"): boolean {
++	try {
++		const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { verified?: unknown; methodId?: unknown };
++		// Old markers were only ever produced by the personal-only flow.
++		return raw.verified === true && (raw.methodId ?? "oauth-personal") === (method === "token" ? "oauth-personal" : method);
+@@ -273 +290 @@
+-export function writeAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath()): void {
++export function writeAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath(), methodId: AcpOAuthMethod = "oauth-personal"): void {
+@@ -275,4 +292,7 @@
+-	fs.writeFileSync(file, `${JSON.stringify({ verified: true, at: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 });
+-}
+-
+-export function clearAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath()): void {
++	fs.writeFileSync(file, `${JSON.stringify({ verified: true, methodId, at: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 });
++}
++
++export function clearAcpAuthVerified(file: string = defaultAcpAuthVerifiedPath(), method?: AcpOAuthMethod): void {
++	// Explicit auth failures invalidate only the attempted method. A rejected
++	// business login must not erase a working personal keychain marker.
++	if (method && !readAcpAuthVerified(file, method)) return;
+@@ -290 +310 @@
+-	const target = dir ?? path.join(os.homedir(), ".gemini", "antigravity-acp");
++	const target = dir ?? acpGeminiDir();
+@@ -303,4 +323,5 @@
+-/** Write a minimal auth block into settings.json. The server reads this file
+- *  at STARTUP, so this must happen before the first server spawn. */
+-export function writeAuthType(type: "gemini-api-key" | "oauth-personal", dir?: string): void {
+-	const target = dir ?? path.join(os.homedir(), ".gemini", "antigravity-acp");
++/** Merge only auth.type, retaining license/project and other settings.
++ *  Undefined restores an originally absent selection after a failed switch.
++ *  Runtime drivers read the selected method on their next server STARTUP. */
++export function writeAuthType(type: string | undefined, dir?: string): void {
++	const target = dir ?? acpGeminiDir();
+@@ -316 +337,3 @@
+-	const nextSettings: Record<string, unknown> = { ...settings, auth: { ...prevAuth, type } };
++	const nextAuth: Record<string, unknown> = { ...prevAuth, type };
++	if (type === undefined) delete nextAuth.type;
++	const nextSettings: Record<string, unknown> = { ...settings, auth: nextAuth };
+@@ -355 +378 @@
+-	const verified = type !== "gemini-api-key" && !tokenPresent(gdir) && readAcpAuthVerified(opts.authVerifiedFile);
++	const verified = type !== "gemini-api-key" && !tokenPresent(gdir, type) && readAcpAuthVerified(opts.authVerifiedFile, type);
+@@ -417 +440 @@
+-	const needsLogin = auth.type !== "gemini-api-key" && !tokenPresent(gdir) && !readAcpAuthVerified(opts.authVerifiedFile);
++	const needsLogin = auth.type !== "gemini-api-key" && !tokenPresent(gdir, auth.type) && !readAcpAuthVerified(opts.authVerifiedFile, auth.type);
+--- a/packages/pi-antigravity-bridge/src/acp/auth.ts
++++ b/packages/pi-antigravity-bridge/src/acp/auth.ts
+@@ -2 +2 @@
+-import { hasAcpToken, writeAcpAuthVerified } from "./setup.js";
++import { acpGeminiDir, clearAcpAuthVerified, hasAcpToken, readAuthState, writeAuthType, writeAcpAuthVerified, type AcpOAuthMethod } from "./setup.js";
+@@ -6 +6 @@
+-// flow), and wait for the token to land in the shared acp_token.json. A
++// flow), and wait for the selected method's shared token file. A
+@@ -23,0 +24,8 @@
++	/** Explicit choice; otherwise retain the configured OAuth method. */
++	methodId?: AcpOAuthMethod;
++	/** Only explicit, confirmed sign-in resets credentials. Auto-setup doesn't. */
++	resetCredentials?: boolean;
++	/** Quiesce the current driver before selecting/spawning the auth process. */
++	beforeStart?: () => Promise<void>;
++	/** Clear conflicting Pi state only after logout capability is confirmed. */
++	beforeCredentialReset?: () => Promise<void>;
+@@ -28,2 +36,2 @@
+-	/** Directory holding acp_token.json. Default: ~/.gemini/antigravity-acp.
+-	 *  Tests point this at a fixture dir; production callers use the default. */
++	/** Directory holding the selected method's token. Default:
++	 *  ${GEMINI_HOME:-~/.gemini}/antigravity-acp. Tests use fixture dirs. */
+@@ -31 +39 @@
+-	/** The server is expected to have written acp_token.json by the time
++	/** The server is expected to have written the matching token by the time
+@@ -53,0 +62,2 @@
++	/** Cleanup was attempted; deleted credentials cannot be rolled back. */
++	credentialsReset?: boolean;
+@@ -72,0 +83,4 @@
++	const serverTokenDir = acpGeminiDir({ ...process.env, ...opts.extraEnv }, opts.cwd);
++	const tokenDir = opts.tokenDir ?? serverTokenDir;
++	if (opts.resetCredentials && tokenDir !== serverTokenDir) return Promise.resolve({ ok: false, error: "reset token directory must match the ACP server GEMINI_HOME; no credentials were reset" });
++	const methodId = opts.methodId ?? (readAuthState(tokenDir).type === "oauth-business" ? "oauth-business" : "oauth-personal");
+@@ -78,0 +93,3 @@
++		// Keep the runtime hook, but scope this attempt's failures to its own
++		// method so an older keychain-only login remains verified.
++		onAuthInvalidated: () => clearAcpAuthVerified(opts.authVerifiedFile, methodId),
+@@ -85,0 +103,3 @@
++		let previousType: string | undefined;
++		let attempted = false;
++		let credentialsReset = false;
+@@ -86,0 +107,10 @@
++			await opts.beforeStart?.();
++			const previous = readAuthState(tokenDir).type;
++			previousType = previous === "token" ? undefined : previous;
++			// The server infers which credentials to clear after failed login
++			// from startup auth.type. Select the attempted method BEFORE spawn,
++			// otherwise a failed business license lookup can erase personal
++			// credentials (and conversely). Only the official scoped logout may
++			// clear credentials, and only on an explicit confirmed reset.
++			attempted = true;
++			writeAuthType(methodId, tokenDir);
+@@ -88 +118,13 @@
+-			await conn.request("authenticate", { methodId: "oauth-personal" }, opts.timeoutMs ?? AUTH_TIMEOUT_MS);
++			if (opts.resetCredentials) {
++				if (!conn.logoutSupported) throw new Error("ACP server does not advertise scoped logout; no credentials were reset. Upgrade the server before forced reauthentication.");
++				// The callback may delete Pi credentials and then fail during
++				// synchronization. Warn about partial cleanup even in that case.
++				credentialsReset = true;
++				await opts.beforeCredentialReset?.();
++				clearAcpAuthVerified(opts.authVerifiedFile, methodId);
++				await conn.request("logout", {}, opts.timeoutMs ?? AUTH_TIMEOUT_MS);
++				// Logout clears auth.type. Restore the attempted method before
++				// authenticate, including its failure-cleanup inference path.
++				writeAuthType(methodId, tokenDir);
++			}
++			await conn.request("authenticate", { methodId }, opts.timeoutMs ?? AUTH_TIMEOUT_MS);
+@@ -90,2 +132,3 @@
+-			while (!hasAcpToken(opts.tokenDir) && Date.now() < deadline) await sleep(200);
+-			if (!hasAcpToken(opts.tokenDir)) {
++			while (!hasAcpToken(tokenDir, methodId) && Date.now() < deadline) await sleep(200);
++			let note: string | undefined;
++			if (!hasAcpToken(tokenDir, methodId)) {
+@@ -96,4 +139 @@
+-					return {
+-						ok: false,
+-						error: `the server accepted the sign-in but holds no usable credentials (session probe failed; token file absent in ${opts.tokenDir ?? "~/.gemini/antigravity-acp"}). Finish the Google sign-in if a browser opened, then retry /agy auth.`,
+-					};
++					throw new Error(`the server accepted ${methodId} sign-in but holds no usable credentials (session probe failed; matching token file absent in ${tokenDir}). Finish the Google sign-in if a browser opened, then retry /agy auth.`);
+@@ -101,2 +141 @@
+-				writeAcpAuthVerified(opts.authVerifiedFile);
+-				return { ok: true, note: "the server authenticated from existing credentials; no browser sign-in was needed" };
++				note = "the server authenticated from existing credentials without a local token file";
+@@ -104,2 +143,5 @@
+-			writeAcpAuthVerified(opts.authVerifiedFile);
+-			return { ok: true };
++			// Also persist for older servers which don't remember authenticate.
++			// Merge with current settings to retain license/project and other keys.
++			writeAuthType(methodId, tokenDir);
++			writeAcpAuthVerified(opts.authVerifiedFile, methodId);
++			return { ok: true, ...(note ? { note } : {}), ...(credentialsReset ? { credentialsReset: true } : {}) };
+@@ -107 +149,11 @@
+-			return { ok: false, error: err instanceof Error ? err.message : String(err) };
++			// Stop the auth subprocess before restoring a failed selection.
++			await conn.killAndWait();
++			let error = err instanceof Error ? err.message : String(err);
++			// The server is gone: restore only the original selection, retaining
++			// license/project and other settings it may have updated.
++			if (attempted) {
++				try { writeAuthType(previousType, tokenDir); }
++				catch (restoreError) { error += `; could not restore previous auth method: ${String(restoreError)}`; }
++			}
++			if (credentialsReset) error += "; the selected login may now be signed out: cleared credentials cannot be restored automatically";
++			return { ok: false, error, ...(credentialsReset ? { credentialsReset: true } : {}) };
+@@ -109 +161 @@
+-			conn.kill();
++			await conn.killAndWait();
+--- a/packages/pi-antigravity-bridge/src/acp/connection.ts
++++ b/packages/pi-antigravity-bridge/src/acp/connection.ts
+@@ -70,0 +71,3 @@
++	/** Optional connection-scoped auth failure hook. Explicit sign-in uses
++	 *  this to invalidate only its selected method, not a different login. */
++	onAuthInvalidated?: () => void;
+@@ -260,0 +264,2 @@
++		const capabilities = result?.agentCapabilities as { auth?: { logout?: unknown } } | undefined;
++		this.logoutSupported = capabilities?.auth?.logout != null && capabilities.auth.logout !== false;
+@@ -264,0 +270,3 @@
++
++	/** Logout must be explicitly advertised before a client calls it. */
++	logoutSupported = false;
+@@ -495 +503 @@
+-			throw translateError(method, err);
++			throw translateError(method, err, this.#opts.onAuthInvalidated);
+@@ -504 +512 @@
+-			throw translateError(method, err);
++			throw translateError(method, err, this.#opts.onAuthInvalidated);
+@@ -556,0 +565,25 @@
++		}
++	}
++
++	/** Unlike kill(), wait until the auth server can no longer persist a
++	 *  late selection before the caller rolls auth.type back. */
++	async killAndWait(): Promise<void> {
++		const child = this.#child;
++		if (!child?.pid) { this.kill(); return; }
++		const pid = child.pid;
++		if (child.exitCode === null && child.signalCode === null) await new Promise<void>((resolve) => {
++			// Use actual process exit, not #exited: transport failure can mark
++			// the connection finished while the subprocess is still alive.
++			const force = setTimeout(() => {
++				try {
++					if (process.platform !== "win32") process.kill(-child.pid!, "SIGKILL");
++					else child.kill("SIGKILL");
++				} catch { /* already gone */ }
++			}, 750);
++			child.once("exit", () => { clearTimeout(force); resolve(); });
++			this.kill();
++		});
++		// A wrapper may exit before its server descendants. Their process
++		// group still owns the credentials: terminate it before rollback.
++		if (process.platform !== "win32") {
++			try { process.kill(-pid, "SIGKILL"); } catch { /* group already gone */ }
+@@ -622 +655 @@
+-export function translateError(method: string, err: unknown): Error {
++export function translateError(method: string, err: unknown, invalidateAuth: (() => void) | null = authInvalidatedHook): Error {
+@@ -626 +659 @@
+-			authInvalidatedHook?.();
++			invalidateAuth?.();
+--- a/packages/pi-antigravity-bridge/src/acp/driver.ts
++++ b/packages/pi-antigravity-bridge/src/acp/driver.ts
+@@ -839,2 +839,3 @@
+-		this.#conn?.abortAll(`driver ${reason}`);
+-		this.#conn?.kill();
++		const conn = this.#conn;
++		// Detach before yielding: a queued turn can create a replacement while
++		// the old process exits. Never orphan that replacement on resumption.
+@@ -842,0 +844,2 @@
++		conn?.abortAll(`driver ${reason}`);
++		await conn?.killAndWait();
+--- /dev/null
++++ b/packages/pi-antigravity-bridge/src/acp/auth-command.ts
+@@ -0,0 +1,61 @@
++import { withDialogLock } from "../dialog-lock.js";
++import { runAcpAuth, type AcpAuthOptions, type AcpAuthResult } from "./auth.js";
++import { ensureAcpReady, type AcpSetupStatus, type SetupOptions } from "./setup.js";
++
++interface AuthUI {
++	select(title: string, options: string[]): Promise<string | undefined>;
++	confirm(title: string, message: string): Promise<boolean>;
++	notify(message: string, type: "info" | "warning"): void;
++}
++
++interface AuthCommandOptions {
++	setup?: SetupOptions;
++	auth?: Omit<AcpAuthOptions, "bin" | "methodId" | "resetCredentials">;
++	onSetup?: (status: AcpSetupStatus) => void;
++	onResult?: (result: AcpAuthResult) => void;
++}
++
++/** Explicit sign-in always offers a method, including on healthy logins.
++ *  Choose before setup so Escape cannot write settings or start a server. */
++export async function runAcpAuthCommand(ui: AuthUI | undefined, opts: AuthCommandOptions = {}): Promise<void> {
++	if (!ui) return;
++	const personal = "Personal (Antigravity subscription)";
++	const enterprise = "Gemini Enterprise (licensed business account)";
++	const choice = await withDialogLock(() => ui.select("ACP sign-in method", [personal, enterprise]));
++	if (choice !== personal && choice !== enterprise) {
++		ui.notify("Sign-in cancelled; authentication unchanged.", "info");
++		return;
++	}
++	const methodId = choice === enterprise ? "oauth-business" : "oauth-personal";
++	const confirmed = await withDialogLock(() => ui.confirm("Replace this ACP login?", `Clear the obsolete Pi antigravity credential and the selected ${choice} login (token/keychain), then sign in again? Other Pi providers and the opposite ACP login stay intact. Cancelling or failing after cleanup can leave this login signed out.`));
++	if (!confirmed) {
++		ui.notify("Sign-in cancelled; authentication unchanged.", "info");
++		return;
++	}
++	ui.notify("Preparing the ACP server (binary + auth settings)…", "info");
++	const status = await ensureAcpReady({
++		...opts.setup,
++		onProgress: (message) => ui.notify(message, "info"),
++	});
++	opts.onSetup?.(status);
++	if (!status.ok) {
++		ui.notify(`ACP auto-setup failed (${status.error}).\n${status.manual}`, "warning");
++		return;
++	}
++	// Intentionally don't short-circuit on !needsLogin: this command also
++	// replaces the selected login after explicit confirmation.
++	ui.notify(
++		`Signing in with ${choice}. Complete the browser sign-in${methodId === "oauth-business" ? " and enterprise license/project selection if offered" : ""}. If no browser opens, copy the URL shown by pi.`,
++		"info",
++	);
++	const result = await runAcpAuth({ ...opts.auth, bin: status.bin, methodId, resetCredentials: true });
++	opts.onResult?.(result);
++	if (result.ok) {
++		ui.notify(
++			`Signed in with ${choice}${result.note ? ` (${result.note})` : ""}. Restart pi or /reload before using the ACP engine; existing driver sessions retain their previous authentication.`,
++			"info",
++		);
++	} else {
++		ui.notify(`ACP sign-in failed (${result.error}).\nRun /agy auth to retry; /agy auth-manual has manual steps.`, "warning");
++	}
++}
+--- /dev/null
++++ b/packages/pi-antigravity-bridge/src/acp/pi-auth-reset.ts
+@@ -0,0 +1,19 @@
++import path from "node:path";
++
++interface LogoutRuntime { logout(providerId: string): Promise<void>; }
++
++/** Delete the obsolete Pi credential, never ACP tokens or other providers.
++ * Use Pi's public locked store rather than reading or rewriting secret values.
++ * The injectable factory keeps package checks offline and independent of Pi. */
++export async function clearConflictingPiAuth(createRuntime?: () => Promise<LogoutRuntime>): Promise<void> {
++	const runtime = await (createRuntime ?? (async () => {
++		const { ModelRuntime, getAgentDir } = await import("@earendil-works/pi-coding-agent");
++		return ModelRuntime.create({
++			authPath: path.join(getAgentDir(), "auth.json"),
++			modelsPath: null,
++			allowModelNetwork: false,
++			refreshOnCreate: false,
++		});
++	}))();
++	await runtime.logout("antigravity");
++}
+--- a/packages/pi-antigravity-bridge/extensions/index.ts
++++ b/packages/pi-antigravity-bridge/extensions/index.ts
+@@ -18,0 +19 @@
++import { clearConflictingPiAuth } from "../src/acp/pi-auth-reset.js";
+@@ -62,0 +64 @@
++import { runAcpAuthCommand } from "../src/acp/auth-command.js";
+@@ -1298,27 +1300,25 @@
+-				ui?.notify("Preparing the ACP server (binary + auth settings)…", "info");
+-				const status = await ensureAcpReady({ configBin: loadConfig().acp.bin, onProgress: (m) => ui?.notify(m, "info") });
+-				ctx.fileLog.log(
+-					"acp-setup",
+-					status.ok
+-						? { ok: true, binarySource: status.binarySource, needsLogin: status.needsLogin }
+-						: { ok: false, error: status.error },
+-					status.ok ? "info" : "warn",
+-				);
+-				if (!status.ok) {
+-					ui?.notify(`ACP auto-setup failed (${status.error}).\n${status.manual}`, "warning");
+-					return;
+-				}
+-				saveConfig({ acp: { ...loadConfig().acp, bin: status.bin } });
+-				if (!status.needsLogin) {
+-					ui?.notify(`Already signed in (auth: ${status.auth}). Nothing to do.`, "info");
+-					return;
+-				}
+-				ui?.notify(
+-					"Signing in: the Google sign-in opens in your browser and completes when you finish it (minutes-scale). If no browser opens, pi shows the sign-in URL to copy.",
+-					"info",
+-				);
+-				const r = await runAcpAuth({
+-					bin: status.bin,
+-					extraEnv: ctx.authCapture?.browserEnv,
+-					authUrlFile: ctx.authCapture?.file,
+-					log: ctx.acpLog,
++				await runAcpAuthCommand(ui, {
++					setup: { configBin: loadConfig().acp.bin },
++					auth: {
++						extraEnv: ctx.authCapture?.browserEnv,
++						authUrlFile: ctx.authCapture?.file,
++						log: ctx.acpLog,
++						beforeStart: async () => {
++							await cmdCtx.waitForIdle();
++							await ctx.acpDriver.close("recycle", "explicit reauthentication");
++						},
++						beforeCredentialReset: async () => {
++							await clearConflictingPiAuth();
++							const sid = cmdCtx.sessionManager.getSessionId();
++							if (sid) ctx.store.delete(`sid:${sid}@acp`);
++							ctx.store.delete(`cwd:${cmdCtx.cwd}@acp`);
++							await cmdCtx.modelRegistry.refresh({ providers: ["antigravity"], allowNetwork: false });
++						},
++					},
++					onSetup: (status) => {
++						ctx.fileLog.log("acp-setup", status.ok
++							? { ok: true, binarySource: status.binarySource, needsLogin: status.needsLogin }
++							: { ok: false, error: status.error }, status.ok ? "info" : "warn");
++						if (status.ok) saveConfig({ acp: { ...loadConfig().acp, bin: status.bin } });
++					},
++					onResult: (r) => ctx.fileLog.log("acp-auth", r.ok ? { ok: true } : { ok: false, error: r.error }, r.ok ? "info" : "warn"),
+@@ -1326,9 +1325,0 @@
+-				ctx.fileLog.log("acp-auth", r.ok ? { ok: true } : { ok: false, error: r.error }, r.ok ? "info" : "warn");
+-				if (r.ok) {
+-					ui?.notify(
+-						r.note ? `Signed in (${r.note}). The ACP engine is ready; takes effect on the next pi start (or /reload).` : "Signed in. The ACP engine is ready; takes effect on the next pi start (or /reload).",
+-						"info",
+-					);
+-				} else {
+-					ui?.notify(`ACP sign-in failed (${r.error}).\nRun /agy auth to retry; /agy auth-manual has manual steps.`, "warning");
+-				}
+@@ -1364,5 +1355,5 @@
+-						"own registry. Logging in uses your Antigravity subscription: the same",
+-						"Google account and plan as the Antigravity CLI (agy). It is no different",
+-						"from logging into the CLI; the server just keeps its own token file on",
+-						"your machine, like any Google tool. This extension never sees your",
+-						"credentials.",
++						"own registry. Choose Personal for your Antigravity subscription or",
++						"Gemini Enterprise for a licensed business account. Enterprise may ask",
++						"you to select a licensed project/location; a work account alone does",
++						"not guarantee entitlement. The server keeps its own credentials; this",
++						"extension never reads their values.",
+@@ -1372,3 +1363,3 @@
+-						'2. Default: put {"auth":{"type":"oauth-personal"}} in',
+-						"   ~/.gemini/antigravity-acp/settings.json, run /agy auth, and complete",
+-						"   the Google login that opens in your browser. No browser (SSH",
++						"2. Run /agy auth, choose Personal or Gemini Enterprise, and complete",
++						"   Google sign-in and any enterprise license/project picker. Restart",
++						"   pi or /reload after switching methods. No browser (SSH",

@@ -16,37 +16,44 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   dontUnpack = true;
 
   installPhase = ''
-    runHook preInstall
+        runHook preInstall
 
-    packageDir="$out/lib/node_modules/${pname}"
-    packageNodeModules="$packageDir/node_modules"
-    scopedDir="$out/lib/node_modules/@juicesharp"
+        packageDir="$out/lib/node_modules/${pname}"
+        packageNodeModules="$packageDir/node_modules"
+        scopedDir="$out/lib/node_modules/@juicesharp"
 
-    mkdir -p "$packageDir" "$packageNodeModules/@juicesharp" "$scopedDir"
+        mkdir -p "$packageDir" "$packageNodeModules/@juicesharp" "$scopedDir"
 
-    # Primary package.
-    cp -r "${src}/packages/${pname}/." "$packageDir/"
+        # Primary package.
+        cp -r "${src}/packages/${pname}/." "$packageDir/"
 
-    # Preserve the scoped top-level representation as well.
-    ln -s ../${pname} "$scopedDir/${pname}"
+        # Preserve the scoped top-level representation as well.
+        ln -s ../${pname} "$scopedDir/${pname}"
 
-    # Install monorepo dependencies where Node will find them when this
-    # package is projected into ~/.pi/agent/extensions/${pname}.
-    ${lib.concatMapStringsSep "\n" (
-      dependency: ''
-        dependencyDir="$packageNodeModules/@juicesharp/${dependency}"
+        # Install monorepo dependencies where Node will find them when this
+        # package is projected into ~/.pi/agent/extensions/${pname}.
+        ${lib.concatMapStringsSep "\n" (dependency: ''
+          dependencyDir="$packageNodeModules/@juicesharp/${dependency}"
 
-        mkdir -p "$dependencyDir"
-        cp -r "${src}/packages/${dependency}/." "$dependencyDir/"
-      ''
-    ) rpivDependencies}
+          mkdir -p "$dependencyDir"
+          cp -r "${src}/packages/${dependency}/." "$dependencyDir/"
+        '') rpivDependencies}
 
-    runHook postInstall
+        mkdir -p "$packageDir/extensions/${pname}"
+        cat > "$packageDir/extensions/${pname}/index.ts" <<'EOF'
+    import extension from "../../index.ts";
+    export default extension;
+    EOF
+        sed -i '/"pi": {/,/^[[:space:]]*},/ { /"extensions": \[/,/^[[:space:]]*\],/ s|"./index.ts"|"./extensions/${pname}/index.ts"|; }' "$packageDir/package.json"
+
+        runHook postInstall
   '';
 
   passthru = {
     packageDir = "${finalAttrs.finalPackage}/lib/node_modules/${pname}";
-    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/${pname}/index.ts" ];
+    extensions = [
+      "${finalAttrs.finalPackage}/lib/node_modules/${pname}/extensions/${pname}/index.ts"
+    ];
   };
 
   meta = {

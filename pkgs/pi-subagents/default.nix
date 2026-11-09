@@ -49,45 +49,54 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   ];
 
   installPhase = ''
-    runHook preInstall
+        runHook preInstall
 
-    packageDir="$out/lib/node_modules/pi-subagents"
-    nodeModulesDir="$packageDir/node_modules"
+        packageDir="$out/lib/node_modules/pi-subagents"
+        nodeModulesDir="$packageDir/node_modules"
 
-    mkdir -p "$packageDir" "$nodeModulesDir" "$out/bin"
+        mkdir -p "$packageDir" "$nodeModulesDir" "$out/bin"
 
-    cp -r . "$packageDir"
+        cp -r . "$packageDir"
 
-    mkdir -p "$nodeModulesDir/acorn"
-    tar -xzf ${acornSrc} \
-      --strip-components=1 \
-      -C "$nodeModulesDir/acorn"
+        mkdir -p "$nodeModulesDir/acorn"
+        tar -xzf ${acornSrc} \
+          --strip-components=1 \
+          -C "$nodeModulesDir/acorn"
 
-    mkdir -p "$nodeModulesDir/jiti"
-    tar -xzf ${jitiSrc} \
-      --strip-components=1 \
-      -C "$nodeModulesDir/jiti"
+        mkdir -p "$nodeModulesDir/jiti"
+        tar -xzf ${jitiSrc} \
+          --strip-components=1 \
+          -C "$nodeModulesDir/jiti"
 
-    mkdir -p "$nodeModulesDir/typebox"
-    tar -xzf ${typeboxSrc} \
-      --strip-components=1 \
-      -C "$nodeModulesDir/typebox"
+        mkdir -p "$nodeModulesDir/typebox"
+        tar -xzf ${typeboxSrc} \
+          --strip-components=1 \
+          -C "$nodeModulesDir/typebox"
 
-    mkdir -p "$nodeModulesDir/yaml"
-    tar -xzf ${yamlSrc} \
-      --strip-components=1 \
-      -C "$nodeModulesDir/yaml"
+        mkdir -p "$nodeModulesDir/yaml"
+        tar -xzf ${yamlSrc} \
+          --strip-components=1 \
+          -C "$nodeModulesDir/yaml"
 
-    makeWrapper ${nodejs}/bin/node "$out/bin/pi-subagents" \
-      --add-flags "$packageDir/install.mjs" \
-      --set-default NODE_PATH "$nodeModulesDir"
+        mkdir -p "$packageDir/extensions/pi-subagents"
+        cat > "$packageDir/extensions/pi-subagents/index.ts" <<'EOF'
+    import extension from "../../index.ts";
+    export default extension;
+    EOF
+        sed -i '/"pi": {/,/^[[:space:]]*},/ { /"extensions": \[/,/^[[:space:]]*\],/ s|"./index.ts"|"./extensions/pi-subagents/index.ts"|; }' "$packageDir/package.json"
 
-    runHook postInstall
+        makeWrapper ${nodejs}/bin/node "$out/bin/pi-subagents" \
+          --add-flags "$packageDir/install.mjs" \
+          --set-default NODE_PATH "$nodeModulesDir"
+
+        runHook postInstall
   '';
 
   passthru = {
     packageDir = "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents";
-    extensions = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/index.ts" ];
+    extensions = [
+      "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/extensions/pi-subagents/index.ts"
+    ];
     skills = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/skills" ];
     prompts = [ "${finalAttrs.finalPackage}/lib/node_modules/pi-subagents/prompts" ];
   };

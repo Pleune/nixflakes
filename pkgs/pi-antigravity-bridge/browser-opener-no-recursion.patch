@@ -1,0 +1,8 @@
+diff --git a/packages/pi-antigravity-bridge/src/acp/browser-capture.ts b/packages/pi-antigravity-bridge/src/acp/browser-capture.ts
+--- a/packages/pi-antigravity-bridge/src/acp/browser-capture.ts
++++ b/packages/pi-antigravity-bridge/src/acp/browser-capture.ts
+@@ -86 +86,3 @@
+-			`REAL=${shQuote(opener)}`,
++			`REAL=${shQuote(opener)}`,
++			"# Do not let xdg-open fall back to this capture wrapper.",
++			"unset BROWSER",

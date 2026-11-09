@@ -140,7 +140,7 @@
       in
       {
         flake = {
-          overlays.default = import ./overlay.nix;
+          overlays.default = import ./overlay.nix { inherit (inputs) jail-nix; };
 
           nixosConfigurations =
             let
