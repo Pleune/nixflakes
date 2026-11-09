@@ -1,0 +1,6 @@
+diff --git a/deps/graph-lifecycle/ownership.cjs b/deps/graph-lifecycle/ownership.cjs
+--- a/deps/graph-lifecycle/ownership.cjs
++++ b/deps/graph-lifecycle/ownership.cjs
+@@ -9 +9 @@
+-  const home = os.userInfo().homedir;
++  const home = os.homedir();

@@ -30,6 +30,7 @@ in
   rpiv-btw = final.callPackage ./pkgs/rpiv-mono/rpiv-btw { };
   incus-backup-rustic = final.callPackage ./pkgs/incus-backup-rustic { };
   keepass-unlocker = final.callPackage ./pkgs/keepass-unlocker { };
+  logseq = final.callPackage ./pkgs/logseq { };
   wol_api = final.callPackage ./pkgs/wake-on-lan-api { };
   rpiv-todo = final.callPackage ./pkgs/rpiv-mono/rpiv-todo { };
   rpiv-voice = final.callPackage ./pkgs/rpiv-mono/rpiv-voice { };
