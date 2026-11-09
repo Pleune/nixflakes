@@ -164,6 +164,7 @@
               lxc = makeSystem "x86_64-linux" "lxc";
               surface = makeSystem "x86_64-linux" "surface";
               wsl = makeSystem "x86_64-linux" "wsl";
+              mitchpc = makeSystem "x86_64-linux" "mitchpc";
 
               # homelab
               git = makeSystem "x86_64-linux" "git";
