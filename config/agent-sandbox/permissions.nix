@@ -27,5 +27,10 @@ with combinators;
   jailCombinators.capture-host-home
   (jailCombinators.safe-path-from-var-resolved "PATH" ":")
   (jailCombinators.minimal-env "/tmp/pi-home" forwardedEnv)
+  # Share the host git identity and ignore/attributes files read-only. Home
+  # Manager installs the config at ~/.config/git; the legacy ~/.gitconfig
+  # location is covered for hosts that use it instead.
+  (jailCombinators.ro-bind-host-home-path ".config/git" ".config/git")
+  (jailCombinators.ro-bind-host-home-path ".gitconfig" ".gitconfig")
   (share-ns "net")
 ]

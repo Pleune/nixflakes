@@ -75,7 +75,13 @@ itself (customize the original before wrapping to change its build).
 The policy keeps cwd writable, provides an ephemeral `/tmp/pi-home` and XDG
 folders, filters PATH/environment, and shares networking. It forwards the existing
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`,
-`DEEPSEEK_API_KEY`, and `XAI_API_KEY` allowlist. Pi-specific state mounts and the RTK
+`DEEPSEEK_API_KEY`, and `XAI_API_KEY` allowlist.
+
+Git identity follows the host: `~/.config/git` (or a legacy `~/.gitconfig`) is
+mounted read-only at the same path inside the jail, so `user.name`, `user.email`,
+`delta` settings, and ignore/attributes files work unchanged. The mount is
+read-only, so `git config --global` inside the sandbox fails instead of rewriting
+host configuration. Pass `--global` writes belong on the host. Pi-specific state mounts and the RTK
 PATH addition are **not** added by the generic launcher. The underlying jail
 builder may cache generated passwd/group files in host `~/.local/share/jail.nix`
 during setup; command HOME itself remains ephemeral. Nix-profile executable

@@ -18,6 +18,9 @@ let
     ro-bind-all-in-except = import ./ro-bind-all-in-except.nix {
       inherit combinators lib pkgs;
     };
+    ro-bind-host-home-path = import ./ro-bind-host-home-path.nix {
+      inherit combinators lib;
+    };
     safe-path-from-var-resolved = import ./safe-path-from-var-resolved.nix {
       inherit combinators lib pkgs;
     };

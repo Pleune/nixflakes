@@ -28,6 +28,9 @@ with tempfile.TemporaryDirectory(prefix=".agent-sandbox-test-", dir=os.getcwd())
     (home / "bin").mkdir(parents=True)
     secret = home / "secret"
     secret.write_text("must stay private")
+    git_config = b"[user]\n\tname = Jail Probe\n"
+    (home / ".config/git").mkdir(parents=True)
+    (home / ".config/git/config").write_bytes(git_config)
     hidden_tool = home / "bin/host-home-tool"
     hidden_tool.write_text(f"#!{shell}\nexit 0\n")
     hidden_tool.chmod(0o755)
@@ -105,9 +108,13 @@ with tempfile.TemporaryDirectory(prefix=".agent-sandbox-test-", dir=os.getcwd())
     run(shell, "-c", 'test ! -e "$HOME/ephemeral"')
     run("host-home-tool", expected=127)
     # The upstream jail builder caches fake passwd/group during host-side setup.
-    assert sorted(p.name for p in home.iterdir()) == [".local", "bin", "secret"]
+    assert sorted(p.name for p in home.iterdir()) == [".config", ".local", "bin", "secret"]
     assert sorted(p.name for p in (home / ".local/share/jail.nix").iterdir()) == ["group", "passwd"]
     assert not (home / ".pi").exists()
+    # The host git config directory is shared read-only at the same XDG path.
+    assert run(shell, "-c", 'cat "$XDG_CONFIG_HOME/git/config"') == git_config
+    run(shell, "-c", 'printf hijacked > "$XDG_CONFIG_HOME/git/config"', expected=1)
+    assert (home / ".config/git/config").read_bytes() == git_config
     profile = home / "profile-bin"
     profile.symlink_to(pathlib.Path(shell).parent)
     profile_env = dict(env, PATH=str(profile))
