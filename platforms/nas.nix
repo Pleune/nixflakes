@@ -123,7 +123,8 @@
     ];
     kernelModules = [ "kvm-intel" ];
     # kernelParams = [ "module_blacklist=i915" ]; # only use nvidia
-    initrd.systemd.enable = true;
+    # boot.initrd.systemd.enable removed upstream: systemd stage 1 is now
+    # unconditional (scripted initrd was dropped).
 
     loader.grub = {
       enable = true;

@@ -12,7 +12,8 @@
         tray-icons-reloaded
         vitals
         space-bar
-        x11-gestures
+        # x11-gestures: dropped upstream (repo deleted) and removed from
+        # nixpkgs gnomeExtensions. Only meaningful in X11 GNOME sessions.
         wireless-hid
         rounded-window-corners-reborn
         alphabetical-app-grid

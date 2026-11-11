@@ -76,7 +76,8 @@
       alsa.enable = true;
       alsa.support32Bit = true;
       pulse.enable = true;
-      jack.enable = true;
+      # jack.enable dropped: deprecated (global LD_LIBRARY_PATH impurity).
+      # Use the pw-jack wrapper from pkgs.pipewire.jack per-invocation instead.
     };
   };
 

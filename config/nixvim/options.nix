@@ -499,6 +499,9 @@
         };
         ltex = {
           enable = true; # grammar checking
+          # ltex-ls was removed from nixpkgs (archived upstream 2026-04-12);
+          # nixvim no longer knows a package for it, so point at the fork.
+          package = pkgs.ltex-ls-plus;
           settings = {
             configurationTarget = {
               dictionary = "user";

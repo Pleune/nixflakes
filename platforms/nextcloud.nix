@@ -40,6 +40,9 @@
   };
 
   nixflakes.agenix.enable = true;
+  # Kept for the post-install admin bootstrap: `nextcloud-occ user:add`
+  # followed by `nextcloud-occ group:adduser admin <username>`. The removed
+  # services.nextcloud.config.adminpassFile option used to consume it.
   age.secrets."nextcloud-admin-pass" = {
     file = "${private.secrets}/nextcloud_admin_password.txt";
     owner = "nextcloud";
@@ -107,7 +110,6 @@
 
       config = {
         dbtype = "pgsql";
-        adminpassFile = config.age.secrets."nextcloud-admin-pass".path;
       };
     };
   };
