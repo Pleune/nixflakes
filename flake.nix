@@ -167,6 +167,7 @@
               mitchpc = makeSystem "x86_64-linux" "mitchpc";
 
               # homelab
+              ai = makeSystem "x86_64-linux" "ai";
               git = makeSystem "x86_64-linux" "git";
               git-runner1 = makeSystem "x86_64-linux" "git-runner1";
               immich = makeSystem "x86_64-linux" "immich";
