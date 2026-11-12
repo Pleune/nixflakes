@@ -71,6 +71,24 @@
       url = "github:lukasl-dev/pi.nix";
     };
 
+    # Hermes Agent (Nous Research).  Consumed by platforms/llm.nix through its NixOS module
+    # (services.hermes-agent), which is where Hermes is hosted.
+    #
+    # Pinned to PR #152542 (unmerged) because its head commit is the only place nix/pm-packages.nix
+    # version-gates the patchelf PR672 backport.  On main the backport is applied unconditionally,
+    # and its patch only fits patchelf 0.19.x source; this repo's nixpkgs is on 0.15.2 (the 0.19
+    # bump was reverted in NixOS/nixpkgs 61a15beb37), so following nixpkgs against main made every
+    # pm tool package fail with "4 out of 6 hunks FAILED".  With the gate, 0.15.2 is used as-is and
+    # nixpkgs can be followed normally.
+    #
+    # Switch the url back to `github:NousResearch/hermes-agent` once https://github.com/NousResearch/
+    # hermes-agent/pull/152542 is merged into main.
+    hermes-agent = {
+      url = "github:NousResearch/hermes-agent/pull/152542/head";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
+
     private = {
       url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
@@ -248,6 +266,11 @@
                 };
 
                 mitchpi = mitchpi.package;
+
+                # `nix shell .#hermes-agent` (upstream's default output, CLI included) without
+                # touching a generation.  The inputs' packages are not merged into pkgs here, and
+                # the overlay would leak a python-heavy package into every package set.
+                hermes-agent = inputs.hermes-agent.packages.${system}.default;
               };
 
             legacyPackages = pkgs // {
