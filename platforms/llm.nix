@@ -3,6 +3,7 @@
   modulesPath,
   config,
   private,
+  hermes-agent,
   ...
 }:
 let
@@ -12,6 +13,9 @@ in
 {
   imports = [
     "${modulesPath}/virtualisation/lxc-container.nix"
+    # Hermes Agent's NixOS module.  Imported here, and not in config/nixos, because Hermes runs on
+    # this host alone.
+    hermes-agent.nixosModules.default
   ];
 
   nixpkgs = {
@@ -160,6 +164,61 @@ in
   nixflakes.services.wake-on-lan-api = {
     enable = true;
     port = 8083;
+  };
+
+  # Hermes Agent, hosted here: the `hermes` CLI on the system PATH, its state under
+  # /var/lib/hermes/.hermes (the module default stateDir), and `hermes serve` on 127.0.0.1:9119 for
+  # Hermes Desktop and anything else that wants the /api/ws + /api/pty sockets.
+  #
+  # The model itself is not here.  It is Strata on ai (nixflakes.services.strata in platforms/ai.nix),
+  # reached over the LAN.
+  services.hermes-agent = {
+    enable = true;
+
+    # `hermes` on environment.systemPackages, plus HERMES_HOME exported system-wide, so an
+    # interactive shell shares sessions, skills and cron with the units instead of keeping a
+    # second ~/.hermes.
+    addToSystemPackages = true;
+
+    settings = {
+      # Strata answers only to host names it knows (platforms/ai.nix allows
+      # "ai.home.pleunetowne.com"), so name it rather than using a LAN address, and it runs with
+      # allowUnauthenticated, so no api_key: Hermes sends its "no-key-required" placeholder to a
+      # keyless server.
+      #
+      # Strata holds one KV cache per conversation.  session_affinity_header makes Hermes carry the
+      # conversation id on every request, so a later turn reuses that cache instead of re-prefilling
+      # the history.
+      providers.strata = {
+        api = "http://ai.home.pleunetowne.com:8080/v1";
+        transport = "chat_completions";
+        default_model = "qwen3.8-flash-next-gyro-gyro-m"; # the id strata-prefetch writes into config.json
+        context_length = 131072; # what ai serves; Hermes refuses to start below 64000
+        session_affinity_header = "x-strata-session";
+      };
+
+      # `custom:<name>` is the durable identity of a `providers:` entry, so this picks the entry
+      # above instead of the bare "custom" class, and the endpoint shows up under its own name in
+      # `hermes model`.
+      model = {
+        provider = "custom:strata";
+        default = "qwen3.8-flash-next-gyro-gyro-m";
+        context_length = 131072;
+      };
+
+      terminal.backend = "local"; # the agent runs on this host, not in a sandbox
+      compression.enabled = true;
+    };
+
+    backend = {
+      # `hermes serve`: the API without the browser admin panel.  The gateway unit comes along with
+      # enable and stays up without messaging platforms (cron only), so nothing needs credentials.
+      mode = "serve";
+      port = 9119;
+      # host stays the module default, 127.0.0.1.  Any other address switches on the dashboard
+      # auth gate, which needs backend.sessionTokenFile pointing at an agenix-managed file; that is
+      # a later change.  Reach it today with an ssh tunnel to llm.
+    };
   };
 
   users.users.${config.services.ollama.user}.extraGroups = [

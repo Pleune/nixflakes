@@ -115,6 +115,31 @@ python3 pkgs/agent-sandbox/test.py "$sandbox" "$fixture" "$bash"
 Runtime tests require working Bubblewrap/user namespaces and should be launched
 from the repository, not from all of HOME.
 
+## Inference stack (ai + llm)
+
+`ai` runs Strata (`nixflakes.services.strata` in `platforms/ai.nix`), serving the Gyro-M
+quant OpenAI- and Anthropic-compatible on `http://ai.home.pleunetowne.com:8080/v1`. It
+serves the LAN without an API key (`allowUnauthenticated`), so `allowedHosts` names the
+domain callers use and `openFirewall` opens the port. The first start downloads the quant
+into `/var/lib/strata` and builds the memory-mapped pack, so the first converge after a
+deploy is slow.
+
+`llm` hosts Hermes Agent (`services.hermes-agent`, via the upstream flake's NixOS module
+imported in `platforms/llm.nix`): the `hermes` CLI on the system PATH, state under
+`/var/lib/hermes`, and `hermes serve` on `127.0.0.1:9119` for Hermes Desktop. Hermes does
+not run a model itself; its `strata` provider points at the endpoint above.
+
+```bash
+nix build --no-link .#packages.x86_64-linux.hermes-agent
+nix build --no-link .#nixosConfigurations.llm.config.system.build.toplevel
+```
+
+The `hermes-agent` input is pinned to the unmerged PR branch
+`github:NousResearch/hermes-agent/pull/152542/head`: that head commit is the only place
+`nix/pm-packages.nix` version-gates the patchelf PR672 backport, which otherwise applies a
+0.19.x-only patch to this repo's patchelf 0.15.2 and fails every pm tool package. Switch
+the url back to `github:NousResearch/hermes-agent` once the PR lands on main.
+
 ## Deploy to all nix homelab components
 ```bash
 # optional update
