@@ -47,6 +47,16 @@ in
   rpiv-voice = final.callPackage ./pkgs/rpiv-mono/rpiv-voice { };
   rpiv-warp = final.callPackage ./pkgs/rpiv-mono/rpiv-warp { };
 
+  # Strata (Qwen3.8-Flash-Next inference on one GPU).  The CUDA engine and the image encoder are
+  # separate derivations so a service can point at them; the `strata` bundle carries both under
+  # passthru.engine / passthru.vision.
+  strata-engine = final.callPackage ./pkgs/strata/engine.nix { };
+  strata-vision = final.callPackage ./pkgs/strata/vision.nix { };
+  strata = final.callPackage ./pkgs/strata {
+    engine = final.strata-engine;
+    vision = final.strata-vision;
+  };
+
   # https://forums.developer.nvidia.com/t/compilation-errors-with-gcc-versions-11-14-and-cuda-toolkit-12-5-12-6-due-to-undefined-builtin-ia32-ldtilecfg-and-builtin-ia32-sttilecfg-etc/308401/2
   # https://github.com/ggml-org/llama.cpp/issues/9473
   # patch does not work when compiling with F16 support, https://github.com/ggml-org/llama.cpp/pull/9509#issuecomment-2661176283

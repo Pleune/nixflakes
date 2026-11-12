@@ -262,7 +262,23 @@
               ];
             };
 
-            checks = deploy-rs.lib.${system}.deployChecks self.deploy;
+            checks =
+              deploy-rs.lib.${system}.deployChecks self.deploy
+              # Not callPackage: that would add `override`/`overrideDerivation` keys, which are
+              # functions and so fail the `attrsOf package` type of `checks`.
+              // (import ./pkgs/strata/checks {
+                inherit pkgs;
+                inherit (pkgs)
+                  lib
+                  stdenv
+                  runCommand
+                  testers
+                  curl
+                  ;
+                strataModule = import ./modules/nixos/strata;
+                strataPkg = pkgs.strata;
+              });
+
             formatter = inputs'.nixpkgs.legacyPackages.nixfmt;
           };
       }
