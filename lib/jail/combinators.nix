@@ -9,6 +9,11 @@ let
     capture-host-home = import ./capture-host-home.nix {
       inherit combinators;
     };
+    # Overrides the upstream `gpu` combinator: jail.nix merges
+    # `additionalCombinators` over its builtins, so this variant wins.
+    gpu = import ./gpu.nix {
+      inherit combinators;
+    };
     minimal-env = import ./minimal-env.nix {
       inherit combinators lib;
     };

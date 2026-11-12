@@ -73,7 +73,15 @@ to the original package and rewraps it; `wrapped.overrideAttrs` adjusts the wrap
 itself (customize the original before wrapping to change its build).
 
 The policy keeps cwd writable, provides an ephemeral `/tmp/pi-home` and XDG
-folders, filters PATH/environment, and shares networking. It forwards the existing
+folders, filters PATH/environment, shares networking, and exposes host GPUs.
+GPU access binds `/dev/dri` plus any host `/dev/kfd` and `/dev/nvidia*` nodes,
+and replaces `/sys` with a tmpfs holding only the read-only `/sys/dev`,
+`/sys/bus`, `/sys/class`, and `/sys/devices` views, so Vulkan, EGL, VA-API,
+ROCm, and CUDA work while debugfs, securityfs, and firmware stay out. Every
+binding is guarded on the host path existing, so GPU-less hosts and drivers
+without `/dev/dri` (NVIDIA without `nvidia-drm`) are unaffected. Device access
+still follows host node permissions, and driver userspace comes from the
+already-visible `/run/opengl-driver`. It forwards the existing
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`,
 `DEEPSEEK_API_KEY`, and `XAI_API_KEY` allowlist.
 
@@ -90,8 +98,9 @@ As with Pi, the jail builder supplies coreutils ahead of the caller's PATH.
 
 This is a permissive development sandbox, **not a hermetic secret boundary**:
 much of the host filesystem (including the Nix store) is readable, the network is
-available, and starting in a home directory exposes that cwd read-write. Do not
-start it in your entire home directory when you want home isolation. Desktop
+available, the GPU is usable, and starting in a home directory exposes that cwd
+read-write. Do not start it in your entire home directory when you want home
+isolation. Desktop
 entries and service launchers are not rewritten; direct original store paths
 remain usable outside the sandbox. GUI programs and commands needing additional
 credentials, host sockets, or persistent state may not work with this policy.

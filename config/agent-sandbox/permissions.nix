@@ -23,6 +23,9 @@ with combinators;
     "dev"
     "home"
   ])
+  # GPU access: DRI render nodes, NVIDIA/AMD device nodes, and a read-only
+  # sysfs device view. Guarded, so GPU-less hosts are unaffected.
+  gpu
   mount-cwd
   jailCombinators.capture-host-home
   (jailCombinators.safe-path-from-var-resolved "PATH" ":")

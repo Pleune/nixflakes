@@ -136,6 +136,35 @@ with tempfile.TemporaryDirectory(prefix=".agent-sandbox-test-", dir=os.getcwd())
         thread.join(timeout=5)
         assert not thread.is_alive()
 
+    # GPU access mirrors the host. Guarded bindings mean a GPU-less host still
+    # starts the sandbox, and only hardware views are added.
+    host_dri = pathlib.Path("/dev/dri")
+    host_render = sorted(p.name for p in host_dri.glob("renderD[0-9]*")) if host_dri.is_dir() else []
+    jail_dev = run(shell, "-c", "ls /dev").decode().split()
+    if host_render:
+        jail_dri = run(shell, "-c", "ls /dev/dri").decode().split()
+        assert all(name in jail_dri for name in host_render), (host_render, jail_dri)
+        # Render nodes are usable, not merely visible.
+        run(shell, "-c", 'for node in /dev/dri/renderD*; do : > "$node" || exit 1; done')
+    else:
+        assert "dri" not in jail_dev, jail_dev
+    vendor_nodes = sorted(p.name for p in pathlib.Path("/dev").glob("nvidia*"))
+    if pathlib.Path("/dev/kfd").exists():
+        vendor_nodes.append("kfd")
+    assert all(name in jail_dev for name in vendor_nodes), (vendor_nodes, jail_dev)
+    # Block devices and the rest of devtmpfs stay hidden.
+    assert not [name for name in jail_dev if name.startswith(("nvme", "sd")) or name == "kvm"], jail_dev
+    # The sysfs views are guarded the same way as the device nodes, so assert only the
+    # ones the host actually has; a parent that already masks /sys/bus (another jail, say)
+    # cannot hand the sandbox a tree it does not have.
+    for path in ("/sys/bus/pci/devices", "/sys/dev/char", "/sys/class", "/sys/devices"):
+        if pathlib.Path(path).is_dir():
+            run(shell, "-c", f"test -d {path}")
+    run(shell, "-c", "test ! -e /sys/kernel/debug && test ! -e /sys/firmware")
+    if pathlib.Path("/sys/bus/pci").is_dir():
+        run(shell, "-c", "touch /sys/bus/pci/sandbox-write-probe", expected=1)
+    run(shell, "-c", 'test ! -d /run/opengl-driver || test -d /run/opengl-driver/lib')
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         process = subprocess.Popen(
             [sandbox, shell, "-c", "printf ready; exec sleep 60"],
