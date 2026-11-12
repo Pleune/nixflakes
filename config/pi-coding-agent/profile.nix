@@ -45,7 +45,7 @@ let
     pkgs.pi-rtk-optimizer
     pkgs.pi-web-search
     pkgs.pi-caveman
-    pkgs.pi-pretty
+    #pkgs.pi-pretty
   ];
 
   extensions = lib.concatMap extensionFor extensionPackages;
