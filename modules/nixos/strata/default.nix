@@ -266,6 +266,60 @@ in
       default = true;
       description = "Download/prepare missing model files before starting (resumable, skipped when done).";
     };
+
+    tune = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Measure the engine settings that depend on this machine, once, before the first serve.
+        Upstream setup.py does this when it installs a model (`Tuning Strata for this PC ... roughly
+        15-30 minutes (3 rounds of each value)`, tools/calibrate.py): `--pcie-frac`, `--spec-min-p`,
+        `--pool-workers`, `--adapt-every/--adapt-swaps/--adapt-decay` and, for a layer split,
+        `--prefill-pipe` are set by the card, the PCIe link and the CPU rather than by the model, and
+        the shipped defaults were measured on the authors' PC (setup.py names a Ryzen 5 7600 + RTX
+        5070 on PCIe 5).  A service installed by Nix never runs setup.py, so without this the same
+        model runs measurably slower than an install that was tuned.
+        The measurement starts the engine itself, so the server is not up yet and nothing else may
+        hold the GPU: it runs in the service's preStart, and the first start can take half an hour
+        (`TimeoutStartSec` is already unlimited).  The result is kept in the state dir as
+        `tune.json`, keyed by this PC plus the model, context, images and cards it serves, and is
+        replayed into the config on every later start (the prefetch rewrites the config each start).
+        A new card, quant or context re-measures; a measurement that fails keeps the defaults and
+        retries at the next three starts, then stops until `tune.json`/`tune-failed.json` are deleted.
+        The tuning's values win over `extraEngineArgs` for those five knobs.
+      '';
+    };
+
+    tuneForce = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Measure again at the next start even when a saved measurement matches this PC.  Reach for it
+        after moving the model to another card, or when a measurement looks wrong; leave it off in
+        the configuration, since it costs the whole 15-30 minutes every start while it is on.
+      '';
+    };
+
+    learnExpertProfile = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Let the engine write down the expert tier it learns while serving (`--expert-profile-save`,
+        the config's `expert_profile_save`), into the state dir, and start from what it learned at
+        the next start instead of from the shipped profile.  Strata's own installer ships a static
+        `--expert-profile` file measured on the authors' machine; a profile learned on this box is
+        about your traffic.  The file is written on QUIT and every `learnProfileEvery` minutes.
+      '';
+    };
+
+    learnProfileEvery = mkOption {
+      type = types.numbers.between 0 1440;
+      default = 10;
+      description = ''
+        Minutes between writes of the learned expert profile (`--expert-profile-save-every`).
+        0 writes only when the engine quits.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -320,6 +374,13 @@ in
         message = "nixflakes.services.strata: mockEngine serves text only; set vision = \"off\" with it.";
       }
       {
+        assertion = !cfg.tune || (cfg.prefetchOnStart && !cfg.mockEngine);
+        message = ''
+          nixflakes.services.strata: tune measures the config prefetchOnStart writes; set
+          prefetchOnStart = true (and mockEngine = false), or tune = false to keep the defaults.
+        '';
+      }
+      {
         assertion = cfg.mockEngine || cfg.vision == "off" || (cfg.package.passthru.vision or null) != null;
         message = "nixflakes.services.strata: with vision on, package must carry the vision encoder under passthru.vision.";
       }
@@ -351,54 +412,54 @@ in
       # and writes config.json for the server.  Dash-leading values must travel as --flag=VALUE
       # (argparse reads a dash-leading value after a space as its own option), which is why
       # extraEngineArgs is rendered as --extra-arg=<x>.
+      #
+      # After the prefetch, strata-tune measures this PC's engine settings into that config (once;
+      # replayed from tune.json afterwards).  It starts the engine itself, so it runs here rather
+      # than in ExecStart, where the server would already hold the GPU, and it always exits 0: a PC
+      # it could not measure keeps the defaults and still serves.
       preStart = mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (
         toString (
           pkgs.writeShellScript "strata-prestart" (
+            let
+              # One argument per element, each already shell-quoted where it needs it.  `$state`
+              # stays literal so the unit's shell expands it, and no element carries a newline: the
+              # command is one line, so the tuning below is a separate command and not a
+              # continuation of the prefetch.
+              args = [
+                "--family" (escapeShellArg cfg.family)
+                "--model" (escapeShellArg cfg.model)
+                "--context" (toString cfg.context)
+                "--data-dir" "\"$state\""
+              ]
+              ++ optional (cfg.lowRam != null) "--low-ram ${if cfg.lowRam then "on" else "off"}"
+              ++ [
+                "--vision" cfg.vision
+                "--learn-profile" (if cfg.learnExpertProfile then "on" else "off")
+                "--learn-profile-every" (toString cfg.learnProfileEvery)
+              ]
+              ++ optional (cfg.vision != "off") "--vision-exe ${escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision"
+              ++ optional (cfg.parallel != null) "--parallel ${toString cfg.parallel}"
+              ++ optional (cfg.hfTokenFile != null) "--hf-token-file \"/run/credentials/strata.service/hf-token\""
+              ++ [
+                "--emit-config" "\"$state/config.json\""
+                "--engine" "${escapeShellArg (toString cfg.package.passthru.engine)}/bin/strata"
+                "--host" (escapeShellArg cfg.host)
+              ]
+              ++ optional (cfg.apiKeyFile != null) "--api-key-file \"/run/credentials/strata.service/api-key\""
+              ++ optional (cfg.gpus != [ ]) "--gpu ${escapeShellArg (concatStringsSep "," cfg.gpus)}"
+              ++ optional (cfg.sampling != { }) "--sampling-json ${pkgs.writeText "strata-sampling.json" (builtins.toJSON cfg.sampling)}"
+              ++ optional (cfg.mcpServers != { }) "--mcp-json ${pkgs.writeText "strata-mcp.json" (builtins.toJSON cfg.mcpServers)}"
+              ++ optional (cfg.kv != null) "--extra-arg=--kv --extra-arg=${escapeShellArg cfg.kv}"
+              ++ map (x: "--extra-arg=${escapeShellArg x}") cfg.extraEngineArgs;
+            in
             ''
               set -euo pipefail
               state="$STATE_DIRECTORY"
-              exec ${cfg.package}/bin/strata-prefetch \
-                --family ${escapeShellArg cfg.family} \
-                --model ${escapeShellArg cfg.model} \
-                --context ${toString cfg.context} \
-                --data-dir "$state" \
+              ${cfg.package}/bin/strata-prefetch ${concatStringsSep " " args}
             ''
-            + optionalString (cfg.lowRam != null) ''
-              --low-ram ${if cfg.lowRam then "on" else "off"} \
+            + optionalString cfg.tune ''
+              ${cfg.package}/bin/strata-tune --config "$state/config.json"${optionalString cfg.tuneForce " --force"}
             ''
-            + ''
-              --vision ${cfg.vision} \
-            ''
-            + optionalString (cfg.vision != "off") ''
-              --vision-exe ${escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision \
-            ''
-            + optionalString (cfg.parallel != null) ''
-              --parallel ${toString cfg.parallel} \
-            ''
-            + optionalString (cfg.hfTokenFile != null) ''
-              --hf-token-file "/run/credentials/strata.service/hf-token" \
-            ''
-            + ''
-              --emit-config "$state/config.json" \
-              --engine ${escapeShellArg (toString cfg.package.passthru.engine)}/bin/strata \
-              --host ${escapeShellArg cfg.host} \
-            ''
-            + optionalString (cfg.apiKeyFile != null) ''
-              --api-key-file "/run/credentials/strata.service/api-key" \
-            ''
-            + optionalString (cfg.gpus != [ ]) ''
-              --gpu ${escapeShellArg (concatStringsSep "," cfg.gpus)} \
-            ''
-            + optionalString (cfg.sampling != { }) ''
-              --sampling-json ${pkgs.writeText "strata-sampling.json" (builtins.toJSON cfg.sampling)} \
-            ''
-            + optionalString (cfg.mcpServers != { }) ''
-              --mcp-json ${pkgs.writeText "strata-mcp.json" (builtins.toJSON cfg.mcpServers)} \
-            ''
-            + optionalString (cfg.kv != null) ''
-              --extra-arg=--kv --extra-arg=${escapeShellArg cfg.kv} \
-            ''
-            + concatMapStrings (x: "--extra-arg=${escapeShellArg x} ") cfg.extraEngineArgs
           )
         )
       );

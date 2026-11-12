@@ -348,6 +348,13 @@ def main() -> int:
                     help="several requests at once (2-8); written into the config's 'parallel' key, "
                          "which the server turns into the engine's batch slots (it lowers N itself when VRAM is short)")
     ap.add_argument("--emit-config")
+    ap.add_argument("--learn-profile", choices=["on", "off"], default="on",
+                    help="let the engine save the expert tier it learns while serving, into the data dir, and "
+                         "begin the next start from it when it is a profile of the same model "
+                         "(the config's 'expert_profile_save'; serve/server.py's learned_profile_args).  "
+                         "'off' keeps serving from the shipped profile only")
+    ap.add_argument("--learn-profile-every", type=float, default=10.0, metavar="MIN",
+                    help="minutes between those saves (0: only when the engine quits)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would be downloaded and built, then stop")
     ap.add_argument("--engine")
@@ -545,6 +552,13 @@ def main() -> int:
             cfg["parallel"] = a.parallel
         if vision:
             cfg["vision"] = vision
+        if a.learn_profile == "on":
+            # what the adaptive tier learned on this box, kept beside the pack.  The server adds
+            # --expert-profile-save/--expert-profile-save-every for these keys and, when the file is
+            # a profile of this same model (its header's layers and experts match), starts from it
+            # instead of the shipped --expert-profile, which was measured on someone else's traffic.
+            cfg["expert_profile_save"] = str(data / f"expert-profile-learned-{fam['tag'].lower()}{a.model.lower()}.bin")
+            cfg["expert_profile_save_every"] = a.learn_profile_every
         out = Path(a.emit_config)
         out.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         if a.api_key_file:

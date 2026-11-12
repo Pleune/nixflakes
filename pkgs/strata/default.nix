@@ -48,10 +48,14 @@ let
       cp -rL ${pins.strataSrc}/. $out/
       chmod -R u+w $out
       rm -rf \
-        $out/bench $out/docs $out/ref $out/apps $out/src $out/include \
+        $out/bench $out/ref $out/apps $out/src $out/include \
         $out/metal $out/sycl $out/spark $out/tests $out/history \
         $out/research $out/docker $out/cmake $out/packaging $out/bin \
         $out/third_party $out/.gitattributes $out/.gitignore
+      # docs/ keeps its top-level markdown and drops the rest: tools/calibrate.py builds the long
+      # prompt it measures a layer split's prompt read on from docs/*.md, while docs/media alone is
+      # 11 MB of pictures.  A split-tuned --prefill-pipe needs those files; a single card does not.
+      find $out/docs -mindepth 1 -maxdepth 1 -not -name '*.md' -exec rm -rf {} +
       rm -rf \
         $out/data/dflash2-tuned $out/data/dsv41 \
         $out/data/experimental-speed-projection $out/data/quant_quality
@@ -72,6 +76,7 @@ stdenvNoCC.mkDerivation {
     cp -rL ${share}/ $out/share/strata/
     chmod -R u+w $out/share/strata
     install -Dm644 ${./prefetch.py} $out/share/strata/prefetch.py
+    install -Dm644 ${./tune.py} $out/share/strata/tune.py
 
     makeWrapper ${py}/bin/python $out/bin/strata-serve \
       --add-flags "$out/share/strata/serve/server.py"
@@ -79,6 +84,9 @@ stdenvNoCC.mkDerivation {
       --add-flags "$out/share/strata/tools/chat.py"
     makeWrapper ${py}/bin/python $out/bin/strata-prefetch \
       --add-flags "$out/share/strata/prefetch.py" \
+      --set STRATA_SHARE "$out/share/strata"
+    makeWrapper ${py}/bin/python $out/bin/strata-tune \
+      --add-flags "$out/share/strata/tune.py" \
       --set STRATA_SHARE "$out/share/strata"
     runHook postInstall
   '';

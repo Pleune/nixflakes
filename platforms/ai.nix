@@ -152,6 +152,22 @@
     # First start of the unit downloads about 92 GB into /var/lib/strata and builds the pack, which
     # takes a while (TimeoutStartSec is 0 so systemd does not kill it).  The old copy under
     # ~/Strata-data belongs to the installer-run server and is not read by the unit.
+    #
+    # `tune` is on by default and adds the other half of that first start: Strata's own setup.py
+    # measures --pcie-frac, --spec-min-p, --pool-workers, --adapt-every/--adapt-swaps/--adapt-decay
+    # (and --prefill-pipe for a layer split) per PC with tools/calibrate.py, roughly 15-30 minutes,
+    # and Nix never runs setup.py.  Without it this box serves the same model on settings measured
+    # on the authors' hardware.  The measurement starts the engine itself, so nothing else may hold
+    # the GPU during that first start; it lands in /var/lib/strata/tune.json and is replayed into
+    # config.json on every later start.  `tuneForce = true` re-measures at the next start.
+    tune = true;
+
+    # The engine saves the expert tier it learns while serving to
+    # /var/lib/strata/expert-profile-learned-gyrom.bin (every 10 minutes and on quit) and begins the
+    # next start from it when it is a profile of this model, instead of the package's
+    # data/gyro-expert-profile.bin, which was measured on someone else's traffic.
+    learnExpertProfile = true;
+    learnProfileEvery = 10;
   };
 
   # Firewall on, for the sake of the model endpoint above.  openssh opens 22 itself, and Strata
