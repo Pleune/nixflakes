@@ -269,7 +269,10 @@ in
 
     tune = mkOption {
       type = types.bool;
-      default = true;
+      # Follows the engine rather than a flat `true`: a mock engine or a config the prefetch does
+      # not write has nothing to measure, and the checks build exactly those configurations.
+      default = cfg.prefetchOnStart && !cfg.mockEngine;
+      defaultText = literalExpression "cfg.prefetchOnStart && !cfg.mockEngine";
       description = ''
         Measure the engine settings that depend on this machine, once, before the first serve.
         Upstream setup.py does this when it installs a model (`Tuning Strata for this PC ... roughly
