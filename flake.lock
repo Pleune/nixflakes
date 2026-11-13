@@ -291,16 +291,16 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1794307593,
-        "narHash": "sha256-S8uDxh7wNP3BlZZcSUZ/kqodYF1m7axMCU2P1/Kbs30=",
-        "owner": "NousResearch",
+        "lastModified": 1794529906,
+        "narHash": "sha256-V3svYmQl1OEaKNIZt/XotjQwksC6HZ164xLwv1b/23M=",
+        "owner": "Pleune",
         "repo": "hermes-agent",
-        "rev": "59e85f91d9d7a899cf2a7f9322c0a90859667080",
+        "rev": "f3477069fa22bc0b5ab4cc61762b01de5349777b",
         "type": "github"
       },
       "original": {
-        "owner": "NousResearch",
-        "ref": "pull/152542/head",
+        "owner": "Pleune",
+        "ref": "nix-flake-fixes",
         "repo": "hermes-agent",
         "type": "github"
       }

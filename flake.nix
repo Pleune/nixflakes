@@ -74,17 +74,25 @@
     # Hermes Agent (Nous Research).  Consumed by platforms/llm.nix through its NixOS module
     # (services.hermes-agent), which is where Hermes is hosted.
     #
-    # Pinned to PR #152542 (unmerged) because its head commit is the only place nix/pm-packages.nix
-    # version-gates the patchelf PR672 backport.  On main the backport is applied unconditionally,
-    # and its patch only fits patchelf 0.19.x source; this repo's nixpkgs is on 0.15.2 (the 0.19
-    # bump was reverted in NixOS/nixpkgs 61a15beb37), so following nixpkgs against main made every
-    # pm tool package fail with "4 out of 6 hunks FAILED".  With the gate, 0.15.2 is used as-is and
-    # nixpkgs can be followed normally.
+    # Forked rather than followed, because two Nix fixes it needs are still open PRs upstream:
+    #  * #152542 -- nix/pm-packages.nix version-gates the patchelf PR672 backport.  On main the
+    #    backport applies unconditionally and its patch only fits patchelf 0.19.x source; this repo's
+    #    nixpkgs is on 0.15.2 (the 0.19 bump was reverted in NixOS/nixpkgs 61a15beb37), so every pm
+    #    tool package failed with "4 out of 6 hunks FAILED".  With the gate, 0.15.2 is used as-is and
+    #    nixpkgs can be followed normally.
+    #  * #141834 -- uv's workspace metadata is read from the unfiltered repo root at eval time.  On
+    #    main `loadWorkspace { workspaceRoot = pythonSrc; }` reads inside the filtered, derived
+    #    `hermes-python-source` path, which is Import From Derivation: it forces that path to be
+    #    realized just to evaluate the package.  CI runs `nix flake check --accept-flake-config
+    #    --no-build`, which forbids realizing anything, so the whole pipeline died with
+    #    "error: path '/nix/store/...-hermes-python-source' is not valid".
     #
-    # Switch the url back to `github:NousResearch/hermes-agent` once https://github.com/NousResearch/
-    # hermes-agent/pull/152542 is merged into main.
+    # Branch `nix-flake-fixes` is main plus both PRs, so no workaround is needed on our side.  Pin a
+    # rev rather than a moving branch here once the fork's own CI has confirmed the branch.
+    #
+    # Switch back to `github:NousResearch/hermes-agent` once both PRs land in main.
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/pull/152542/head";
+      url = "github:Pleune/hermes-agent/nix-flake-fixes";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.home-manager.follows = "home-manager";
     };

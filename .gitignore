@@ -3,3 +3,4 @@ result
 *.qcow2
 *.iso
 __pycache__
+/hermes-agent/
