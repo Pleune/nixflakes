@@ -97,6 +97,16 @@
       inputs.home-manager.follows = "home-manager";
     };
 
+    # Hermes WebUI (github:nesquena/hermes-webui).  Not in nixpkgs; it ships its own package and
+    # NixOS module (services.hermes-webui), consumed by platforms/ai.nix.
+    #
+    # Follows nixpkgs so the WebUI package and the Hermes agent venv it runs the agent with are
+    # built from the same package set.
+    hermes-webui = {
+      url = "github:nesquena/hermes-webui";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     private = {
       url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
