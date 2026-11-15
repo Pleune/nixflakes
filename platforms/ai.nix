@@ -19,7 +19,9 @@
     "sd_mod"
   ];
   boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ "kvm-amd" ];
+  # `btrfs` for the Docker data-root subvolume below; systemd-modules-load runs before
+  # local-fs.target, so the .mount unit can mount it.
+  boot.kernelModules = [ "kvm-amd" "btrfs" ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" = {
@@ -182,34 +184,40 @@
   # Hermes Agent, hosted here for now (temporarily moved off llm; see the disabled block in
   # platforms/llm.nix — restore it there to move Hermes back).
   #
-  # Container mode: the gateway runs as an Ubuntu 24.04 container (docker, auto-enabled by the
-  # module) with /nix/store bind-mounted read-only and /var/lib/hermes mounted at /data, so apt/
-  # pip/npm self-modification persists in the writable layer across restarts and rebuilds.  The
-  # container uses --network=host, which is what makes the API server below visible on the LAN.
+  # Native mode (container.enable = false): the gateway and the hashboard run as ordinary systemd
+  # units (`hermes-agent` and `hermes-backend`) on this host, and the *agent's own shell tool* is
+  # what gets sandboxed — `terminal.backend = docker` below runs every command it issues in a
+  # Docker container with CPU/memory/disk caps.  Dropping container mode is what makes the
+  # `hermes dashboard` hashboard available again (the module asserts `backend.mode != none` against
+  # `container.enable`, because the container runs the gateway only).
   #
-  # The `hermes dashboard` hashboard cannot run in container mode (the module asserts against it:
-  # the container runs the gateway only), so the browser UI here is Hermes WebUI, configured below.
-  # The gateway's OpenAI-compatible API server on 8642 is still on: it is the LAN endpoint for other
+  # The gateway's OpenAI-compatible API server on 8642 stays on: it is the LAN endpoint for other
   # clients, and Hermes WebUI's Tasks/cron health probe polls it.
   services.hermes-agent = {
     enable = true;
-    container.enable = true;
+    container.enable = false;
 
-    # `hermes` on the system PATH plus HERMES_HOME exported system-wide; the host CLI reads
-    # /var/lib/hermes/.hermes/.container-mode and execs into the container, so interactive shells
-    # share sessions, skills and cron with the service instead of growing a second ~/.hermes.
+    # `hermes` on the system PATH plus HERMES_HOME exported system-wide, so interactive shells
+    # share sessions, skills and cron with the units instead of growing a second ~/.hermes.
     addToSystemPackages = true;
-
-    # Mitch gets ~/.hermes -> /var/lib/hermes/.hermes and joins the hermes group.
-    container.hostUsers = [ username ];
 
     # Plaintext for now; the agenix pass moves these to an environmentFile / age secret.
     #
     # API_SERVER_KEY is mandatory: the api_server platform refuses to start without it (and
     # checks its strength).  It authenticates every /v1 request as a bearer token, which is what
     # lets the API server answer the whole LAN.
+    #
+    # The dashboard trio is mandatory too once backend.host is non-loopback: the hashboard answers
+    # shell/PTY sockets, so binding 0.0.0.0 switches on its auth gate and the `basic` provider
+    # these three register is what satisfies it.  Hermes reads env before config.yaml, hashes the
+    # password in memory per start, and never writes it to config.yaml; SECRET signs session
+    # tokens, so without a fixed value every restart logs everyone out (it must decode to 16+
+    # bytes as base64 or hex).
     environment = {
       API_SERVER_KEY = "hermes-lan-bootstrap";
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME = "mitch";
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD = "hermes-bootstrap";
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET = "2W74lj6sTnRABgmlKGNN4SGqIzgvwExq6YP70XmE5z0=";
     };
 
     settings = {
@@ -243,22 +251,117 @@
         extra.port = 8642;
       };
 
-      terminal.backend = "local"; # the container itself is the sandbox
+      # The sandbox is the agent's shell tool, not the process hosting the agent.  Every
+      # terminal/execute_code call runs in `docker run` against the default Hermes sandbox image
+      # (hermes_cli/config_defaults.py:13 `DEFAULT_SANDBOX_IMAGE =
+      # "nousresearch/hermes-sandbox:desktop"`), which Docker pulls on the first call — nothing
+      # pre-pulls it here, so that first command pays the download.
+      #
+      # `tools/environments/docker.py:_resource_args` turns the numbers below into `--cpus 12`,
+      # `--memory 8192m` and a disk quota, all gated on a once-per-process cgroup probe
+      # (`--cpus/--memory/--pids-limit` need the controllers; ai has them).  CPU and memory are
+      # therefore hard caps.
+      #
+      # Disk is different: Docker only accepts `--storage-opt size=` when overlay2 sits on XFS
+      # mounted with `pquota` (daemon/graphdriver/overlay2/overlay.go returns "--storage-opt is
+      # supported only for overlay over xfs with 'pquota' mount option"), and ai's data root is on
+      # btrfs.  Hermes' probe (`_storage_opt_supported`) fails once per process, caches
+      # "unsupported", logs "Docker storage driver does not support per-container disk limits" and
+      # starts the sandbox without the flag.  The real cap is the btrfs qgroup limit below, which
+      # fails writes with EDQUOT at 500 GiB for the whole store.  `container_disk` is kept at the
+      # same 500 GiB so the intent is stated once and becomes real per-container enforcement the
+      # day the data root moves to XFS+pquota.
+      terminal = {
+        backend = "docker";
+        container_cpu = 12;
+        container_memory = 8192; # MB
+        container_disk = 512000; # MB = 500 GiB; enforced by btrfs today, by Docker if XFS later
+        # The sandbox keeps its filesystem between sessions, so `pip install` inside a turn
+        # survives to the next one (container_persistent is the upstream default; stated so the
+        # durability is visible here).
+        container_persistent = true;
+        # Commands need the network for pip/npm/curl, and the sandbox is already isolated by
+        # `--cap-drop ALL` plus the two tmpfs mounts docker.py adds.
+        docker_network = true;
+        # Expose the agent's working directory inside the container as /workspace, otherwise the
+        # shell/file tools work in a container that cannot see /var/lib/hermes/workspace.  This is
+        # the one knob that trades isolation for continuity; leave it false to lock the sandbox
+        # away from the agent's files.
+        docker_mount_cwd_to_workspace = true;
+      };
       compression.enabled = true;
     };
 
-    # backend.mode must stay "none": the module refuses serve/dashboard together with
-    # container.enable (one command in one container).  Hermes WebUI replaces the hashboard.
+    backend = {
+      # `hermes dashboard`: the /api/ws + /api/pty sockets plus the browser admin panel on the same
+      # port, in its own unit (`systemd.services.hermes-backend`) beside the gateway unit.  Both
+      # share one HERMES_HOME.
+      #
+      # LAN-facing, which is why the basic-auth environment above is required: binding anything but
+      # loopback switches on the auth gate, and 0.0.0.0 accepts any Host header.
+      mode = "dashboard";
+      host = "0.0.0.0";
+      port = 9119;
+    };
   };
+
+  # Docker is the agent's terminal sandbox now, so the daemon has to run here.  With
+  # container.enable = false the module no longer enables it for us (that mkDefault lives inside
+  # the container-mode branch).
+  virtualisation.docker.enable = true;
+
+  # ── Docker data root on the `hermes-container` store, capped at 500 GiB ──────────
+  # /dev/sda1 (UUID 9e27c0a6-7a7d-41fe-8e83-0ed124cea728, 1.82 TiB, mkfs.btrfs v7.3 with
+  # block-group-tree) holds Docker's layer store in the `docker` subvolume, so image pulls and
+  # sandbox writes can never fill the 256 GiB ext4 root.  The cap is a qgroup limit (see the
+  # service below) rather than a Docker flag, because Docker's own disk quota needs XFS+pquota.
+  # Created by ./setup-hermes-container-storage.sh, which also renames the filesystem label from
+  # `storage_pool` to `hermes-container`; the mount below stays on the UUID so that rename is
+  # cosmetic.  Run the script on ai before the first rebuild, or this mount unit fails at boot.
+  boot.supportedFilesystems.btrfs = true;
+
+  fileSystems."/var/lib/docker" = {
+    device = "/dev/disk/by-uuid/9e27c0a6-7a7d-41fe-8e83-0ed124cea728";
+    fsType = "btrfs";
+    options = [ "subvol=/docker" "noatime" ];
+  };
+
+  # Qgroup limits live inside the filesystem and survive a reboot, but re-applying them on every
+  # boot keeps a recreated subvolume or a `btrfs quota disable` self-healing.  `quota enable` is
+  # a no-op once the quota tree exists, so it is guarded rather than fatal.
+  systemd.services."btrfs-docker-quota" = {
+    description = "Cap the hermes-container Docker data root at 500 GiB";
+    requires = [ "var-lib-docker.mount" ];
+    after = [ "var-lib-docker.mount" ];
+    before = [ "docker.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      type = "oneshot";
+      remainAfterExit = true;
+    };
+    script = ''
+      ${pkgs.btrfs-progs}/bin/btrfs quota enable /var/lib/docker || true
+      ${pkgs.btrfs-progs}/bin/btrfs qgroup limit -e 500g /var/lib/docker
+    '';
+  };
+
+  # Docker must see the quota before the first container, otherwise a huge pull could land
+  # unaccounted.
+  systemd.services.docker.after = [ "btrfs-docker-quota.service" ];
+
+  # The gateway and dashboard units run as `hermes`, and only members of the docker group reach
+  # /run/docker.sock — without this every terminal call dies with a permission error on the socket.
+  users.users.hermes.extraGroups = [ "docker" ];
 
   # Hermes WebUI (github:nesquena/hermes-webui — not in nixpkgs, but it ships its own package and
   # NixOS module, so this is the clean path).  This replaces the hashboard that container mode
   # cannot run.
   #
-  # Chat is routed to the gateway container rather than to the WebUI's own in-process runtime
-  # (`HERMES_WEBUI_CHAT_BACKEND = gateway`, docs/advanced-chat-setup.md): with `container.enable`
-  # the agent already runs in the container against /var/lib/hermes/.hermes, and a second
-  # in-process agent would race it on the same state.db.  The WebUI still reads
+  # Chat is routed to the gateway unit rather than to the WebUI's own in-process runtime
+  # (`HERMES_WEBUI_CHAT_BACKEND = gateway`, docs/advanced-chat-setup.md): the gateway already runs
+  # against /var/lib/hermes/.hermes, and a second in-process agent would race it on the same
+  # state.db — the same reason it stayed gateway-backed when Hermes ran in container mode.  The
+  # WebUI still reads
   # $HERMES_HOME/config.yaml for its model list and session view, so it shows exactly the config
   # above — Gyro-M through Strata — and the browser talks to the same gateway the CLI does.
   # Gateway mode costs a few WebUI-only routes, which answer 409 `gateway_mode_unsupported`:
@@ -290,9 +393,8 @@
     agent.package = config.services.hermes-agent.package;
 
     extraEnvironment = {
-      # Browser turns go to the gateway's API server.  `--network=host` means the container's
-      # 0.0.0.0:8642 is also 127.0.0.1:8642 for this unit, so the WebUI talks to the gateway over
-      # loopback and never through the firewall.
+      # Browser turns go to the gateway's API server, which binds 0.0.0.0:8642 on this box; this
+      # unit reaches it over loopback and never through the firewall.
       HERMES_WEBUI_CHAT_BACKEND = "gateway";
       HERMES_WEBUI_GATEWAY_BASE_URL = "http://127.0.0.1:8642";
       # Approval cards need the gateway runs API (/v1/runs + /v1/runs/{id}/approval).  The pinned
@@ -302,7 +404,8 @@
       HERMES_WEBUI_GATEWAY_USE_RUNS_API = "true";
 
       # The agent dir resolves inside the read-only store, so relative writes need a writable
-      # home; this is the workspace the container mounts at /data/workspace.
+      # home; this is the agent's own working directory (the module writes it to
+      # `terminal.cwd`, and the docker sandbox mounts it at /workspace).
       HERMES_WEBUI_SERVER_CWD = "/var/lib/hermes/workspace";
       HERMES_WEBUI_DEFAULT_WORKSPACE = "/var/lib/hermes/workspace";
       HERMES_WEBUI_SKIP_ONBOARDING = "1"; # config.yaml is declarative; no first-run wizard
@@ -317,17 +420,23 @@
   # enabled on every host and avahi answers on UDP 5353.
   #
   # Hermes adds the LAN surface: 8642 is the gateway API server (bearer-key gated by
-  # API_SERVER_KEY).  Hermes WebUI opens its own 8787 through openFirewall above, so it is not
-  # listed here; this stays the file's only `networking.firewall` assignment.
+  # API_SERVER_KEY) and 9119 is the hashboard (basic-auth gated).  Hermes WebUI opens its own 8787
+  # through openFirewall above, so it is not listed here; this stays the file's only
+  # `networking.firewall` assignment.
   networking.firewall = {
     enable = true;
-    allowedTCPPorts = [ 8642 ];
+    allowedTCPPorts = [ 8642 9119 ];
     allowedUDPPorts = [ 5353 ];
   };
 
   users.users.${username}.extraGroups = [
     "video"
     "render"
+    # Native mode has no container-mode ~/.hermes symlink, so mitch's interactive `hermes` shares
+    # the service's state by reading /var/lib/hermes/.hermes directly: `addToSystemPackages` exports
+    # HERMES_HOME system-wide, and the module already makes that tree `2770 hermes hermes` and writes
+    # config.yaml 0660 precisely because addToSystemPackages is on (hermes-agent/nix/nixosModules.nix:59).
+    "hermes"
   ];
 
   system.stateVersion = "26.05"; # Did you read the comment?
