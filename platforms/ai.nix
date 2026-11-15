@@ -150,6 +150,13 @@
     vision = "cpu";
     gpus = [ "0" ];
 
+    # Two requests answered at once.  Each slot holds its own session context in VRAM, so Hermes'
+    # WebUI and a second caller (the llm host, a script) stop queueing behind each other.  Strata
+    # turns this into the engine's batch slots, lowers it when the card runs short of VRAM, and
+    # clamps a value over the engine's limit rather than refusing it.  Null would mean one at a
+    # time; 1..8 is the range the module accepts.
+    parallel = 2;
+
     # Served to the LAN without an API key, so it is reachable by the llm host (and anything else
     # on PleuneNET).  `openFirewall` adds 8080 to the firewall, which is on for this host now.
     host = "0.0.0.0";
