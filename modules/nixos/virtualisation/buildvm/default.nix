@@ -180,6 +180,16 @@ in
         '';
       };
 
+      knownHostsFile = mkOption {
+        type = types.str;
+        default = "/var/lib/buildvm/guest-known_hosts";
+        description = ''
+          Root-owned known_hosts holding the guest's sshd host key, used only by the provisioning
+          ssh.  buildvm-install deletes it when it writes a fresh image, so a reseed re-trusts the
+          guest's new key instead of failing on a changed fingerprint.
+        '';
+      };
+
       markerFile = mkOption {
         type = types.str;
         default = "/home/${cfg.userName}/provisioned-commit";
@@ -292,6 +302,12 @@ in
         else
           echo "buildvm: writing $IMAGE_FILE to $DISK"
           qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
+          # A fresh image brings fresh sshd host keys, so the pinned fingerprint from the old
+          # guest is now wrong.  Drop it and let provisioning trust the new one on first use.
+          if [ -f ${escapeShellArg cfg.provision.knownHostsFile} ]; then
+            rm -f ${escapeShellArg cfg.provision.knownHostsFile}
+            echo "buildvm: dropped the stale guest host key from ${cfg.provision.knownHostsFile}"
+          fi
         fi
 
         # Graft out-of-band guest files: the shared keypair and the repo checkouts.  This unit is
@@ -396,9 +412,14 @@ in
         # only the first word and then try to run `private` as a command.
         OVERRIDE=${optionalString (cfg.provision.secretsDir != null) (escapeShellArg "--override-input private ${cfg.provision.secretsDir}")}
 
+        # Trust-on-first-use against a file of our own: the guest key is not in root's known_hosts,
+        # and buildvm-install deletes this file whenever it writes a fresh image, so a reseed re-trusts
+        # automatically while a key that changes under a running guest still fails.
+        KNOWN=${escapeShellArg cfg.provision.knownHostsFile}
+        mkdir -p "$(dirname "$KNOWN")"
         gssh() {
           ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-            -p "$PORT" "$USER@127.0.0.1" "$@"
+            -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$USER@127.0.0.1" "$@"
         }
 
         # The guest boots asynchronously; sshd takes a few seconds, and a reseed takes longer.

@@ -173,6 +173,13 @@ guest's clone (the branch tip there can be ahead of or behind what ai runs, so t
 trust HEAD); then `sudo nixos-rebuild switch --flake
 /home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config`;
 record the commit; reboot the guest — qemu restarts it (`buildvm.service` `Restart = always`).
+
+Its ssh trusts the guest on first use into `/var/lib/buildvm/guest-known_hosts`, its own file rather
+than root's `known_hosts`, and `buildvm-install` deletes that file whenever it writes a fresh image.
+So a reseed re-trusts the guest's new sshd keys automatically, while a key that changes under a
+running guest still fails as a real warning.  A stale entry in `/root/.ssh/known_hosts` from an
+earlier guest does not affect provisioning, but it will break your own `ssh -p 2224`:
+`sudo ssh-keygen -R '[127.0.0.1]:2224'`.
 `builder` is in `wheel` with NOPASSWD sudo, which is what makes that possible and also makes it a nix
 trusted user (`config/nixos/core/nix` trusts `@wheel`).  So on a fresh disk the first boot ends with
 the guest running `platforms/buildvm.nix`: Xfce and Xvnc, nix gc, deploy-rs, and a root filesystem
@@ -241,6 +248,7 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 ```
 
 `wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
+It also drops `/var/lib/buildvm/guest-known_hosts`, because a new image carries new sshd host keys.
 The guest grows its own filesystem into the partition on boot, so nothing needs resizing.  Leave
 `/home/builder/provisioned-commit` alone and the reseeded guest re-applies the same commit on its next
 boot, which is what you want after wiping the disk.  To hand
@@ -296,6 +304,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm: builder: no local source for nixflakes, falling back to its url` | `/var/lib/deploy-ai/repo` does not exist yet — no deploy has run since the guest started being seeded from it.  The fallback clone needs `ai` to reach the git host with the keypair (§2/§4) |
 | `buildvm: clone of /var/lib/deploy-ai/repo into nixflakes failed` | the mirror exists but has no branches yet — run a `deploy-ai` so its fetch populates it, then `sudo systemctl restart buildvm-install` |
 | `buildvm: copy of secrets from /nix/store/… failed` | the tree `ai` evaluated is no longer in its store; re-evaluate and `sudo systemctl restart buildvm-install` |
+| `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | the guest was reseeded so its sshd keys are new while an old fingerprint is pinned.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every reseed, so this row only applies to generations before that fix or to your own `ssh`: `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
 | `buildvm-provision: no commit to apply (missing /home/builder/nixflakes?)` | the clone never happened — check the install unit's log and that `/var/lib/deploy-ai/repo` has branches |
 | `buildvm-provision: … is not in the guest's checkout` | `/home/builder/deployed-commit` names a commit the guest's clone predates.  Every `deploy-ai` run fetches the mirror the clone came from; to bring an existing checkout forward, run `git -C ~/nixflakes fetch origin` inside the guest (that needs §2) or reseed (§9), which re-clones from the mirror |
