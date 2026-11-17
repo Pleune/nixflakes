@@ -164,7 +164,11 @@ Add to the same module as `pkgs.writeShellScript` + unit:
       `{ private ? null }` so `buildvmBootstrap` still evaluates without the secrets input.
 - [x] T2 keypair grafted into `~builder/.ssh` (authorized_keys, id_ed25519, id_ed25519.pub).
       `provisionDir` and the `known_hosts` graft are gone: provisioning never talks to the git host.
-- [x] T3 bare mirrors under `/var/lib/buildvm/repos`, first-time clones, `origin` set to the real URL.
+- [x] T3 first-time clones into the guest from sources already on `ai`: `nixflakes` from
+      `deploy-ai`'s mirror (`/var/lib/deploy-ai/repo`), `secrets` as a plain copy of the tree `ai`
+      evaluated (`provision.secretsSource = private`).  No mirrors under `/var/lib/buildvm/repos`,
+      no network at seed time; `origin` is still the real URL.  (Changed during implementation from
+      the `repos = { name, mirror, origin }` design above.)
 - [x] T4 `buildvm-provision.service` switches the recorded commit
       (`/home/builder/deployed-commit`, fallback HEAD) with `--override-input private
       /home/builder/secrets`, marks `/home/builder/provisioned-commit`, reboots the guest.

@@ -387,27 +387,24 @@ in
     cpus = buildvm.cpus;
     memoryMiB = buildvm.memoryMiB;
     userName = buildvm.userName;
-    # Everything the guest gets from ai rather than from the git host, cloned on first boot.
+    # Everything the guest gets from ai rather than from the git host, handed over on first boot.
+    # The nixflakes checkout comes from deploy-ai's own mirror of the repo it deployed, so the guest
+    # starts on exactly the commit ai is running; origin stays the git host so the agent can push.
     repos = [
       {
         name = "nixflakes";
         url = buildvm.gitHost;
-        mirror = "${buildvm.stateDir}/repos/nixflakes";
+        source = "/var/lib/deploy-ai/repo";
         home = "nixflakes";
-      }
-      {
-        name = "secrets";
-        url = buildvm.secretsGit;
-        mirror = "${buildvm.stateDir}/repos/secrets";
-        home = "secrets";
       }
     ];
     provision = {
       enable = true;
       flakeAttr = "buildvm";
-      # The secrets checkout provisioning clones, passed as --override-input so the switch never
-      # has to fetch the `private` input over ssh.
+      # The secrets tree ai itself evaluated, copied into the guest and passed as --override-input so
+      # the switch never has to fetch the `private` input over ssh.
       secretsDir = "/home/${buildvm.userName}/secrets";
+      secretsSource = private;
     };
   };
 

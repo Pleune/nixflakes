@@ -45,11 +45,10 @@ rec {
   privateKeyPath = "${stateDir}/secrets/id_ed25519";
 
   # Where the agent's checkout comes from and what it works in.  Both are guest-side paths/URLs.
-  # Provisioning clones them from mirrors held on ai (buildvm-install), so neither the seed nor the
-  # switch needs to reach the git host; `origin` is still the real URL so the agent can push once
-  # it has a key the host accepts.
+  # buildvm-install clones it from the repository already on ai, so neither the seed nor the switch
+  # needs to reach the git host; `origin` is still the real URL so the agent can pull and push once
+  # that host accepts the key it was given.
   gitHost = "ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git";
-  secretsGit = "ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
   workdir = "/home/builder/nixflakes";
 
   # Written by deploy-ai after every successful switch, outside the checkout so it never makes

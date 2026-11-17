@@ -104,21 +104,26 @@ in
     # The user defined in platforms/buildvm.nix; its ~/.ssh is what the install unit provisions.
     userName = mkOption { type = types.str; default = "builder"; };
 
-    # Repos handed to the guest from ai instead of from the git host.  Mirroring on ai means the
-    # guest can be seeded, and switched, with no access to the git host at all; `origin` is still the
-    # real URL so the agent can push once that host accepts the key it was given.
+    # Repos handed to the guest from ai instead of from the git host.  The guest is seeded from a
+    # repository already on this machine, so seeding and switching need no access to the git host at
+    # all; `origin` is still the real URL so the agent can push once that host accepts the key it was
+    # given.
     repos = mkOption {
       type = types.listOf (types.submodule {
         options = {
           name = mkOption { type = types.str; description = "Label used in log lines."; };
           url = mkOption {
             type = types.str;
-            description = "Upstream URL, fetched into the mirror and left as the clone's origin.";
+            description = "Upstream URL, left as the clone's origin and used if source is missing.";
           };
-          mirror = mkOption {
-            type = types.str;
-            example = "/var/lib/buildvm/repos/nixflakes";
-            description = "Bare mirror on ai, kept up to date on every install pass.";
+          source = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "/var/lib/deploy-ai/repo";
+            description = ''
+              Bare repository on ai to clone from.  Null means clone straight from url, which needs
+              the deploy key the git host accepts.
+            '';
           };
           home = mkOption {
             type = types.str;
@@ -128,7 +133,7 @@ in
         };
       });
       default = [ ];
-      description = "Repos to mirror on ai and clone into the guest when it is seeded.";
+      description = "Repos to clone into the guest when it is seeded.";
     };
 
     provision = {
@@ -150,8 +155,19 @@ in
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Guest checkout of the secrets repo, passed as `--override-input private` so the switch
-          resolves the `private` input from disk instead of over ssh.
+          Where the secrets tree lands in the guest, passed as `--override-input private` so the
+          switch resolves the `private` input from disk instead of over ssh.  It is a copy of the
+          whole `private` input, flake.nix included, so that override is a valid flake.
+        '';
+      };
+
+      secretsSource = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          Path on ai whose contents are copied into secretsDir on every install pass, normally the
+          `private` input ai itself evaluated against.  A plain copy, not a git checkout: the guest
+          reads the same secrets ai used and needs no deploy key for the secrets repo.
         '';
       };
 
@@ -188,11 +204,16 @@ in
       # image once and never resizes anything.
       wantedBy = [ "multi-user.target" ];
       before = [ "buildvm.service" ];
+      # agenix decrypts the keypair through activation scripts, and the copy of those scripts that
+      # runs at boot is nixos-activation.service, so order after it.  Without this the unit starts
+      # while /run/agenix is still empty and the guest gets no private key.
+      after = [ "nixos-activation.service" ];
       serviceConfig.Type = "oneshot";
       serviceConfig.RemainAfterExit = true;
       # Units get only this PATH, so every tool the script calls has to be listed: awk is gawk and
-      # find is findutils, neither of which coreutils provides.  git is here for the mirrors.
-      path = [ pkgs.qemu pkgs.git pkgs.util-linux pkgs.coreutils pkgs.systemd pkgs.gawk pkgs.findutils ];
+      # find is findutils, neither of which coreutils provides, and git needs openssh for its ssh
+      # transport ("error: cannot run ssh" otherwise).
+      path = [ pkgs.qemu pkgs.git pkgs.openssh pkgs.util-linux pkgs.coreutils pkgs.systemd pkgs.gawk pkgs.findutils ];
       script = ''
         DISK=${cfg.disk}
         IMAGE=${cfg.image}
@@ -202,30 +223,44 @@ in
         KEY=${escapeShellArg cfg.guestKeyPath}
         MNT=/mnt/buildvm
 
-        # Fetch a bare mirror on ai: clone when absent, fetch when present.  Failures are logged, not
-        # fatal - a guest already seeded keeps working without the network.
-        fetch_mirror() {
-          mkdir -p "$(dirname "$1")"
-          if [ -d "$1" ]; then
-            git --git-dir="$1" fetch --quiet --prune origin '+refs/heads/*:refs/heads/*' \
-              || echo "buildvm: mirror fetch of $1 failed" >&2
-          else
-            git clone --quiet --mirror "$2" "$1" \
-              || echo "buildvm: mirror clone of $2 failed" >&2
-          fi
-        }
-
-        # Clone a mirror into the guest's home, but only the first time: later passes never touch the
-        # agent's own checkout.
+        # Clone a repository into the guest's home, but only the first time: later passes never touch
+        # the agent's own checkout.  The source is a repository that already lives on ai, so seeding
+        # needs no git host; url is still recorded as origin for the day the guest pushes.
         clone_home() {
-          TARGET="$MNT/home/$USER/$2"
+          TARGET="$MNT/home/$USER/$1"
           [ -e "$TARGET/.git" ] && return 0
           mkdir -p "$(dirname "$TARGET")"
-          git clone --quiet "$1" "$TARGET" \
-            || { echo "buildvm: clone of $1 into $2 failed" >&2; return 0; }
+          SRC="$2"
+          if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
+            echo "buildvm: ${cfg.userName}: no local source for $1, falling back to its url" >&2
+            SRC="$3"
+          fi
+          git clone --quiet "$SRC" "$TARGET" \
+            || { echo "buildvm: clone of $SRC into $1 failed" >&2; return 0; }
+          # A bare mirror's HEAD can point at a branch it never fetched, which would leave the clone
+          # with no working tree, so pick a head that is actually there.
+          BR=$(git --git-dir="$SRC" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | grep -m1 '^main$')
+          [ -n "$BR" ] || BR=$(git --git-dir="$SRC" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | head -1)
+          if [ -n "$BR" ]; then
+            git -C "$TARGET" checkout --quiet -B "$BR" "origin/$BR" \
+              || echo "buildvm: cannot check out $BR in $1" >&2
+          fi
           git -C "$TARGET" remote set-url origin "$3"
           chown -R "$GUEST_UID:$GUEST_UID" "$TARGET"
-          echo "buildvm: cloned $2 into the guest from $1"
+          echo "buildvm: cloned $1 into the guest from $SRC"
+        }
+
+        # The secrets tree is a plain copy, refreshed on every pass: ai evaluated the same tree, and
+        # the guest only ever reads it.  The store is read-only, hence the chmod.
+        copy_secrets() {
+          TARGET="$MNT/$2"
+          rm -rf "$TARGET"
+          mkdir -p "$TARGET"
+          cp -r "$1/." "$TARGET/" \
+            || { echo "buildvm: copy of secrets from $1 failed" >&2; return 0; }
+          chmod -R u+rwx "$TARGET"
+          chown -R "$GUEST_UID:$GUEST_UID" "$TARGET"
+          echo "buildvm: copied the secrets tree into the guest from $1"
         }
 
         if [ ! -b "$DISK" ]; then
@@ -312,13 +347,14 @@ in
           chown -R "$GUEST_UID:$GUEST_UID" "$SSH_DIR"
           echo "buildvm: grafted ssh keypair for ${cfg.userName}"
 
-          # The mirrors are fetched with the same key: it is the deploy key the git host accepts.
+          # Only the fallback clone above reaches the git host, and it uses the same key.
           if [ -f "$KEY" ]; then
             export GIT_SSH_COMMAND="ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
           fi
           ${concatMapStringsSep "\n" (r: ''
-          fetch_mirror ${escapeShellArg r.mirror} ${escapeShellArg r.url}
-          clone_home ${escapeShellArg r.mirror} ${escapeShellArg r.home} ${escapeShellArg r.url} '') cfg.repos}
+          clone_home ${escapeShellArg r.home} ${escapeShellArg r.source} ${escapeShellArg r.url} '') cfg.repos}
+          ${optionalString (cfg.provision.secretsSource != null) ''
+          copy_secrets ${escapeShellArg cfg.provision.secretsSource} ${escapeShellArg cfg.provision.secretsDir} ''}
         fi
 
         sync
