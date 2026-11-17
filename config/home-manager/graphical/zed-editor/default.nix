@@ -8,6 +8,7 @@ with lib;
 {
   options.nixflakes.programs.zedEditor.enable = mkEnableOption "Zed editor";
 
+  # TODO: zedEditor -> zed-editor
   config = mkIf config.nixflakes.programs.zedEditor.enable {
     programs.zed-editor = {
       enable = true;

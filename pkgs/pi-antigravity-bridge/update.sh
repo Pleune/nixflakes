@@ -43,6 +43,10 @@ src=$(jq -er .storePath <<< "$prefetch")
 hash=$(jq -er .hash <<< "$prefetch")
 version=$(jq -er .version "$src/packages/pi-antigravity-bridge/package.json")
 
+current_rev=$(sed -n 's/^  rev = "\([0-9a-f]*\)";$/\1/p' "$package_file")
+current_version=$(sed -n 's/^  version = "\([^"]*\)";$/\1/p' "$package_file")
+current_hash=$(sed -n 's/^    hash = "\(sha256-[A-Za-z0-9+/=]*\)";$/\1/p' "$package_file")
+
 mkdir -p "$tmpdir/workspace/packages"
 for name in pi-antigravity-bridge pi-ask-shared pi-tui-dialogs; do
   cp -r "$src/packages/$name" "$tmpdir/workspace/packages/"
@@ -58,6 +62,17 @@ cp package-lock.json "$tmpdir/workspace/"
   npm install --package-lock-only --ignore-scripts --legacy-peer-deps --no-audit --no-fund
 )
 cp "$tmpdir/workspace/package-lock.json" package-lock.json
+
+# Idempotent: when the pins and the regenerated lockfile are already the ones
+# on disk, the dependency hash is still valid, so there is nothing to rewrite.
+if [[ "$rev" == "$current_rev" && "$version" == "$current_version" && "$hash" == "$current_hash" ]] \
+  && cmp -s package-lock.json "$tmpdir/package-lock.json"; then
+  echo "No changes to commit; pi-antigravity-bridge already at $version ($rev)"
+  if "$check"; then
+    echo "Check complete; restoring package pins and lockfile"
+  fi
+  exit 0
+fi
 
 awk -v version="$version" -v rev="$rev" -v hash="$hash" '
   /^  version = "/ { print "  version = \"" version "\";"; next }

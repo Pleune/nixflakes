@@ -11,8 +11,22 @@ let
       ipywidgets
       jupyterlab
       nbconvert
-    ]);
-in {
+    ]
+  );
+
+  # Honeypot bait for iocaine. These links are hidden from humans but sit in
+  # the footer of every rendered page, so a crawler that follows them hands
+  # iocaine a path it only ever recognizes as bait. The token has to match
+  # `checks.generated-urls.identifiers` in platforms/jump.nix, because the
+  # poisoned page is served by iocaine on the other host and there is no way
+  # for Forgejo to ask it anything.
+  honeypotToken = "guestbook-7c4b59dd";
+  forgejoBait = pkgs.writeTextDir "templates/custom/extra_links_footer.tmpl" ''
+    <a href="/${honeypotToken}/" class="tw-hidden">Guestbook</a>
+    <a href="/cgi-bin/guestbook.pl" class="tw-hidden">Visitor log</a>
+  '';
+in
+{
   imports = [
     "${modulesPath}/virtualisation/lxc-container.nix"
   ];
@@ -113,6 +127,26 @@ in {
     };
     lfs.enable = true;
     package = pkgs.forgejo;
+  };
+
+  # Forgejo has no option for extra templates, and the upstream docs treat
+  # custom templates as unsupported, so these hooks are the ones shipped as
+  # empty placeholders upstream (`templates/custom/*.tmpl`) rather than an
+  # override of a real page. `customDir` is already in ReadWritePaths, and
+  # the unit runs as the Forgejo user with `CapabilityBoundingSet = ""`,
+  # `NoNewPrivileges` and `PrivateUsers` set, so `install` must not try to
+  # chown: the copy lands owned by the service's own user and group.
+  #
+  # Forgejo overlays `${customDir}/templates` onto its builtin templates
+  # (modules/templates/base.go:19 in 17.0.1), which is how the placeholder
+  # gets replaced. Templates are still the unsupported route upstream: expect
+  # to re-check this include site after a Forgejo upgrade.
+  systemd.services.forgejo = {
+    preStart = pkgs.lib.mkAfter ''
+      install -d -m 0750 ${config.services.forgejo.customDir}/templates/custom
+      install -m 0640 ${forgejoBait}/templates/custom/extra_links_footer.tmpl ${config.services.forgejo.customDir}/templates/custom/extra_links_footer.tmpl
+    '';
+    restartTriggers = [ forgejoBait ];
   };
 
   nixflakes.makeUser = false;

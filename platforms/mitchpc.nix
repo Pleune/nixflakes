@@ -101,6 +101,8 @@
     LC_TIME = "en_US.UTF-8";
   };
 
+  services.openssh.enable = true;
+
   # Enable the GNOME Desktop Environment.
   services.displayManager.gdm.enable = true;
   services.desktopManager.gnome.enable = true;
@@ -214,6 +216,7 @@
         firefox.enable = true;
         keepassxc.enable = true;
         mitchvim.enable = true;
+        zedEditor.enable = true;
       };
     };
   };
