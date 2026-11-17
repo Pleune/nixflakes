@@ -392,7 +392,9 @@ in
         ATTR=${escapeShellArg cfg.provision.flakeAttr}
         TARGET_FILE=${escapeShellArg cfg.provision.targetFile}
         MARKER=${escapeShellArg cfg.provision.markerFile}
-        OVERRIDE=${optionalString (cfg.provision.secretsDir != null) "--override-input private ${escapeShellArg cfg.provision.secretsDir}"}
+        # Quote the whole flag: unquoted, `OVERRIDE=--override-input private /path` would assign
+        # only the first word and then try to run `private` as a command.
+        OVERRIDE=${optionalString (cfg.provision.secretsDir != null) (escapeShellArg "--override-input private ${cfg.provision.secretsDir}")}
 
         gssh() {
           ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
@@ -421,6 +423,12 @@ in
         fi
         if ! gssh "git -C '$WORK' cat-file -e '$TARGET^{commit}'"; then
           echo "buildvm-provision: $TARGET is not in the guest's checkout" >&2
+          exit 1
+        fi
+        # The clone's branch tip can be ahead of or behind the commit ai actually runs, so put the
+        # working tree on $TARGET before the switch instead of trusting HEAD.
+        if ! gssh "git -C '$WORK' checkout --quiet --detach '$TARGET'"; then
+          echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
           exit 1
         fi
 
