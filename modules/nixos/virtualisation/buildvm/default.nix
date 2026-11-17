@@ -80,7 +80,9 @@ in
       before = [ "buildvm.service" ];
       serviceConfig.Type = "oneshot";
       serviceConfig.RemainAfterExit = true;
-      path = [ pkgs.qemu pkgs.util-linux pkgs.coreutils pkgs.systemd ];
+      # Units get only this PATH, so every tool the script calls has to be listed: awk is gawk and
+      # find is findutils, neither of which coreutils provides.
+      path = [ pkgs.qemu pkgs.util-linux pkgs.coreutils pkgs.systemd pkgs.gawk pkgs.findutils ];
       script = ''
         DISK=${cfg.disk}
         IMAGE=${cfg.image}

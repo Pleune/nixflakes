@@ -205,9 +205,9 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 `wipefs` clears the image's MBR signature, which is what makes the installer write the seed again.
 The guest grows its own filesystem into the partition on boot, so nothing needs resizing. To hand
 space back: stop the guest, shrink the inner partition instead of the disk —
-`LOOP=$(sudo losetup -f --show /dev/disk/by-partlabel/buildvm)`,
-`sudo e2fsck -f -y "$LOOP"p1`, `sudo resize2fs "$LOOP"p1 900G`, `sudo parted "$LOOP" resizepart 1 900G`,
-then `sudo losetup -d "$LOOP"`.
+`LOOP=$(sudo losetup -f --show -P /dev/disk/by-partlabel/buildvm)` (`-P` is what makes
+`"$LOOP"p1` exist), `sudo e2fsck -f -y "$LOOP"p1`, `sudo resize2fs "$LOOP"p1 900G`,
+`sudo parted "$LOOP" resizepart 1 900G`, then `sudo losetup -d "$LOOP"`.
 
 Cores/memory come from `nixflakes.virtualisation.buildvm.cpus`/`memoryMiB` (12 / 8192 MiB).
 
