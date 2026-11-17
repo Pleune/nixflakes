@@ -4,7 +4,7 @@
 { config, inputs, lib, pkgs, ... }:
 with lib;
 let
-  buildvm = import ../lib/buildvm;
+  buildvm = import ../lib/buildvm { private = inputs.private; };
 in
 {
   options = {
@@ -74,9 +74,13 @@ in
       isNormalUser = true;
       shell = pkgs.bash;
       home = "/home/${buildvm.userName}";
-      # Not in wheel: the agent builds and pushes; it activates nothing on ai.
-      extraGroups = [ ];
-      openssh.authorizedKeys.keys = [ buildvm.publicKey ];
+      # In wheel on purpose: the switch that makes this guest what it is runs *inside* the guest
+      # (modules/nixos/virtualisation/buildvm -> buildvm-provision.service runs
+      # `sudo nixos-rebuild switch --flake .#buildvm`).  That is all it can activate - the guest is
+      # disposable and shares nothing with ai - and `config/nixos/core/nix` makes @wheel a nix
+      # trusted user, which the flake workflow needs.
+      extraGroups = [ "wheel" ];
+      openssh.authorizedKeys.keys = lib.optionals (buildvm.publicKey != "") [ buildvm.publicKey ];
     };
 
     services.openssh = {
@@ -86,6 +90,14 @@ in
         PermitRootLogin = "no";
       };
     };
+
+    # The provisioning pass and the agent both need root inside the guest without a password, and
+    # there is no password to give: sshd is key-only and PermitRootLogin stays "no".  NixOS ships
+    # wheel with sudo rights already; this only removes the password prompt.
+    security.sudo.extraConfig = ''
+      %wheel ALL=(ALL) NOPASSWD: ALL
+      Defaults !lecture
+    '';
 
     nixflakes.buildvm.diskImage = import "${inputs.nixpkgs}/nixos/lib/make-disk-image.nix" {
       inherit pkgs config lib;

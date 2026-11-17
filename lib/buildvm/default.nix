@@ -1,19 +1,30 @@
-# Shared constants for the build VM. A plain attrset (not a module) so both consumers can import
+# Shared constants for the build VM. A plain attrset (not a module) so every consumer can import
 # it without declaring options:
-#   * platforms/buildvm.nix  - the guest system (authorized key, hostname)
-#   * platforms/ai.nix       - the host runner, the deploy gate, the Hermes ssh backend
+#   * platforms/buildvm.nix        - the guest system (authorized key, hostname)
+#   * platforms/ai.nix             - the host runner, the deploy gate, the Hermes ssh backend
+#   * platforms/buildvm-bootstrap.nix - the seed image, which is evaluated *without* the secrets
+#                                       input and therefore gets no public key of its own
 #
-# The private half of the key lives on ai at nixflakes.virtualisation.buildvm.privateKeyPath,
-# outside the repo and outside anything the agent can write. docs/buildvm-ai-setup.md section 4
-# generates it and prints the public half to paste below.
+# There is one ai <-> buildvm keypair.  Its private half lives in the secrets repo as
+# ai_buildvm_id_ed25519.age, decryptable with ai's host key, and ai exposes it through agenix at
+# nixflakes.virtualisation.buildvm.privateKeyPath: deploy-ai, the Hermes terminal, and
+# buildvm-install all use it, and buildvm-install grafts it into the guest as builder's own
+# ~/.ssh/id_ed25519 so the guest authenticates outbound with the same identity.
 #
-# There is deliberately no repo on ai.  The agent clones from the git host inside the guest, and
-# deploy-ai is told which repo to read with a required --repo URL.
+# The public half is read from the same repo (`ai_buildvm_id_ed25519.pub`).  That is an eval-time
+# read of a fetched flake input, not of a derivation, so it introduces no IFD; it does mean the
+# lock file has to point at a revision that contains the file.
+{ private ? null }:
 let
   stateDir = "/var/lib/buildvm";
+
+  # sshd takes one line per key; the committed .pub ends with a newline, which would otherwise
+  # become a blank line inside authorized_keys.
+  firstLine = text: builtins.elemAt (builtins.match "([^\r\n]+)[\r\n]*" text) 0;
 in
 rec {
-  publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvtkbKm1Q/LHKAYelr6EidEUGY3xYkQGHknRRXZkkFn buildvm@ai";
+  # "" when the secrets input was not passed (the seed image), which the consumers filter out.
+  publicKey = if private == null then "" else firstLine (builtins.readFile "${private.secrets}/ai_buildvm_id_ed25519.pub");
 
   # Raw partition handed straight to qemu; created by hand (docs/buildvm-ai-setup.md section 3).
   disk = "/dev/disk/by-partlabel/buildvm";
@@ -28,12 +39,17 @@ rec {
   # Paths on ai.
   inherit stateDir;
 
-  # Private half of the keypair on ai, generated during setup.  Mode 0640 root:hermes so the
-  # gateway units can use it as the ssh sandbox key.
+  # Private half of the keypair, as an agenix-generated path on ai (platforms/ai.nix wires it to
+  # config.age.secrets."ai_buildvm_id_ed25519", mode 0640 root:hermes so the gateway units can read
+  # it).  Kept as a plain default so the module stays usable without agenix.
   privateKeyPath = "${stateDir}/secrets/id_ed25519";
 
-  # Where the agent clones from, and what it works in. Both are guest-side paths/URLs.
+  # Where the agent's checkout comes from and what it works in.  Both are guest-side paths/URLs.
+  # Provisioning clones them from mirrors held on ai (buildvm-install), so neither the seed nor the
+  # switch needs to reach the git host; `origin` is still the real URL so the agent can push once
+  # it has a key the host accepts.
   gitHost = "ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git";
+  secretsGit = "ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
   workdir = "/home/builder/nixflakes";
 
   # Written by deploy-ai after every successful switch, outside the checkout so it never makes

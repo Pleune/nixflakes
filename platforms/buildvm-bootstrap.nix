@@ -15,7 +15,9 @@
 # guest's first boot; the host never resizes anything.
 { config, lib, pkgs, ... }:
 let
-  buildvm = import ../lib/buildvm;
+  # No secrets input here by design, so no public key: buildvm-install grafts the keypair into the
+  # guest before its first boot.
+  buildvm = import ../lib/buildvm { };
 in
 {
   system.stateVersion = "25.05";
@@ -80,7 +82,10 @@ in
     isNormalUser = true;
     shell = pkgs.bash;
     extraGroups = [ ];
-    openssh.authorizedKeys.keys = [ buildvm.publicKey ];
+    # The seed is reachable only with the key buildvm-install grafts into the guest before the
+    # first boot, so it authorizes nothing itself.  (This system is evaluated without the secrets
+    # input, so `buildvm.publicKey` is empty here by design.)
+    openssh.authorizedKeys.keys = lib.optionals (buildvm.publicKey != "") [ buildvm.publicKey ];
   };
 
   # Root has no password and no key here; without this NixOS refuses to evaluate, and the point of

@@ -8,6 +8,8 @@
   modulesPath,
   hermes-agent,
   hermes-webui,
+  # The secrets repo, so the ai <-> buildvm keypair can be read at eval time and decrypted at boot.
+  private,
   # From the flake's specialArgs: the guest's kernel, initrd, init and installer image, taken
   # from nixosConfigurations.buildvm so the VM boots exactly the system the flake describes.
   buildvmBoot,
@@ -15,7 +17,12 @@
 }:
 let
   # Single source of truth for the guest's key, port, disk and limits.
-  buildvm = import ../lib/buildvm;
+  buildvm = import ../lib/buildvm { inherit private; };
+
+  # The ai <-> buildvm keypair, decrypted by agenix with ai's host key.  Group `hermes` because the
+  # gateway, backend and webui units run as hermes and use this key for their ssh sandbox; mode
+  # 0640 so root and hermes can read it and nobody else can.
+  buildvmKey = config.age.secrets."ai_buildvm_id_ed25519".path;
 in
 {
   boot.initrd.availableKernelModules = [
@@ -296,10 +303,10 @@ in
         ssh_host = "127.0.0.1";
         ssh_port = buildvm.sshPort;
         ssh_user = buildvm.userName;
-        # Generated on ai by hand (docs/buildvm-ai-setup.md section 4); mode 0640 root:hermes so
-        # these units can read it.  It never enters the repo, and the guest authorizes only its
-        # public half.
-        ssh_key = buildvm.privateKeyPath;
+        # The ai <-> buildvm keypair, decrypted by agenix at boot; mode 0640 root:hermes so these
+        # units can read it.  It never enters the repo, and the guest authorizes only its public
+        # half - which is also the guest's own key, grafted by buildvm-install.
+        ssh_key = buildvmKey;
         ssh_persistent = true;
         # A guest-side path: the agent's shell starts in the flake checkout it clones itself.
         # `coerce_ssh_remote_cwd` maps host paths here, so keep it a path the guest really has.
@@ -346,6 +353,18 @@ in
     };
   };
 
+  # ── Secrets ───────────────────────────────────────────────────────────────────────────
+  # One secret for now: the private half of the ai <-> buildvm keypair.  The secrets repo is
+  # reachable through the `private` input, and the file is encrypted for ai's host ssh key, so ai
+  # needs that key in agenix's keys directory (docs/buildvm-ai-setup.md section 4).
+  nixflakes.agenix.enable = true;
+
+  age.secrets."ai_buildvm_id_ed25519" = {
+    file = "${private.secrets}/ai_buildvm_id_ed25519.age";
+    mode = "0640";
+    group = "hermes";
+  };
+
   # ── The agent's execution host: a NixOS guest on the 1.82 TiB disk ───────────────
   # Docker is retired here.  The sandbox is now a qemu/KVM guest whose disk is the whole partition
   # that used to hold Docker's data root (docs/buildvm-ai-setup.md section 3 wipes the btrfs
@@ -361,11 +380,35 @@ in
     disk = buildvm.disk;
     image = buildvmBoot.image;
     publicKey = buildvm.publicKey;
-    privateKeyPath = buildvm.privateKeyPath;
+    # agenix-decrypted (see the secrets section above); buildvm-install grafts this same keypair
+    # into the guest and buildvm-provision sshes with it.
+    privateKeyPath = buildvmKey;
     sshPort = buildvm.sshPort;
     cpus = buildvm.cpus;
     memoryMiB = buildvm.memoryMiB;
     userName = buildvm.userName;
+    # Everything the guest gets from ai rather than from the git host, cloned on first boot.
+    repos = [
+      {
+        name = "nixflakes";
+        url = buildvm.gitHost;
+        mirror = "${buildvm.stateDir}/repos/nixflakes";
+        home = "nixflakes";
+      }
+      {
+        name = "secrets";
+        url = buildvm.secretsGit;
+        mirror = "${buildvm.stateDir}/repos/secrets";
+        home = "secrets";
+      }
+    ];
+    provision = {
+      enable = true;
+      flakeAttr = "buildvm";
+      # The secrets checkout provisioning clones, passed as --override-input so the switch never
+      # has to fetch the `private` input over ssh.
+      secretsDir = "/home/${buildvm.userName}/secrets";
+    };
   };
 
   # ── The deploy gate ───────────────────────────────────────────────────────────────
@@ -381,7 +424,7 @@ in
     publicKey = buildvm.publicKey;
     deployedSource = deployedSource;
     deployedCommit = deployedCommit;
-    buildKey = buildvm.privateKeyPath;
+    buildKey = buildvmKey;
     # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
     # and refuses anything outside these prefixes before building.  platforms/ stays off the list
     # except the two files involved here, which is what stops the agent rewriting another machine.
