@@ -117,18 +117,19 @@ in
         resize2fs "$DISK"
 
         # Graft out-of-band guest files (the ssh keys it needs for the secrets input).  The VM is
-        # stopped, so mounting its filesystem here is safe.
+        # stopped, so mounting its filesystem here is safe.  The uid goes in a plain variable: UID is
+        # readonly in bash, so assigning it fails and chown would run with root's uid.
         if [ -d "$PROVISION" ] && [ -n "$(ls -A "$PROVISION" 2>/dev/null || true)" ]; then
           MNT=/mnt/buildvm
           mkdir -p "$MNT"
           mount "$DISK" "$MNT"
-          UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
-          if [ -n "$UID" ]; then
+          GUEST_UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
+          if [ -n "$GUEST_UID" ]; then
             mkdir -p "$MNT/home/${cfg.userName}/.ssh"
             cp -r "$PROVISION"/. "$MNT/home/${cfg.userName}/.ssh/"
             chmod 700 "$MNT/home/${cfg.userName}/.ssh"
             find "$MNT/home/${cfg.userName}/.ssh" -type f -exec chmod 600 {} \;
-            chown -R "$UID:$UID" "$MNT/home/${cfg.userName}/.ssh"
+            chown -R "$GUEST_UID:$GUEST_UID" "$MNT/home/${cfg.userName}/.ssh"
             echo "buildvm: provisioned guest ssh files for ${cfg.userName}"
           else
             echo "buildvm: user ${cfg.userName} not found in the guest, skipping provisioning" >&2
@@ -148,14 +149,16 @@ in
         Type = "simple";
         # Root: it owns the raw disk and needs /dev/kvm.
         User = "root";
+        # Root= is deliberately absent: stage 1 takes root from the guest's initrd fstab (the
+        # by-label entry in platforms/buildvm.nix).  Passing root= as well makes
+        # systemd-fstab-generator write sysroot.mount twice, which fails the generator and lands the
+        # guest in Emergency Mode.  Keep notes outside ExecStart: systemd joins the backslash
+        # continuation lines into one command line, so a # inside it would reach qemu as an argument.
         ExecStart = ''
           ${pkgs.qemu}/bin/qemu-system-x86_64 \
             -machine q35 -cpu host -enable-kvm \
             -smp ${toString cfg.cpus} -m ${toString cfg.memoryMiB} \
             -kernel ${cfg.kernel} -initrd ${cfg.initrd} \
-            # No root= here: stage 1 takes root from the guest's initrd fstab (the by-label entry in
-            # platforms/buildvm.nix).  Passing root= as well makes systemd-fstab-generator write
-            # sysroot.mount twice, which fails the generator and lands the guest in Emergency Mode.
             -append "init=${cfg.init} console=ttyS0 rd.shell=0 panic=0" \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0 \
