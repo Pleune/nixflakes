@@ -61,8 +61,10 @@ ls -l /dev/disk/by-partlabel/buildvm
 `--new=1:0:0` uses the default 1 MiB-aligned first sector and the last *usable* sector, leaving the
 trailing 32 sectors for the backup GPT. This partition is what
 `nixflakes.virtualisation.buildvm.disk` hands raw to qemu; the guest owns its contents
-(`buildvm-install.service` writes a bootable image onto it — an MBR with one ext4 partition, labelled
-`buildvm`), so the host mounts nothing here and never resizes it.
+(`buildvm-install.service` writes a bootable image onto it — a GPT with an ESP labelled `ESP` and an
+ext4 root labelled `buildvm`), so the host mounts nothing here and never resizes it. The image's own
+partition table lives *inside* this partition, and Linux does not scan inside partitions, so the host
+never sees `buildvm`'s ESP or root; only the loop device in §9 does.
 
 Wipe the old signatures, not just the partition table: a leftover filesystem on the partition is what
 made the installer think the guest was already installed.
@@ -105,8 +107,8 @@ way in.
 ## 5. Seed the guest, then switch `ai`
 
 Commit the pubkey first (flakes only see tracked files).  The seed image is built by
-`make-disk-image`, which boots a throwaway VM to install GRUB, so build it on a KVM host — here, on
-`ai` itself:
+`make-disk-image`, which boots a throwaway VM under OVMF to install systemd-boot onto the ESP it
+creates, so build it on a KVM host — here, on `ai` itself:
 
 ```bash
 nix build --accept-flake-config '.#nixosConfigurations.buildvmBootstrap.config.system.build.diskImage'
@@ -125,11 +127,14 @@ write whenever the partition already has a partition table. Grafting `guest-prov
 `~builder/.ssh` happens on every start, so keys you add later land without wiping the guest —
 `sudo systemctl restart buildvm-install` re-provisions in place. Nothing resizes anything on the host
 — the guest grows its own root partition and filesystem on its first boot (`boot.growPartition`),
-which is why a seed image sized to its own closure lands on a 1.82 TiB disk.
+which is why a seed image sized to its own closure lands on a 1.82 TiB disk. The unit also seeds
+`/var/lib/buildvm/efi-vars.fd` from `pkgs.OVMF.variables` the first time, because qemu's writable
+pflash unit needs an existing file of the firmware's own size.
 
-qemu boots the disk (GRUB lives in the image, so there is no `-kernel`/`-initrd`/`-append`), and the
-seed carries only systemd, nix, git and sshd. Install the real guest from inside it (§6): the switch
-reinstalls GRUB onto the guest's own disk, so the boot chain survives it.
+qemu boots the disk as UEFI (`pkgs.OVMF` firmware, no `-kernel`/`-initrd`/`-append`): OVMF loads the
+kernel's EFI stub through systemd-boot, which reads its entries from the ESP, and the seed carries
+only systemd, nix, git and sshd. Install the real guest from inside it (§6): the switch rewrites the
+loader entries and copies the new kernel onto the guest's own ESP, so the boot chain survives it.
 
 ## 6. Check the guest
 
@@ -146,8 +151,8 @@ repos. A first-connect ssh failure is usually a missing git-server host key: `ss
 git.pleunetowne.com` into `~builder/.ssh/known_hosts`.
 
 Then replace the seed with the real guest system. `nixos-rebuild switch` runs the bootloader phase, so
-GRUB on the guest's disk is rewritten with the new kernel and `boot.growPartition` has already grown
-the root by then:
+systemd-boot's entries and the kernel on the guest's ESP are rewritten with the new system, and
+`boot.growPartition` has already grown the root by then:
 
 ```bash
 sudo ssh -p 2224 builder@127.0.0.1 \
@@ -202,12 +207,14 @@ sudo wipefs -a /dev/disk/by-partlabel/buildvm
 sudo systemctl restart buildvm-install buildvm     # throws away everything the agent built
 ```
 
-`wipefs` clears the image's MBR signature, which is what makes the installer write the seed again.
+`wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
 The guest grows its own filesystem into the partition on boot, so nothing needs resizing. To hand
-space back: stop the guest, shrink the inner partition instead of the disk —
+space back: stop the guest, shrink the inner root partition instead of the disk —
 `LOOP=$(sudo losetup -f --show -P /dev/disk/by-partlabel/buildvm)` (`-P` is what makes
-`"$LOOP"p1` exist), `sudo e2fsck -f -y "$LOOP"p1`, `sudo resize2fs "$LOOP"p1 900G`,
-`sudo parted "$LOOP" resizepart 1 900G`, then `sudo losetup -d "$LOOP"`.
+`"$LOOP"p1`/`"$LOOP"p2` exist, where p1 is the ESP and p2 the root), `sudo e2fsck -f -y "$LOOP"p2`,
+`sudo resize2fs "$LOOP"p2 900G`, `sudo parted "$LOOP" resizepart 2 900G`, then
+`sudo losetup -d "$LOOP"`. To reset the guest's firmware state (its NVRAM boot entries), delete
+`/var/lib/buildvm/efi-vars.fd`; `buildvm-install.service` seeds a fresh copy next start.
 
 Cores/memory come from `nixflakes.virtualisation.buildvm.cpus`/`memoryMiB` (12 / 8192 MiB).
 
@@ -248,9 +255,12 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-install`: `… is not a block device` | §3 not run, or the partition label differs |
 | `buildvm: no *.img inside /nix/store/…-buildvm-bootstrap` | `image` was pointed at something other than the `make-disk-image` output directory |
 | `buildvm: … already partitioned, skipping install` | expected on every boot after the first; `wipefs -a` the partition (§9) to reseed |
-| `buildvm: no partition node for /dev/loop0 p1, skipping provisioning` | udev never made the loop partition node; the guest still boots, but `~builder/.ssh` stays unprovisioned — check `losetup -a` for a leftover device |
+| `buildvm: no partition node for /dev/loop0 p1, skipping provisioning` | udev never made the loop partition nodes; the guest still boots, but `~builder/.ssh` stays unprovisioned — check `losetup -a` for a leftover device |
+| `buildvm: no partition labelled buildvm on /dev/loop0, skipping provisioning` | the image on the disk has no root carrying that label — a foreign image or a half-written partition; reseed (§9) |
 | the guest never starts after an install failure | `buildvm.service` requires `buildvm-install.service`; fix the install unit, then `systemctl start buildvm` |
-| qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or GRUB never got into the partition — read `journalctl -u buildvm -b`, which shows the guest's serial console |
+| qemu: `pflash: file … does not exist` | `/var/lib/buildvm/efi-vars.fd` was deleted and `buildvm.service` started before `buildvm-install.service` seeded it — `systemctl start buildvm-install` |
+| guest drops to the UEFI shell / `Boot Failed` | no NVRAM entry and no ESP fallback path; the fallback needs `EFI/BOOT/BOOTX64.EFI` on the ESP, so re-run the bootloader phase in the guest (`nixos-rebuild switch --bootloader-only`) or reset `/var/lib/buildvm/efi-vars.fd` |
+| qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or no loader on the ESP — read `journalctl -u buildvm -b`, which shows the guest's serial console |
 | guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
 | guest builds fail on the `secrets` input | §2: guest key is not a deploy key for `secrets.git` |
 | gate refuses `outside the deploy-ai allowlist` | correct; the refusal names the nearest allowed prefix — widen `nixflakes.deploy-ai.allowlist` only deliberately |
