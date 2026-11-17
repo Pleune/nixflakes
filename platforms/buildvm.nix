@@ -44,9 +44,13 @@ in
     # so stage 1 needs virtio and ext4 before it can mount root.
     boot.initrd.kernelModules = [ "virtio_pci" "virtio_blk" "ext4" ];
 
-    # The raw image is a bare ext4 filesystem on the whole virtio disk, and qemu passes
-    # root=/dev/vda, so there is no partition to name here.
-    fileSystems."/" = { device = "/dev/vda"; fsType = "ext4"; };
+    # The raw image is a bare ext4 filesystem on the whole virtio disk, so there is no partition to
+    # name; make-disk-image labels it "buildvm" (mkfs.ext4 -L).  Root must be named by that udev
+    # symlink rather than /dev/vda: systemd-fstab-generator writes sysroot.mount from the kernel
+    # root= line *before* it reads the initrd fstab, so a second definition of the same node makes
+    # the generator fail with "Failed to create unit file ... as it already exists" and the guest
+    # drops into Emergency Mode.
+    fileSystems."/" = { device = "/dev/disk/by-label/buildvm"; fsType = "ext4"; };
 
     # Skip the repo's default user: no password login, no home-manager in a build VM.
     nixflakes.makeUser = false;

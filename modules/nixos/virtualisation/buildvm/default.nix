@@ -153,7 +153,10 @@ in
             -machine q35 -cpu host -enable-kvm \
             -smp ${toString cfg.cpus} -m ${toString cfg.memoryMiB} \
             -kernel ${cfg.kernel} -initrd ${cfg.initrd} \
-            -append "init=${cfg.init} root=/dev/vda rw console=ttyS0 rd.shell=0 panic=0" \
+            # No root= here: stage 1 takes root from the guest's initrd fstab (the by-label entry in
+            # platforms/buildvm.nix).  Passing root= as well makes systemd-fstab-generator write
+            # sysroot.mount twice, which fails the generator and lands the guest in Emergency Mode.
+            -append "init=${cfg.init} console=ttyS0 rd.shell=0 panic=0" \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0 \
             -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \
