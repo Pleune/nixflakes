@@ -80,7 +80,7 @@ in
       before = [ "buildvm.service" ];
       serviceConfig.Type = "oneshot";
       serviceConfig.RemainAfterExit = true;
-      path = [ pkgs.qemu pkgs.util-linux pkgs.coreutils ];
+      path = [ pkgs.qemu pkgs.util-linux pkgs.coreutils pkgs.systemd ];
       script = ''
         DISK=${cfg.disk}
         IMAGE=${cfg.image}
@@ -100,37 +100,48 @@ in
 
         # Already installed (or made by hand) => leave the guest's data alone.  The image is
         # partitioned, so look for a partition table: a stale filesystem signature would otherwise
-        # read as "installed", and an empty disk would read as "not installed".
+        # read as "installed", and an empty disk would read as "not installed".  Provisioning below
+        # still runs, so a guest written before the keys existed gets them.
         if [ -n "$(blkid -p -o value -s PTTYPE "$DISK" 2>/dev/null || true)" ]; then
           echo "buildvm: $DISK already partitioned, skipping install"
-          exit 0
+        else
+          echo "buildvm: writing $IMAGE_FILE to $DISK"
+          qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
         fi
 
-        echo "buildvm: writing $IMAGE_FILE to $DISK"
-        qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
-
-        # Graft out-of-band guest files (the ssh keys it needs for the secrets input).  The VM is
-        # stopped, so mounting its filesystem here is safe.  The uid goes in a plain variable: UID is
-        # readonly in bash, so assigning it fails and chown would run with root's uid.
+        # Graft out-of-band guest files (the ssh keys it needs for the secrets input).  This unit is
+        # Before= the qemu unit, so the VM is stopped and mounting its filesystem here is safe.  The
+        # uid goes in a plain variable: UID is readonly in bash, so assigning it fails and chown would
+        # run with root's uid.
         if [ -d "$PROVISION" ] && [ -n "$(ls -A "$PROVISION" 2>/dev/null || true)" ]; then
           MNT=/mnt/buildvm
           mkdir -p "$MNT"
-          # The image's root is the first partition *inside* it, so loop-mount with partitions.
-          LOOP=$(losetup -f --show "$DISK")
-          mount "$LOOP"p1 "$MNT"
-          GUEST_UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
-          if [ -n "$GUEST_UID" ]; then
-            mkdir -p "$MNT/home/${cfg.userName}/.ssh"
-            cp -r "$PROVISION"/. "$MNT/home/${cfg.userName}/.ssh/"
-            chmod 700 "$MNT/home/${cfg.userName}/.ssh"
-            find "$MNT/home/${cfg.userName}/.ssh" -type f -exec chmod 600 {} \;
-            chown -R "$GUEST_UID:$GUEST_UID" "$MNT/home/${cfg.userName}/.ssh"
-            echo "buildvm: provisioned guest ssh files for ${cfg.userName}"
+          # The image's root is the first partition *inside* it, so the loop device has to scan the
+          # image's partition table (-P); without it no /dev/loop0p1 node is ever created and mount
+          # fails with "Can't lookup blockdev".
+          LOOP=$(losetup -f --show -P "$DISK")
+          udevadm settle --timeout=10 || true
+          if [ ! -b "$LOOP"p1 ]; then
+            # Provisioning is out-of-band: the guest still boots without it, so keep the failure a
+            # warning instead of blocking buildvm.service, which requires this unit.
+            echo "buildvm: no partition node for $LOOP p1, skipping provisioning" >&2
+            losetup -d "$LOOP" || true
           else
-            echo "buildvm: user ${cfg.userName} not found in the guest, skipping provisioning" >&2
+            mount "$LOOP"p1 "$MNT"
+            GUEST_UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
+            if [ -n "$GUEST_UID" ]; then
+              mkdir -p "$MNT/home/${cfg.userName}/.ssh"
+              cp -r "$PROVISION"/. "$MNT/home/${cfg.userName}/.ssh/"
+              chmod 700 "$MNT/home/${cfg.userName}/.ssh"
+              find "$MNT/home/${cfg.userName}/.ssh" -type f -exec chmod 600 {} \;
+              chown -R "$GUEST_UID:$GUEST_UID" "$MNT/home/${cfg.userName}/.ssh"
+              echo "buildvm: provisioned guest ssh files for ${cfg.userName}"
+            else
+              echo "buildvm: user ${cfg.userName} not found in the guest, skipping provisioning" >&2
+            fi
+            umount "$MNT"
+            losetup -d "$LOOP"
           fi
-          umount "$MNT"
-          losetup -d "$LOOP"
         fi
       '';
     };

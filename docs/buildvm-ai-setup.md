@@ -120,11 +120,12 @@ journalctl -u buildvm-install -u buildvm -b --no-pager | tail -40
 part of the host build, and no kernel, initrd or guest closure is rooted in ai's store. Once the
 partition is written, the seed image is an ordinary unrooted store path, so `nix gc` reclaims it.
 
-`buildvm-install.service` writes the image's `nixos.img` onto the partition, grafts
-`guest-provision/` into `~builder/.ssh`, and quits: it skips whenever the partition already has a
-partition table. Nothing resizes anything on the host — the guest grows its own root partition and
-filesystem on its first boot (`boot.growPartition`), which is why a seed image sized to its own
-closure lands on a 1.82 TiB disk.
+`buildvm-install.service` writes the image's `nixos.img` onto the partition and quits: it skips the
+write whenever the partition already has a partition table. Grafting `guest-provision/` into
+`~builder/.ssh` happens on every start, so keys you add later land without wiping the guest —
+`sudo systemctl restart buildvm-install` re-provisions in place. Nothing resizes anything on the host
+— the guest grows its own root partition and filesystem on its first boot (`boot.growPartition`),
+which is why a seed image sized to its own closure lands on a 1.82 TiB disk.
 
 qemu boots the disk (GRUB lives in the image, so there is no `-kernel`/`-initrd`/`-append`), and the
 seed carries only systemd, nix, git and sshd. Install the real guest from inside it (§6): the switch
@@ -247,6 +248,8 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-install`: `… is not a block device` | §3 not run, or the partition label differs |
 | `buildvm: no *.img inside /nix/store/…-buildvm-bootstrap` | `image` was pointed at something other than the `make-disk-image` output directory |
 | `buildvm: … already partitioned, skipping install` | expected on every boot after the first; `wipefs -a` the partition (§9) to reseed |
+| `buildvm: no partition node for /dev/loop0 p1, skipping provisioning` | udev never made the loop partition node; the guest still boots, but `~builder/.ssh` stays unprovisioned — check `losetup -a` for a leftover device |
+| the guest never starts after an install failure | `buildvm.service` requires `buildvm-install.service`; fix the install unit, then `systemctl start buildvm` |
 | qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or GRUB never got into the partition — read `journalctl -u buildvm -b`, which shows the guest's serial console |
 | guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
 | guest builds fail on the `secrets` input | §2: guest key is not a deploy key for `secrets.git` |
