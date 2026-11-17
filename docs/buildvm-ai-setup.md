@@ -30,14 +30,15 @@ One keypair (created in §4) does three jobs:
 
 | Who uses it | What it needs |
 | --- | --- |
-| `ai` → guest: `ssh -p 2224 builder@127.0.0.1`, Hermes `terminal.ssh_key` | guest authorizes the public half; the install unit does this |
-| guest → git host: `nixflakes.git` and the private `secrets` repo | **read deploy key for both** |
+| `ai` → guest: `ssh -p 2224 builder@127.0.0.1`, Hermes `terminal.ssh_key`, `buildvm-provision.service` | guest authorizes the public half; the install unit does this |
+| guest → git host: `nixflakes.git` and `secrets.git` | **read deploy key for both**, plus push on `nixflakes.git` |
 | `ai` root: the gate's mirror fetch (`nixflakes.deploy-ai.buildKey`) and `deployer@ai` | host authorizes the public half (`publicKey`), already wired |
 
-The guest needs the `secrets` input at **eval** time (`config/nixos/network/networkmanager` reads
-`age.secrets."PT-Git.crt".file`), so `secrets.git` must authorize it too or every guest build fails
-before starting. If you made a separate read-only git account for the agent, authorize the key for
-that account instead.
+The guest's own switch does *not* need the git host: `buildvm-install.service` mirrors both repos on
+`ai` and clones them into the guest, and `buildvm-provision.service` passes
+`--override-input private /home/builder/secrets`, so the `secrets` input resolves from disk. What still
+needs §2 is anything the guest runs itself — `nix flake update`, another rev, or a `git push` — because
+those go to the URL left as `origin`.
 
 ## 3. Partition the disk
 
@@ -69,99 +70,124 @@ never sees `buildvm`'s ESP or root; only the loop device in §9 does.
 Wipe the old signatures, not just the partition table: a leftover filesystem on the partition is what
 made the installer think the guest was already installed.
 
-## 4. Keypair and guest provisioning
+## 4. Keypair: the secrets repo, agenix, and what the guest gets
 
-The private half stays on `ai`, outside the repo; the public half goes into
-`lib/buildvm/default.nix`. Group `hermes` rather than root-only `0600`, because the gateway and
-dashboard units read it as the Hermes user.
+There is one ai ↔ buildvm keypair, and it lives in the **secrets repo**, not on disk:
 
-```bash
-sudo mkdir -p /var/lib/buildvm/secrets/guest-provision
-sudo chown root:hermes /var/lib/buildvm/secrets && sudo chmod 0750 /var/lib/buildvm/secrets
+| File | Role |
+| --- | --- |
+| `ai_buildvm_id_ed25519.age` | private half, encrypted for `ai`'s host ssh key |
+| `ai_buildvm_id_ed25519.pub` | public half, read at eval time by `lib/buildvm/default.nix` |
 
-# Skip if it exists — regenerating invalidates everything authorized so far.
-sudo ssh-keygen -t ed25519 -N '' -C 'buildvm@ai' -f /var/lib/buildvm/secrets/id_ed25519
-sudo chmod 0640 /var/lib/buildvm/secrets/id_ed25519
-sudo chmod 0644 /var/lib/buildvm/secrets/id_ed25519.pub
-```
+`platforms/ai.nix` decrypts the private half with agenix (`nixflakes.agenix.enable`,
+`age.secrets."ai_buildvm_id_ed25519"`) and hands the resulting path — `/run/agenix/ai_buildvm_id_ed25519`,
+mode `0640`, group `hermes` — to everything that sshes to the guest: `nixflakes.virtualisation.buildvm.privateKeyPath`,
+`nixflakes.deploy-ai.buildKey`, and Hermes `terminal.ssh_key`.  Group `hermes` rather than root-only
+`0600` because the gateway and dashboard units run as `User=hermes`.
 
-`buildvm-install.service` grafts `guest-provision/` into `~builder/.ssh` while the VM is stopped.
-`known_hosts` must carry the address qemu gives the guest for the host (`10.0.2.2`), or the first
-`ssh deployer@ai` stops on a host-key prompt; scanning loopback returns `ai`'s own key, which is the
-one that answers there:
+agenix decrypts with `config.age.identityPaths`, whose default is `/etc/ssh/ssh_host_ed25519_key`, so
+`ai` needs nothing beyond that host key and a secret encrypted for it:
 
 ```bash
-sudo cp /var/lib/buildvm/secrets/id_ed25519 /var/lib/buildvm/secrets/id_ed25519.pub \
-      /var/lib/buildvm/secrets/guest-provision/
-sudo ssh-keyscan -t ed25519 127.0.0.1 | sed 's/^127\.0\.0\.1/10.0.2.2/' \
-      | sudo tee /var/lib/buildvm/secrets/guest-provision/known_hosts >/dev/null
-sudo chmod 600 /var/lib/buildvm/secrets/guest-provision/id_ed25519
-sudo chmod 644 /var/lib/buildvm/secrets/guest-provision/{id_ed25519.pub,known_hosts}
-sudo cat /var/lib/buildvm/secrets/id_ed25519.pub
+# On your workstation: the pubkey to encrypt for, and the check that the secret opens there.
+ssh ai 'cat /etc/ssh/ssh_host_ed25519_key.pub'
+age -d ai_buildvm_id_ed25519.age | ssh-keygen -yf -   # must print ai_buildvm_id_ed25519.pub
 ```
 
-Paste that into `lib/buildvm/default.nix` as `publicKey = "ssh-ed25519 AAAA… buildvm@ai"` — the
-guest authorizes exactly what is recorded there, so an unreplaced value means the guest boots with no
-way in.
+Commit both files to the secrets repo, then point this flake at that revision:
+
+```bash
+cd nixflakes && nix flake update private
+nix eval --accept-flake-config .#nixosConfigurations.buildvm.config.users.users.builder.openssh.authorizedKeys.keys
+```
+
+That eval reads the `.pub` through the `private` input, so it is the test that the lock file carries a
+revision with the files in it. `platforms/buildvm-bootstrap.nix` deliberately evaluates *without*
+`private`, so the seed image authorizes no key of its own; `buildvm-install.service` puts the keypair
+into `~builder/.ssh` while the VM is stopped (§5), which is why the guest is reachable from its very
+first boot.
+
+The guest gets the private half as its own `~builder/.ssh/id_ed25519`, so outbound ssh from the guest
+authenticates with the identity §2 already authorizes. Nothing else is grafted: `known_hosts` is not
+written, because provisioning never contacts the git host (§2), and the first real ssh from the guest
+to `git.pleunetowne.com:2223` should be answered with `ssh-keyscan -p 2223 git.pleunetowne.com >>
+~builder/.ssh/known_hosts`.
 
 ## 5. Seed the guest, then switch `ai`
 
-Commit the pubkey first (flakes only see tracked files).  The seed image is built by
-`make-disk-image`, which boots a throwaway VM under OVMF to install systemd-boot onto the ESP it
-creates, so build it on a KVM host — here, on `ai` itself:
+Commit the key files in the secrets repo first (§4) — flakes only see what the lock file points at.
+The seed image is built by `make-disk-image`, which boots a throwaway VM under OVMF to install
+systemd-boot onto the ESP it creates, so build it on a KVM host — here, on `ai` itself:
 
 ```bash
 nix build --accept-flake-config '.#nixosConfigurations.buildvmBootstrap.config.system.build.diskImage'
 ls -lh result          # a directory containing nixos.img
 sudo nixos-rebuild switch --flake '.#ai'
 sudo systemctl restart hermes-agent hermes-backend hermes-webui
-journalctl -u buildvm-install -u buildvm -b --no-pager | tail -40
+journalctl -u buildvm-install -u buildvm -u buildvm-provision -b --no-pager | tail -40
 ```
 
 `--flake '.#ai'` builds `ai` and the seed image and nothing else: the guest's own system is no longer
 part of the host build, and no kernel, initrd or guest closure is rooted in ai's store. Once the
 partition is written, the seed image is an ordinary unrooted store path, so `nix gc` reclaims it.
 
-`buildvm-install.service` writes the image's `nixos.img` onto the partition and quits: it skips the
-write whenever the partition already has a partition table. Grafting `guest-provision/` into
-`~builder/.ssh` happens on every start, so keys you add later land without wiping the guest —
-`sudo systemctl restart buildvm-install` re-provisions in place. Nothing resizes anything on the host
-— the guest grows its own root partition and filesystem on its first boot (`boot.growPartition`),
-which is why a seed image sized to its own closure lands on a 1.82 TiB disk. The unit also seeds
-`/var/lib/buildvm/efi-vars.fd` from `pkgs.OVMF.variables` the first time, because qemu's writable
-pflash unit needs an existing file of the firmware's own size.
+`buildvm-install.service` writes the image's `nixos.img` onto the partition and then grafts, on every
+start, everything the guest needs but cannot fetch itself:
+
+* `~builder/.ssh/authorized_keys`, `id_ed25519`, `id_ed25519.pub` — the shared keypair (§4), so the
+  guest is reachable and authenticates outbound from its first boot.  `restart buildvm-install`
+  re-grafts in place without wiping the guest.
+* `~builder/nixflakes` and `~builder/secrets`, cloned from bare mirrors it keeps on `ai`
+  (`/var/lib/buildvm/repos/…`, refreshed on every start).  Only the *first* clone touches the guest's
+  home, so the agent's own checkout is never overwritten, and `origin` is set to the real URL.
+
+Nothing resizes anything on the host — the guest grows its own root partition and filesystem on its
+first boot (`boot.growPartition`), which is why a seed image sized to its own closure lands on a
+1.82 TiB disk. The unit also seeds `/var/lib/buildvm/efi-vars.fd` from `pkgs.OVMF.variables` the first
+time, because qemu's writable pflash unit needs an existing file of the firmware's own size.
 
 qemu boots the disk as UEFI (`pkgs.OVMF` firmware, no `-kernel`/`-initrd`/`-append`): OVMF loads the
 kernel's EFI stub through systemd-boot, which reads its entries from the ESP, and the seed carries
-only systemd, nix, git and sshd. Install the real guest from inside it (§6): the switch rewrites the
-loader entries and copies the new kernel onto the guest's own ESP, so the boot chain survives it.
+only systemd, nix, git and sshd. `buildvm-provision.service` (§6) installs the real guest from inside
+it: the switch rewrites the loader entries and copies the new kernel onto the guest's own ESP, so the
+boot chain survives it.
 
-## 6. Check the guest
+## 6. The guest's own system, and checking it
+
+`buildvm-provision.service` runs once per boot, after the VM is up, and applies the guest's own NixOS
+config *inside* the guest:
 
 ```bash
 sudo ssh -p 2224 builder@127.0.0.1 'echo ok && nix --version && df -h / && uname -a'
-sudo ssh -p 2224 builder@127.0.0.1 \
-  'git clone ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git /home/builder/nixflakes'
+journalctl -u buildvm-provision -b --no-pager | tail -30
+sudo ssh -p 2224 builder@127.0.0.1 'cat /home/builder/provisioned-commit'
+```
+
+What it does, in order: wait for ssh; read the commit to apply (`/home/builder/deployed-commit`, the
+one `deploy-ai` recorded, falling back to the checkout's HEAD); skip if
+`/home/builder/provisioned-commit` already names it; otherwise `sudo nixos-rebuild switch --flake
+/home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config`;
+record the commit; reboot the guest — qemu restarts it (`buildvm.service` `Restart = always`).
+`builder` is in `wheel` with NOPASSWD sudo, which is what makes that possible and also makes it a nix
+trusted user (`config/nixos/core/nix` trusts `@wheel`).  So on a fresh disk the first boot ends with
+the guest running `platforms/buildvm.nix`: Xfce and Xvnc, nix gc, deploy-rs, and a root filesystem
+grown to fill the partition.
+
+```bash
+sudo ssh -p 2224 builder@127.0.0.1 'df -h / && findmnt -T /'
+sudo ssh -p 2224 builder@127.0.0.1 'sudo -n systemctl is-system-running'
+```
+
+To test that the guest can reach the git host on its own — the thing provisioning deliberately avoids
+— evaluate an input it has to fetch:
+
+```bash
 sudo ssh -p 2224 builder@127.0.0.1 \
   'cd /home/builder/nixflakes && nix eval --accept-flake-config .#nixosConfigurations.ai.config.system.build.toplevel.drvPath'
 ```
 
-That eval is the real test of §2 — it needs `secrets`, so it proves the guest key works for both
-repos. A first-connect ssh failure is usually a missing git-server host key: `ssh-keyscan -p 2223
-git.pleunetowne.com` into `~builder/.ssh/known_hosts`.
-
-Then replace the seed with the real guest system. `nixos-rebuild switch` runs the bootloader phase, so
-systemd-boot's entries and the kernel on the guest's ESP are rewritten with the new system, and
-`boot.growPartition` has already grown the root by then:
-
-```bash
-sudo ssh -p 2224 builder@127.0.0.1 \
-  'cd /home/builder/nixflakes && nix nixos-rebuild switch --flake .#buildvm --accept-flake-config'
-sudo ssh -p 2224 builder@127.0.0.1 'df -h / && findmnt -T /'
-# reboot the guest, not the host: qemu exits and the `buildvm` unit restarts it (Restart = always)
-sudo ssh -p 2224 builder@127.0.0.1 'sudo reboot'
-journalctl -u buildvm -b --no-pager | tail -30
-```
+That needs `secrets` over ssh, so it proves §2 and §4 for the guest key. A first-connect failure is the
+missing git-server host key: `ssh-keyscan -p 2223 git.pleunetowne.com >> /home/builder/.ssh/known_hosts`.
 
 ## 7. Check the gate
 
@@ -208,7 +234,9 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 ```
 
 `wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
-The guest grows its own filesystem into the partition on boot, so nothing needs resizing. To hand
+The guest grows its own filesystem into the partition on boot, so nothing needs resizing.  Leave
+`/home/builder/provisioned-commit` alone and the reseeded guest re-applies the same commit on its next
+boot, which is what you want after wiping the disk.  To hand
 space back: stop the guest, shrink the inner root partition instead of the disk —
 `LOOP=$(sudo losetup -f --show -P /dev/disk/by-partlabel/buildvm)` (`-P` is what makes
 `"$LOOP"p1`/`"$LOOP"p2` exist, where p1 is the ESP and p2 the root), `sudo e2fsck -f -y "$LOOP"p2`,
@@ -255,14 +283,21 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-install`: `… is not a block device` | §3 not run, or the partition label differs |
 | `buildvm: no *.img inside /nix/store/…-buildvm-bootstrap` | `image` was pointed at something other than the `make-disk-image` output directory |
 | `buildvm: … already partitioned, skipping install` | expected on every boot after the first; `wipefs -a` the partition (§9) to reseed |
-| `buildvm: no partition node for /dev/loop0 p1, skipping provisioning` | udev never made the loop partition nodes; the guest still boots, but `~builder/.ssh` stays unprovisioned — check `losetup -a` for a leftover device |
-| `buildvm: no partition labelled buildvm on /dev/loop0, skipping provisioning` | the image on the disk has no root carrying that label — a foreign image or a half-written partition; reseed (§9) |
-| the guest never starts after an install failure | `buildvm.service` requires `buildvm-install.service`; fix the install unit, then `systemctl start buildvm` |
+| `buildvm: no partition node for /dev/loop0 p1, skipping grafting` | udev never made the loop partition nodes; the guest still boots, but `~builder/.ssh` and the repo checkouts stay absent — check `losetup -a` for a leftover device |
+| `buildvm: no partition labelled buildvm on /dev/loop0, skipping grafting` | the image on the disk has no root carrying that label — a foreign image or a half-written partition; reseed (§9) |
+| `buildvm: mirror clone of ssh://… failed` | `ai` could not reach the git host with the keypair (§2/§4). A guest already cloned keeps working; the mirrors stay stale until a fetch succeeds |
+| `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
+| `buildvm-provision: no commit to apply (missing /home/builder/nixflakes?)` | the clone never happened — check the install unit's log and that the mirror exists |
+| `buildvm-provision: … is not in the guest's checkout` | `/home/builder/deployed-commit` names a commit the mirror predates; `sudo systemctl restart buildvm-install` to refetch, or let the next deploy record a real one |
+| `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had |
+| `buildvm-provision: guest did not come back after the switch` | the new system does not boot — the switch rewrote the ESP entries. Boot the previous loader entry from the guest's serial console (`journalctl -u buildvm -b`), or reseed (§9) |
+| the guest stays the seed image (no Xfce, no sudo) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means the agenix secret must exist — `ls -l /run/agenix/ai_buildvm_id_ed25519` |
+| Hermes terminal: `Load key "…": Permission denied`, then `Permission denied (publickey)` | the agenix secret is not `0640 root:hermes`, or `/run/agenix/ai_buildvm_id_ed25519` is missing because decryption failed — `journalctl -u agenix-install -b`. Decryption fails when `config.age.identityPaths` (default `/etc/ssh/ssh_host_ed25519_key`) is not the key the secret is encrypted for |
 | qemu: `pflash: file … does not exist` | `/var/lib/buildvm/efi-vars.fd` was deleted and `buildvm.service` started before `buildvm-install.service` seeded it — `systemctl start buildvm-install` |
 | guest drops to the UEFI shell / `Boot Failed` | no NVRAM entry and no ESP fallback path; the fallback needs `EFI/BOOT/BOOTX64.EFI` on the ESP, so re-run the bootloader phase in the guest (`nixos-rebuild switch --bootloader-only`) or reset `/var/lib/buildvm/efi-vars.fd` |
 | qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or no loader on the ESP — read `journalctl -u buildvm -b`, which shows the guest's serial console |
 | guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
-| guest builds fail on the `secrets` input | §2: guest key is not a deploy key for `secrets.git` |
+| a guest build *you* run fails on the `secrets` input | it fetched the input over ssh: §2 (deploy key) plus `known_hosts` for port 2223. Provisioning avoids this with `--override-input private` (§6) |
 | gate refuses `outside the deploy-ai allowlist` | correct; the refusal names the nearest allowed prefix — widen `nixflakes.deploy-ai.allowlist` only deliberately |
 | gate refuses `does not have the deployed commit … in its history` | ref rebased or unrelated; rebase onto the deployed commit |
 | a reboot you did not ask for | the 60-minute guard armed before a switch; `systemctl cancel --when` |
