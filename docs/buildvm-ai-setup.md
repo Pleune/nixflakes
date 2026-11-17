@@ -61,8 +61,11 @@ ls -l /dev/disk/by-partlabel/buildvm
 `--new=1:0:0` uses the default 1 MiB-aligned first sector and the last *usable* sector, leaving the
 trailing 32 sectors for the backup GPT. This partition is what
 `nixflakes.virtualisation.buildvm.disk` hands raw to qemu; the guest owns its contents
-(`make-disk-image.nix` writes a bare ext4 filesystem at offset 0, which `buildvm-install.service`
-grows to fill the partition), so the host mounts nothing here.
+(`buildvm-install.service` writes a bootable image onto it — an MBR with one ext4 partition, labelled
+`buildvm`), so the host mounts nothing here and never resizes it.
+
+Wipe the old signatures, not just the partition table: a leftover filesystem on the partition is what
+made the installer think the guest was already installed.
 
 ## 4. Keypair and guest provisioning
 
@@ -95,24 +98,37 @@ sudo chmod 644 /var/lib/buildvm/secrets/guest-provision/{id_ed25519.pub,known_ho
 sudo cat /var/lib/buildvm/secrets/id_ed25519.pub
 ```
 
-Paste that into `lib/buildvm/default.nix` as `publicKey = "ssh-ed25519 AAAA… buildvm@ai";`. The
-placeholder authorizes nothing, so until you replace it the guest boots with no way in.
+Paste that into `lib/buildvm/default.nix` as `publicKey = "ssh-ed25519 AAAA… buildvm@ai"` — the
+guest authorizes exactly what is recorded there, so an unreplaced value means the guest boots with no
+way in.
 
-## 5. Switch `ai`
+## 5. Seed the guest, then switch `ai`
 
-Commit the pubkey first (flakes only see tracked files):
+Commit the pubkey first (flakes only see tracked files).  The seed image is built by
+`make-disk-image`, which boots a throwaway VM to install GRUB, so build it on a KVM host — here, on
+`ai` itself:
 
 ```bash
+nix build --accept-flake-config '.#nixosConfigurations.buildvmBootstrap.config.system.build.diskImage'
+ls -lh result          # a directory containing nixos.img
 sudo nixos-rebuild switch --flake '.#ai'
 sudo systemctl restart hermes-agent hermes-backend hermes-webui
 journalctl -u buildvm-install -u buildvm -b --no-pager | tail -40
 ```
 
-This builds two systems: `ai`, and the `buildvm` guest whose kernel/initrd/init/qemu use them plus
-the raw image (`nixflakes.buildvm.diskImage`). Expect a big first build (Xfce/tigervnc/browser in
-the guest image). `buildvm-install.service` writes the image, grows the ext4 root offline
-(`e2fsck -f -y` + `resize2fs`), copies `guest-provision/`, then never touches the guest again — it
-skips when the partition already holds a filesystem.
+`--flake '.#ai'` builds `ai` and the seed image and nothing else: the guest's own system is no longer
+part of the host build, and no kernel, initrd or guest closure is rooted in ai's store. Once the
+partition is written, the seed image is an ordinary unrooted store path, so `nix gc` reclaims it.
+
+`buildvm-install.service` writes the image's `nixos.img` onto the partition, grafts
+`guest-provision/` into `~builder/.ssh`, and quits: it skips whenever the partition already has a
+partition table. Nothing resizes anything on the host — the guest grows its own root partition and
+filesystem on its first boot (`boot.growPartition`), which is why a seed image sized to its own
+closure lands on a 1.82 TiB disk.
+
+qemu boots the disk (GRUB lives in the image, so there is no `-kernel`/`-initrd`/`-append`), and the
+seed carries only systemd, nix, git and sshd. Install the real guest from inside it (§6): the switch
+reinstalls GRUB onto the guest's own disk, so the boot chain survives it.
 
 ## 6. Check the guest
 
@@ -127,6 +143,19 @@ sudo ssh -p 2224 builder@127.0.0.1 \
 That eval is the real test of §2 — it needs `secrets`, so it proves the guest key works for both
 repos. A first-connect ssh failure is usually a missing git-server host key: `ssh-keyscan -p 2223
 git.pleunetowne.com` into `~builder/.ssh/known_hosts`.
+
+Then replace the seed with the real guest system. `nixos-rebuild switch` runs the bootloader phase, so
+GRUB on the guest's disk is rewritten with the new kernel and `boot.growPartition` has already grown
+the root by then:
+
+```bash
+sudo ssh -p 2224 builder@127.0.0.1 \
+  'cd /home/builder/nixflakes && nix nixos-rebuild switch --flake .#buildvm --accept-flake-config'
+sudo ssh -p 2224 builder@127.0.0.1 'df -h / && findmnt -T /'
+# reboot the guest, not the host: qemu exits and the `buildvm` unit restarts it (Restart = always)
+sudo ssh -p 2224 builder@127.0.0.1 'sudo reboot'
+journalctl -u buildvm -b --no-pager | tail -30
+```
 
 ## 7. Check the gate
 
@@ -172,10 +201,13 @@ sudo wipefs -a /dev/disk/by-partlabel/buildvm
 sudo systemctl restart buildvm-install buildvm     # throws away everything the agent built
 ```
 
-The partition spans the disk and the installer grows into it, so nothing needs resizing. To hand
-space back: stop the guest, `sudo e2fsck -f -y /dev/disk/by-partlabel/buildvm`,
-`sudo resize2fs /dev/disk/by-partlabel/buildvm 900G`,
-`sudo sgdisk -d 1 -n 1:2048:<last-sector> -c 1:buildvm /dev/sda`, then grow the filesystem again.
+`wipefs` clears the image's MBR signature, which is what makes the installer write the seed again.
+The guest grows its own filesystem into the partition on boot, so nothing needs resizing. To hand
+space back: stop the guest, shrink the inner partition instead of the disk —
+`LOOP=$(sudo losetup -f --show /dev/disk/by-partlabel/buildvm)`,
+`sudo e2fsck -f -y "$LOOP"p1`, `sudo resize2fs "$LOOP"p1 900G`, `sudo parted "$LOOP" resizepart 1 900G`,
+then `sudo losetup -d "$LOOP"`.
+
 Cores/memory come from `nixflakes.virtualisation.buildvm.cpus`/`memoryMiB` (12 / 8192 MiB).
 
 ## 10. Roll back to Docker
@@ -213,8 +245,10 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | Symptom | Cause |
 | --- | --- |
 | `buildvm-install`: `… is not a block device` | §3 not run, or the partition label differs |
-| `buildvm: … already holds a filesystem, skipping install` | expected on every boot after the first |
-| qemu starts, ssh times out | guest kernel/initrd mismatch, or no `/dev/kvm` (`ls -l /dev/kvm`) |
+| `buildvm: no *.img inside /nix/store/…-buildvm-bootstrap` | `image` was pointed at something other than the `make-disk-image` output directory |
+| `buildvm: … already partitioned, skipping install` | expected on every boot after the first; `wipefs -a` the partition (§9) to reseed |
+| qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or GRUB never got into the partition — read `journalctl -u buildvm -b`, which shows the guest's serial console |
+| guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
 | guest builds fail on the `secrets` input | §2: guest key is not a deploy key for `secrets.git` |
 | gate refuses `outside the deploy-ai allowlist` | correct; the refusal names the nearest allowed prefix — widen `nixflakes.deploy-ai.allowlist` only deliberately |
 | gate refuses `does not have the deployed commit … in its history` | ref rebased or unrelated; rebase onto the deployed commit |
