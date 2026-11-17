@@ -13,8 +13,7 @@ let
   stateDir = "/var/lib/buildvm";
 in
 rec {
-  publicKey =
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIREPLACE-WITH-KEY-FROM-docs/buildvm-ai-setup.md buildvm@ai";
+  publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvtkbKm1Q/LHKAYelr6EidEUGY3xYkQGHknRRXZkkFn buildvm@ai";
 
   # Raw partition handed straight to qemu; created by hand (docs/buildvm-ai-setup.md section 3).
   disk = "/dev/disk/by-partlabel/buildvm";
