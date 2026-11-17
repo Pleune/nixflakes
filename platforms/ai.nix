@@ -349,8 +349,10 @@ in
   # ── The agent's execution host: a NixOS guest on the 1.82 TiB disk ───────────────
   # Docker is retired here.  The sandbox is now a qemu/KVM guest whose disk is the whole partition
   # that used to hold Docker's data root (docs/buildvm-ai-setup.md section 3 wipes the btrfs
-  # `hermes-container` filesystem; `buildvm-install.service` writes the guest image onto it), so
-  # there is no daemon, no data-root mount and no qgroup cap left to configure.  The guest is defined in
+  # `hermes-container` filesystem; `buildvm-install.service` writes the seed image onto it), so
+  # there is no daemon, no data-root mount and no qgroup cap left to configure.  ai supplies that
+  # image and nothing else: it boots from its own bootloader, so no kernel, initrd or guest closure
+  # is rooted in ai's store (platforms/buildvm-bootstrap.nix).  The guest is defined in
   # platforms/buildvm.nix and reaches ai over qemu user-mode networking: host loopback port
   # `buildvm.sshPort` forwards to the guest's sshd, and the guest sees the host at
   # `buildvm.sshPort`.
@@ -358,11 +360,6 @@ in
     enable = true;
     disk = buildvm.disk;
     image = buildvmBoot.image;
-    kernel = buildvmBoot.kernel;
-    initrd = buildvmBoot.initrd;
-    # qemu boots the guest directly (`-kernel`/`-initrd`/`init=`), so the guest image carries no
-    # bootloader and this must be the store path of the guest system's init.
-    init = buildvmBoot.init;
     publicKey = buildvm.publicKey;
     privateKeyPath = buildvm.privateKeyPath;
     sshPort = buildvm.sshPort;

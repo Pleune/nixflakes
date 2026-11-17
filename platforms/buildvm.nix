@@ -12,9 +12,9 @@ in
       type = types.nullOr types.path;
       default = null;
       description = ''
-        Raw ext4 filesystem image (no partition table) that seeds the guest partition on ai.
-        Installed once by the buildvm-install unit, then grown to fill the partition; the guest
-        owns everything inside it, including its own partition table-free layout.
+        Bootable raw disk image (MBR partition table + GRUB) for the guest partition, for reseeding
+        it by hand.  ai installs the seed image instead (platforms/buildvm-bootstrap.nix), and the
+        guest grows its own root partition on boot, so nothing resizes this image on the host.
       '';
     };
 
@@ -35,21 +35,30 @@ in
 
     networking.hostName = "buildvm";
 
-    # No physical install: qemu boots this config with -kernel/-initrd/-append, so there is
-    # nothing for a bootloader to do and switch-to-configuration must not look for one.
-    boot.loader.grub.enable = false;
+    # The guest boots its own disk: qemu gets no -kernel/-initrd/-append, so GRUB has to live in the
+    # partition and `nixos-rebuild switch` inside the guest has to be able to reinstall it.
+    system.switch.enable = true;
+    boot.loader.grub.enable = true;
+    boot.loader.grub.efiSupport = false;
+    # The only virtio disk, which is also the device the image was installed onto.
+    boot.loader.grub.device = "/dev/vda";
     boot.loader.efi.canTouchEfiVariables = false;
 
-    # The image is a bare ext4 filesystem written onto the host partition (/dev/vda in the guest),
-    # so stage 1 needs virtio and ext4 before it can mount root.
+    # The image's root partition is a few GiB; the disk it lands on is 1.82 TiB.  The guest grows
+    # the partition and the filesystem itself, on boot, before anything else mounts root.
+    boot.growPartition = true;
+
+    # Serial console because qemu runs -nographic; rd.shell=1 so a boot failure reaches this console
+    # instead of timing out a device job in silence.
+    boot.kernelParams = [ "console=ttyS0" "rd.shell=1" "panic=0" ];
+
+    # The initrd must have virtio and ext4 before it can mount root.
     boot.initrd.kernelModules = [ "virtio_pci" "virtio_blk" "ext4" ];
 
-    # The raw image is a bare ext4 filesystem on the whole virtio disk, so there is no partition to
-    # name; make-disk-image labels it "buildvm" (mkfs.ext4 -L).  Root must be named by that udev
-    # symlink rather than /dev/vda: systemd-fstab-generator writes sysroot.mount from the kernel
-    # root= line *before* it reads the initrd fstab, so a second definition of the same node makes
-    # the generator fail with "Failed to create unit file ... as it already exists" and the guest
-    # drops into Emergency Mode.
+    # Name root by the ext4 label make-disk-image writes (mkfs.ext4 -L buildvm) rather than
+    # /dev/vda: systemd-fstab-generator writes sysroot.mount from the kernel root= line *before* it
+    # reads the initrd fstab, so a second definition of the same node makes the generator fail with
+    # "Failed to create unit file ... as it already exists" and the guest drops into Emergency Mode.
     fileSystems."/" = { device = "/dev/disk/by-label/buildvm"; fsType = "ext4"; };
 
     # Skip the repo's default user: no password login, no home-manager in a build VM.
@@ -77,12 +86,13 @@ in
       name = "buildvm-disk";
       label = "buildvm";
       format = "raw";
-      partitionTableType = "none";
-      installBootLoader = false;
+      # MBR table with one ext4 partition, which is what boot.loader.grub above installs onto and
+      # what boot.growPartition grows.
+      partitionTableType = "legacy";
       fsType = "ext4";
-      # The partition is ~1.7 TiB; the image only needs to hold the store plus headroom, and
-      # buildvm-install resize2fs's it to the whole partition on first boot.
-      diskSize = 20480;
+      # The partition is ~1.7 TiB; the image only needs the store plus headroom, and the guest
+      # grows into the rest on its first boot.
+      diskSize = "auto";
       additionalSpace = "4G";
     };
 

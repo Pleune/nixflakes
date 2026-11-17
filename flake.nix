@@ -206,10 +206,16 @@
                   ! builtins.elem baseName [ ".git" ".direnv" ".ralph" "result" "state.json" "secrets" ];
               };
 
-              # The Hermes agent's execution host. Its toplevel doubles as the kernel/initrd qemu
-              # boots it with, and its disk image seeds the raw partition on ai; ai imports both.
+              # The Hermes agent's execution host.  Its disk image is never installed by ai: the
+              # guest is seeded with the seed image below and rebuilt from inside itself.
               buildvm = makeSystem "x86_64-linux" "buildvm" { };
-              buildvmToplevel = buildvm.config.system.build.toplevel;
+
+              # Seed image for the guest disk.  Standalone on purpose: no host modules, no secrets
+              # input, and nothing of it needs to survive in ai's store after first boot.
+              buildvmBootstrap = inputs.nixpkgs.lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [ ./platforms/buildvm-bootstrap.nix ];
+              };
             in
             {
               # live-iso = mk "live";
@@ -224,13 +230,11 @@
                 deployedSource = nixflakesSource;
                 deployedCommit = self.rev or self.dirtyRev or "";
                 buildvmBoot = {
-                  kernel = "${buildvmToplevel}/kernel";
-                  initrd = "${buildvmToplevel}/initrd";
-                  init = "${buildvmToplevel}/init";
-                  image = buildvm.config.nixflakes.buildvm.diskImage;
+                  image = buildvmBootstrap.config.system.build.diskImage;
                 };
               };
               buildvm = buildvm;
+              buildvmBootstrap = buildvmBootstrap;
               git = mk "git";
               git-runner1 = mk "git-runner1";
               immich = mk "immich";

@@ -20,25 +20,11 @@ in
     image = mkOption {
       type = types.nullOr types.path;
       default = null;
-      description = "Raw guest image installed onto disk on first boot.";
-    };
-
-    kernel = mkOption {
-      type = types.nullOr types.path;
-      default = null;
-      description = "Guest kernel (bzImage), booted directly by qemu; the image carries no bootloader.";
-    };
-
-    initrd = mkOption {
-      type = types.nullOr types.path;
-      default = null;
-      description = "Guest initrd, booted directly by qemu.";
-    };
-
-    init = mkOption {
-      type = types.str;
-      default = "/init";
-      description = "Path of the guest system's init, passed as init= on the kernel command line.";
+      description = ''
+        make-disk-image output directory, whose `*.img` is the bootable raw image (MBR partition
+        table, GRUB inside the guest) written onto disk on first boot.  The image is a build-time
+        path, not a runtime root: nothing in the host's store belongs to the guest.
+      '';
     };
 
     publicKey = mkOption {
@@ -79,20 +65,22 @@ in
   config = mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.image != null && cfg.kernel != null && cfg.initrd != null;
-        message = "nixflakes.virtualisation.buildvm needs image, kernel and initrd";
+        assertion = cfg.image != null;
+        message = "nixflakes.virtualisation.buildvm needs image";
       }
     ];
 
-    environment.systemPackages = [ pkgs.qemu pkgs.e2fsprogs ];
+    environment.systemPackages = [ pkgs.qemu ];
 
     systemd.services.buildvm-install = {
       description = "Install the buildvm guest image onto its raw partition (first boot only)";
+      # The guest grows its own filesystem (boot.growPartition), so this unit only ever writes the
+      # image once and never resizes anything.
       wantedBy = [ "multi-user.target" ];
       before = [ "buildvm.service" ];
       serviceConfig.Type = "oneshot";
       serviceConfig.RemainAfterExit = true;
-      path = [ pkgs.qemu pkgs.e2fsprogs pkgs.util-linux pkgs.coreutils ];
+      path = [ pkgs.qemu pkgs.util-linux pkgs.coreutils ];
       script = ''
         DISK=${cfg.disk}
         IMAGE=${cfg.image}
@@ -103,18 +91,23 @@ in
           exit 1
         fi
 
-        # Already installed (or made by hand) => leave the guest's data alone.
-        if [ -n "$(blkid -o value -s TYPE "$DISK" 2>/dev/null || true)" ]; then
-          echo "buildvm: $DISK already holds a filesystem, skipping install"
+        # make-disk-image yields a directory holding the raw file, not the file itself.
+        IMAGE_FILE=$(ls "$IMAGE"/*.img 2>/dev/null | head -1 || true)
+        if [ -z "$IMAGE_FILE" ]; then
+          echo "buildvm: no *.img inside $IMAGE" >&2
+          exit 1
+        fi
+
+        # Already installed (or made by hand) => leave the guest's data alone.  The image is
+        # partitioned, so look for a partition table: a stale filesystem signature would otherwise
+        # read as "installed", and an empty disk would read as "not installed".
+        if [ -n "$(blkid -p -o value -s PTTYPE "$DISK" 2>/dev/null || true)" ]; then
+          echo "buildvm: $DISK already partitioned, skipping install"
           exit 0
         fi
 
-        echo "buildvm: writing $IMAGE to $DISK"
-        qemu-img convert -f raw -O raw "$IMAGE" "$DISK"
-
-        # Grow the image's filesystem to the whole partition, offline while the guest is stopped.
-        e2fsck -f -y "$DISK"
-        resize2fs "$DISK"
+        echo "buildvm: writing $IMAGE_FILE to $DISK"
+        qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
 
         # Graft out-of-band guest files (the ssh keys it needs for the secrets input).  The VM is
         # stopped, so mounting its filesystem here is safe.  The uid goes in a plain variable: UID is
@@ -122,7 +115,9 @@ in
         if [ -d "$PROVISION" ] && [ -n "$(ls -A "$PROVISION" 2>/dev/null || true)" ]; then
           MNT=/mnt/buildvm
           mkdir -p "$MNT"
-          mount "$DISK" "$MNT"
+          # The image's root is the first partition *inside* it, so loop-mount with partitions.
+          LOOP=$(losetup -f --show "$DISK")
+          mount "$LOOP"p1 "$MNT"
           GUEST_UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
           if [ -n "$GUEST_UID" ]; then
             mkdir -p "$MNT/home/${cfg.userName}/.ssh"
@@ -135,6 +130,7 @@ in
             echo "buildvm: user ${cfg.userName} not found in the guest, skipping provisioning" >&2
           fi
           umount "$MNT"
+          losetup -d "$LOOP"
         fi
       '';
     };
@@ -149,19 +145,16 @@ in
         Type = "simple";
         # Root: it owns the raw disk and needs /dev/kvm.
         User = "root";
-        # Root= is deliberately absent: stage 1 takes root from the guest's initrd fstab (the
-        # by-label entry in platforms/buildvm.nix).  Passing root= as well makes
-        # systemd-fstab-generator write sysroot.mount twice, which fails the generator and lands the
-        # guest in Emergency Mode.  Keep notes outside ExecStart: systemd joins the backslash
-        # continuation lines into one command line, so a # inside it would reach qemu as an argument.
+        # The disk boots itself: GRUB lives in the guest image, so qemu gets no -kernel/-initrd/-append
+        # and the kernel command line (console, root) comes from the guest's own bootloader config.
+        # Keep notes outside ExecStart: systemd joins the backslash continuation lines into one
+        # command line, so a # inside it would reach qemu as an argument.
         ExecStart = ''
           ${pkgs.qemu}/bin/qemu-system-x86_64 \
             -machine q35 -cpu host -enable-kvm \
             -smp ${toString cfg.cpus} -m ${toString cfg.memoryMiB} \
-            -kernel ${cfg.kernel} -initrd ${cfg.initrd} \
-            -append "init=${cfg.init} console=ttyS0 rd.shell=0 panic=0" \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
-            -device virtio-blk-pci,drive=vd0 \
+            -device virtio-blk-pci,drive=vd0,bootindex=0 \
             -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \
             -device virtio-net-pci,netdev=n0 \
             -nographic
