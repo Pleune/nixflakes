@@ -11,9 +11,9 @@ in
       type = types.str;
       example = "/dev/disk/by-partlabel/buildvm";
       description = ''
-        Raw block device passed straight through as the guest's only disk.  Created by
-        setup-buildvm-storage.sh; the guest owns its partition table and filesystem, so the host
-        never mounts it.
+        Raw block device passed straight through as the guest's only disk.  Created by hand
+        (docs/buildvm-ai-setup.md section 3); the guest owns its partition table and filesystem, so
+        the host never mounts it.
       '';
     };
 
@@ -63,6 +63,9 @@ in
 
     memoryMiB = mkOption { type = types.ints.positive; default = 8192; };
 
+    # The user defined in platforms/buildvm.nix; its ~/.ssh is what the install unit provisions.
+    userName = mkOption { type = types.str; default = "builder"; };
+
     provisionDir = mkOption {
       type = types.str;
       default = "/var/lib/buildvm/secrets/guest-provision";
@@ -96,7 +99,7 @@ in
         PROVISION=${cfg.provisionDir}
 
         if [ ! -b "$DISK" ]; then
-          echo "buildvm: $DISK is not a block device - run setup-buildvm-storage.sh on ai first" >&2
+          echo "buildvm: $DISK is not a block device - partition it per docs/buildvm-ai-setup.md section 3" >&2
           exit 1
         fi
 
@@ -138,6 +141,7 @@ in
     systemd.services.buildvm = {
       description = "buildvm - NixOS build VM for the Hermes agent (qemu/KVM)";
       after = [ "network-online.target" "buildvm-install.service" ];
+      wants = [ "network-online.target" ];
       requires = [ "buildvm-install.service" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
@@ -157,7 +161,7 @@ in
             -nographic
         '';
         # qemu exits when the guest powers off; bring it back as a real host would.
-        Restart = "on-failure";
+        Restart = "always";
         RestartSec = "5s";
         TimeoutStopSec = "30s";
       };

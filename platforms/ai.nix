@@ -1,14 +1,22 @@
 {
   username,
+  deployedCommit,
+  deployedSource,
   config,
   lib,
   pkgs,
   modulesPath,
   hermes-agent,
   hermes-webui,
+  # From the flake's specialArgs: the guest's kernel, initrd, init and installer image, taken
+  # from nixosConfigurations.buildvm so the VM boots exactly the system the flake describes.
+  buildvmBoot,
   ...
 }:
-
+let
+  # Single source of truth for the guest's key, port, disk and limits.
+  buildvm = import ../lib/buildvm;
+in
 {
   boot.initrd.availableKernelModules = [
     "nvme"
@@ -19,9 +27,9 @@
     "sd_mod"
   ];
   boot.initrd.kernelModules = [ ];
-  # `btrfs` for the Docker data-root subvolume below; systemd-modules-load runs before
-  # local-fs.target, so the .mount unit can mount it.
-  boot.kernelModules = [ "kvm-amd" "btrfs" ];
+  # `kvm-amd` because the agent's sandbox VM needs /dev/kvm; loaded at boot so the buildvm unit can
+  # start without waiting for a module.
+  boot.kernelModules = [ "kvm-amd" ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" = {
@@ -193,8 +201,9 @@
   #
   # Native mode (container.enable = false): the gateway and the hashboard run as ordinary systemd
   # units (`hermes-agent` and `hermes-backend`) on this host, and the *agent's own shell tool* is
-  # what gets sandboxed — `terminal.backend = docker` below runs every command it issues in a
-  # Docker container with CPU/memory/disk caps.  Dropping container mode is what makes the
+  # what gets sandboxed — `terminal.backend = ssh` below runs every command it issues inside the
+  # qemu guest on this box (`nixflakes.virtualisation.buildvm`), which holds the CPU/RAM/disk caps
+  # the retired docker sandbox used to set.  Dropping container mode is what makes the
   # `hermes dashboard` hashboard available again (the module asserts `backend.mode != none` against
   # `container.enable`, because the container runs the gateway only).
   #
@@ -207,6 +216,18 @@
     # `hermes` on the system PATH plus HERMES_HOME exported system-wide, so interactive shells
     # share sessions, skills and cron with the units instead of growing a second ~/.hermes.
     addToSystemPackages = true;
+
+    # `ssh` on the PATH of both hermes units.  A systemd unit's PATH is not the login-shell PATH:
+    # `systemd.services.<name>.path` replaces it, and this module builds it from the hermes package,
+    # bash, coreutils, git and `extraPackages` (hermes-agent/nix/moduleCommon.nix `processPath`), so
+    # `/run/current-system/sw/bin` is absent even though `openssh` is in
+    # `environment.systemPackages`.  The ssh backend shells out to the real `ssh` binary and probes
+    # for it before offering the tool (`tools/terminal_tool_backends.py` `check_terminal_requirements`
+    # plus `tools/environments/ssh.py` `_ensure_ssh_available`); with no `ssh` on the unit PATH,
+    # `terminal` and `process_manage` are dropped from every session and the agent reports "terminal
+    # is not available in this execution context" — which is exactly what the docker backend used to
+    # do here, because `docker` was missing from the same PATH.
+    extraPackages = [ pkgs.openssh ];
 
     # Plaintext for now; the agenix pass moves these to an environmentFile / age secret.
     #
@@ -258,45 +279,58 @@
         extra.port = 8642;
       };
 
-      # The sandbox is the agent's shell tool, not the process hosting the agent.  Every
-      # terminal/execute_code call runs in `docker run` against the default Hermes sandbox image
-      # (hermes_cli/config_defaults.py:13 `DEFAULT_SANDBOX_IMAGE =
-      # "nousresearch/hermes-sandbox:desktop"`), which Docker pulls on the first call — nothing
-      # pre-pulls it here, so that first command pays the download.
+      # The sandbox is the agent's shell tool, not the process hosting the agent, and it is now a
+      # VM on this box rather than a container.
+      # `tools/environments/ssh.py` runs each command as `ssh -p <port> -i <key> <user>@<host>
+      # 'sh -lc …'` with ControlMaster multiplexing (`BatchMode=yes`, `StrictHostKeyChecking=
+      # accept-new`, `ConnectTimeout=10`), and `tools/terminal_tool_backends.py:_SSH_KEYS` maps the
+      # keys below onto ssh_host/ssh_user/ssh_port/ssh_key/ssh_persistent.
       #
-      # `tools/environments/docker.py:_resource_args` turns the numbers below into `--cpus 12`,
-      # `--memory 8192m` and a disk quota, all gated on a once-per-process cgroup probe
-      # (`--cpus/--memory/--pids-limit` need the controllers; ai has them).  CPU and memory are
-      # therefore hard caps.
-      #
-      # Disk is different: Docker only accepts `--storage-opt size=` when overlay2 sits on XFS
-      # mounted with `pquota` (daemon/graphdriver/overlay2/overlay.go returns "--storage-opt is
-      # supported only for overlay over xfs with 'pquota' mount option"), and ai's data root is on
-      # btrfs.  Hermes' probe (`_storage_opt_supported`) fails once per process, caches
-      # "unsupported", logs "Docker storage driver does not support per-container disk limits" and
-      # starts the sandbox without the flag.  The real cap is the btrfs qgroup limit below, which
-      # fails writes with EDQUOT at 500 GiB for the whole store.  `container_disk` is kept at the
-      # same 500 GiB so the intent is stated once and becomes real per-container enforcement the
-      # day the data root moves to XFS+pquota.
+      # The docker keys are gone rather than translated: `container_cpu`/`container_memory`/
+      # `container_disk` were docker flags, and the equivalent caps are now the qemu limits
+      # (`nixflakes.virtualisation.buildvm.cpus`/`memoryMiB`) plus the size of the partition the
+      # guest owns.  `container_persistent` is replaced by `ssh_persistent`, which keeps the guest's
+      # own filesystem between sessions.
       terminal = {
-        backend = "docker";
-        container_cpu = 12;
-        container_memory = 8192; # MB
-        container_disk = 512000; # MB = 500 GiB; enforced by btrfs today, by Docker if XFS later
-        # The sandbox keeps its filesystem between sessions, so `pip install` inside a turn
-        # survives to the next one (container_persistent is the upstream default; stated so the
-        # durability is visible here).
-        container_persistent = true;
-        # Commands need the network for pip/npm/curl, and the sandbox is already isolated by
-        # `--cap-drop ALL` plus the two tmpfs mounts docker.py adds.
-        docker_network = true;
-        # Expose the agent's working directory inside the container as /workspace, otherwise the
-        # shell/file tools work in a container that cannot see /var/lib/hermes/workspace.  This is
-        # the one knob that trades isolation for continuity; leave it false to lock the sandbox
-        # away from the agent's files.
-        docker_mount_cwd_to_workspace = true;
+        backend = "ssh";
+        ssh_host = "127.0.0.1";
+        ssh_port = buildvm.sshPort;
+        ssh_user = buildvm.userName;
+        # Generated on ai by hand (docs/buildvm-ai-setup.md section 4); mode 0640 root:hermes so
+        # these units can read it.  It never enters the repo, and the guest authorizes only its
+        # public half.
+        ssh_key = buildvm.privateKeyPath;
+        ssh_persistent = true;
+        # A guest-side path: the agent's shell starts in the flake checkout it clones itself.
+        # `coerce_ssh_remote_cwd` maps host paths here, so keep it a path the guest really has.
+        cwd = buildvm.workdir;
       };
+
+      # The bot's screen follows the shell backend: `computer_use/placement.py` treats ssh as one of
+      # `_STREAM_BACKENDS`, so `auto` puts Xvnc/Xfce/browser inside the guest (platforms/buildvm.nix
+      # installs them).  Rendering there is software-only; the VM has no GPU.  Set this to
+      # "gateway" to move the desktop back onto ai.
+      bot_desktop.placement = "auto";
+
       compression.enabled = true;
+
+      # Disk and power commands stay the operator's: every wipe, partition and reset step in
+      # docs/buildvm-ai-setup.md and `nixos-rebuild` runs out of band.  These fnmatch globs are
+      # floors — `tools/approval_floors.py` applies them even under yolo or `mode = "off"`.
+      approvals.deny = [
+        "mkfs*"
+        "wipefs*"
+        "parted*"
+        "fdisk*"
+        "sgdisk*"
+        "dd *"
+        "losetup*"
+        "shutdown*"
+        "reboot*"
+        "systemctl reboot*"
+        "systemctl poweroff*"
+        "nixos-rebuild*"
+      ];
     };
 
     backend = {
@@ -312,53 +346,65 @@
     };
   };
 
-  # Docker is the agent's terminal sandbox now, so the daemon has to run here.  With
-  # container.enable = false the module no longer enables it for us (that mkDefault lives inside
-  # the container-mode branch).
-  virtualisation.docker.enable = true;
-
-  # ── Docker data root on the `hermes-container` store, capped at 500 GiB ──────────
-  # /dev/sda1 (UUID 9e27c0a6-7a7d-41fe-8e83-0ed124cea728, 1.82 TiB, mkfs.btrfs v7.3 with
-  # block-group-tree) holds Docker's layer store in the `docker` subvolume, so image pulls and
-  # sandbox writes can never fill the 256 GiB ext4 root.  The cap is a qgroup limit (see the
-  # service below) rather than a Docker flag, because Docker's own disk quota needs XFS+pquota.
-  # Created by ./setup-hermes-container-storage.sh, which also renames the filesystem label from
-  # `storage_pool` to `hermes-container`; the mount below stays on the UUID so that rename is
-  # cosmetic.  Run the script on ai before the first rebuild, or this mount unit fails at boot.
-  boot.supportedFilesystems.btrfs = true;
-
-  fileSystems."/var/lib/docker" = {
-    device = "/dev/disk/by-uuid/9e27c0a6-7a7d-41fe-8e83-0ed124cea728";
-    fsType = "btrfs";
-    options = [ "subvol=/docker" "noatime" ];
+  # ── The agent's execution host: a NixOS guest on the 1.82 TiB disk ───────────────
+  # Docker is retired here.  The sandbox is now a qemu/KVM guest whose disk is the whole partition
+  # that used to hold Docker's data root (docs/buildvm-ai-setup.md section 3 wipes the btrfs
+  # `hermes-container` filesystem; `buildvm-install.service` writes the guest image onto it), so
+  # there is no daemon, no data-root mount and no qgroup cap left to configure.  The guest is defined in
+  # platforms/buildvm.nix and reaches ai over qemu user-mode networking: host loopback port
+  # `buildvm.sshPort` forwards to the guest's sshd, and the guest sees the host at
+  # `buildvm.sshPort`.
+  nixflakes.virtualisation.buildvm = {
+    enable = true;
+    disk = buildvm.disk;
+    image = buildvmBoot.image;
+    kernel = buildvmBoot.kernel;
+    initrd = buildvmBoot.initrd;
+    # qemu boots the guest directly (`-kernel`/`-initrd`/`init=`), so the guest image carries no
+    # bootloader and this must be the store path of the guest system's init.
+    init = buildvmBoot.init;
+    publicKey = buildvm.publicKey;
+    privateKeyPath = buildvm.privateKeyPath;
+    sshPort = buildvm.sshPort;
+    cpus = buildvm.cpus;
+    memoryMiB = buildvm.memoryMiB;
+    userName = buildvm.userName;
   };
 
-  # Qgroup limits live inside the filesystem and survive a reboot, but re-applying them on every
-  # boot keeps a recreated subvolume or a `btrfs quota disable` self-healing.  `quota enable` is
-  # a no-op once the quota tree exists, so it is guarded rather than fatal.
-  systemd.services."btrfs-docker-quota" = {
-    description = "Cap the hermes-container Docker data root at 500 GiB";
-    requires = [ "var-lib-docker.mount" ];
-    after = [ "var-lib-docker.mount" ];
-    before = [ "docker.service" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = {
-      type = "oneshot";
-      remainAfterExit = true;
-    };
-    script = ''
-      ${pkgs.btrfs-progs}/bin/btrfs quota enable /var/lib/docker || true
-      ${pkgs.btrfs-progs}/bin/btrfs qgroup limit -e 500g /var/lib/docker
-    '';
+  # ── The deploy gate ───────────────────────────────────────────────────────────────
+  # The agent's only route onto this host's system.  There is no repository on ai: the gate is told
+  # which one to read (`deploy-ai --repo <url> --ref <rev>`), mirrors it root-side, requires the
+  # deployed commit to be an ancestor of that ref, and compares the candidate tree's *content*
+  # against the source the running system came from, refusing anything outside `allowlist`.  It
+  # then builds in the guest, copies the closure back, health-probes, switches, and rolls back
+  # automatically if the probes go red; the reboot guard is armed immediately before the switch so
+  # a long failing build cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.sh.
+  nixflakes.deploy-ai = {
+    enable = true;
+    publicKey = buildvm.publicKey;
+    deployedSource = deployedSource;
+    deployedCommit = deployedCommit;
+    buildKey = buildvm.privateKeyPath;
+    # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
+    # and refuses anything outside these prefixes before building.  platforms/ stays off the list
+    # except the two files involved here, which is what stops the agent rewriting another machine.
+    allowlist = [
+      "platforms/ai.nix"
+      "platforms/buildvm.nix"
+      "lib/"
+      "modules/nixos/"
+      "config/"
+      "pkgs/"
+      "flake.nix"
+      "skills/"
+      "docs/"
+      "README.md"
+    ];
   };
 
-  # Docker must see the quota before the first container, otherwise a huge pull could land
-  # unaccounted.
-  systemd.services.docker.after = [ "btrfs-docker-quota.service" ];
-
-  # The gateway and dashboard units run as `hermes`, and only members of the docker group reach
-  # /run/docker.sock — without this every terminal call dies with a permission error on the socket.
-  users.users.hermes.extraGroups = [ "docker" ];
+  # The gateway and dashboard units run as `hermes`; they need no group for the sandbox any more,
+  # only read access to `buildvm.privateKeyPath`, created as 0640 root:hermes during setup
+  # (docs/buildvm-ai-setup.md section 4).
 
   # Hermes WebUI (github:nesquena/hermes-webui — not in nixpkgs, but it ships its own package and
   # NixOS module, so this is the clean path).  This replaces the hashboard that container mode
@@ -411,8 +457,9 @@
       HERMES_WEBUI_GATEWAY_USE_RUNS_API = "true";
 
       # The agent dir resolves inside the read-only store, so relative writes need a writable
-      # home; this is the agent's own working directory (the module writes it to
-      # `terminal.cwd`, and the docker sandbox mounts it at /workspace).
+      # home; this is the WebUI process's own working directory on ai.  It is *not* the sandbox's
+      # cwd — `settings.terminal.cwd` is a guest path now — it only keeps relative writes off the
+      # read-only store.
       HERMES_WEBUI_SERVER_CWD = "/var/lib/hermes/workspace";
       HERMES_WEBUI_DEFAULT_WORKSPACE = "/var/lib/hermes/workspace";
       HERMES_WEBUI_SKIP_ONBOARDING = "1"; # config.yaml is declarative; no first-run wizard

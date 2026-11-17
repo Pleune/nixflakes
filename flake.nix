@@ -181,11 +181,11 @@
           nixosConfigurations =
             let
               makeSystem =
-                system: name:
+                system: name: extraArgs:
                 withSystem system (
                   ctx:
                   inputs.nixpkgs.lib.nixosSystem {
-                    specialArgs = specialArgs ctx name;
+                    specialArgs = specialArgs ctx name // extraArgs;
                     modules = [
                       ./modules/nixos
                       ./config/nixos
@@ -193,27 +193,54 @@
                     ];
                   }
                 );
+              mk = name: makeSystem "x86_64-linux" name { };
+
+              # Snapshot of this flake's own source, kept in the ai system's roots.  deploy-ai
+              # diffs a candidate tree against it, which is how "what is deployed" is answerable
+              # without a git repository on the host.  .git is excluded: history is the candidate
+              # tree's business, the baseline is about content.
+              nixflakesSource = builtins.path {
+                path = ./.;
+                name = "nixflakes-source";
+                filter = path: baseName:
+                  ! builtins.elem baseName [ ".git" ".direnv" ".ralph" "result" "state.json" "secrets" ];
+              };
+
+              # The Hermes agent's execution host. Its toplevel doubles as the kernel/initrd qemu
+              # boots it with, and its disk image seeds the raw partition on ai; ai imports both.
+              buildvm = makeSystem "x86_64-linux" "buildvm" { };
+              buildvmToplevel = buildvm.config.system.build.toplevel;
             in
             {
-              # live-iso = makeSystem "x86_64-linux" "live";
+              # live-iso = mk "live";
 
-              lxc = makeSystem "x86_64-linux" "lxc";
-              surface = makeSystem "x86_64-linux" "surface";
-              wsl = makeSystem "x86_64-linux" "wsl";
-              mitchpc = makeSystem "x86_64-linux" "mitchpc";
+              lxc = mk "lxc";
+              surface = mk "surface";
+              wsl = mk "wsl";
+              mitchpc = mk "mitchpc";
 
               # homelab
-              ai = makeSystem "x86_64-linux" "ai";
-              git = makeSystem "x86_64-linux" "git";
-              git-runner1 = makeSystem "x86_64-linux" "git-runner1";
-              immich = makeSystem "x86_64-linux" "immich";
-              jellyfin = makeSystem "x86_64-linux" "jellyfin";
-              jump = makeSystem "x86_64-linux" "jump";
-              llm = makeSystem "x86_64-linux" "llm";
-              nas = makeSystem "x86_64-linux" "nas";
-              nextcloud = makeSystem "x86_64-linux" "nextcloud";
-              notes = makeSystem "x86_64-linux" "notes";
-              paperless = makeSystem "x86_64-linux" "paperless";
+              ai = makeSystem "x86_64-linux" "ai" {
+                deployedSource = nixflakesSource;
+                deployedCommit = self.rev or self.dirtyRev or "";
+                buildvmBoot = {
+                  kernel = "${buildvmToplevel}/kernel";
+                  initrd = "${buildvmToplevel}/initrd";
+                  init = "${buildvmToplevel}/init";
+                  image = buildvm.config.nixflakes.buildvm.diskImage;
+                };
+              };
+              buildvm = buildvm;
+              git = mk "git";
+              git-runner1 = mk "git-runner1";
+              immich = mk "immich";
+              jellyfin = mk "jellyfin";
+              jump = mk "jump";
+              llm = mk "llm";
+              nas = mk "nas";
+              nextcloud = mk "nextcloud";
+              notes = mk "notes";
+              paperless = mk "paperless";
             };
 
           deploy.nodes =
@@ -289,6 +316,9 @@
                 # touching a generation.  The inputs' packages are not merged into pkgs here, and
                 # the overlay would leak a python-heavy package into every package set.
                 hermes-agent = inputs.hermes-agent.packages.${system}.default;
+
+                # The only way the agent can activate ai; see modules/nixos/deploy-ai.
+                deploy-ai = pkgs.deploy-ai;
               };
 
             legacyPackages = pkgs // {

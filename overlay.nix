@@ -19,6 +19,7 @@ in
   azure-storage-explorer = final.callPackage ./pkgs/azure-storage-explorer { };
   context-mode = final.callPackage ./pkgs/context-mode { };
   code-review-graph = final.callPackage ./pkgs/code-review-graph { };
+  deploy-ai = final.callPackage ./pkgs/deploy-ai { };
   trilium-git-sync = final.callPackage ./pkgs/trilium-git-sync { };
   pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };
   pi-subagents = final.callPackage ./pkgs/pi-subagents { };
