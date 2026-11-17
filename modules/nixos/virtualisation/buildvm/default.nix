@@ -21,8 +21,8 @@ in
       type = types.nullOr types.path;
       default = null;
       description = ''
-        make-disk-image output directory, whose `*.img` is the bootable raw image (MBR partition
-        table, GRUB inside the guest) written onto disk on first boot.  The image is a build-time
+        make-disk-image output directory, whose `*.img` is the bootable raw image (GPT partition
+        table, systemd-boot on its ESP) written onto disk on first boot.  The image is a build-time
         path, not a runtime root: nothing in the host's store belongs to the guest.
       '';
     };
@@ -43,6 +43,42 @@ in
       type = types.port;
       default = 2224;
       description = "Loopback port forwarded to the guest sshd (qemu user-mode networking).";
+    };
+
+    # The guest boots UEFI, so qemu needs a firmware image plus somewhere to keep its variables.
+    # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot (which would reject the
+    # unsigned systemd-boot NixOS installs) and requires SMM, i.e. -machine q35,smm=on and a secure
+    # pflash global, for features a local build VM has no use for.
+    firmware = mkOption {
+      type = types.path;
+      default = pkgs.OVMF.firmware;
+      defaultText = literalExpression "pkgs.OVMF.firmware";
+      description = "Read-only EFI firmware (OVMF_CODE.fd).";
+    };
+
+    efiVariables = mkOption {
+      type = types.path;
+      default = pkgs.OVMF.variables;
+      defaultText = literalExpression "pkgs.OVMF.variables";
+      description = "EFI variable store template, copied to efiVarsPath when that file is missing.";
+    };
+
+    efiVarsPath = mkOption {
+      type = types.str;
+      default = "/var/lib/buildvm/efi-vars.fd";
+      description = ''
+        Writable OVMF variable store, so the boot entry the guest writes into NVRAM survives a
+        reboot.  Deleting it resets the firmware to the template above.
+      '';
+    };
+
+    rootLabel = mkOption {
+      type = types.str;
+      default = "buildvm";
+      description = ''
+        ext4 label of the guest's root partition, used to find it inside the image during
+        provisioning.  Under GPT the root is the second partition, not the first.
+      '';
     };
 
     cpus = mkOption { type = types.ints.positive; default = 12; };
@@ -87,10 +123,19 @@ in
         DISK=${cfg.disk}
         IMAGE=${cfg.image}
         PROVISION=${cfg.provisionDir}
+        VARS=${cfg.efiVarsPath}
 
         if [ ! -b "$DISK" ]; then
           echo "buildvm: $DISK is not a block device - partition it per docs/buildvm-ai-setup.md section 3" >&2
           exit 1
+        fi
+
+        # qemu's pflash unit must point at an existing file of the firmware's own size, so seed it
+        # from the template.  Kept once, never overwritten: it holds the guest's NVRAM.
+        if [ ! -f "$VARS" ]; then
+          mkdir -p "$(dirname "$VARS")"
+          install -m 0644 ${cfg.efiVariables} "$VARS"
+          echo "buildvm: seeded EFI variable store $VARS"
         fi
 
         # make-disk-image yields a directory holding the raw file, not the file itself.
@@ -118,18 +163,27 @@ in
         if [ -d "$PROVISION" ] && [ -n "$(ls -A "$PROVISION" 2>/dev/null || true)" ]; then
           MNT=/mnt/buildvm
           mkdir -p "$MNT"
-          # The image's root is the first partition *inside* it, so the loop device has to scan the
-          # image's partition table (-P); without it no /dev/loop0p1 node is ever created and mount
-          # fails with "Can't lookup blockdev".
+          # The image's partitions live *inside* it, so the loop device has to scan its partition
+          # table (-P); without it no /dev/loop0p1 node is ever created and mount fails with
+          # "Can't lookup blockdev".
           LOOP=$(losetup -f --show -P "$DISK")
           udevadm settle --timeout=10 || true
-          if [ ! -b "$LOOP"p1 ]; then
+          # GPT puts the ESP first, so the root is whichever partition carries the image's label
+          # rather than a fixed index; a hand-made single-partition disk matches the same label.
+          ROOT=""
+          for part in "$LOOP"p*; do
+            if [ "$(blkid -p -o value -s LABEL "$part" 2>/dev/null || true)" = "${cfg.rootLabel}" ]; then
+              ROOT="$part"
+              break
+            fi
+          done
+          if [ -z "$ROOT" ]; then
             # Provisioning is out-of-band: the guest still boots without it, so keep the failure a
             # warning instead of blocking buildvm.service, which requires this unit.
-            echo "buildvm: no partition node for $LOOP p1, skipping provisioning" >&2
+            echo "buildvm: no partition labelled ${cfg.rootLabel} on $LOOP, skipping provisioning" >&2
             losetup -d "$LOOP" || true
           else
-            mount "$LOOP"p1 "$MNT"
+            mount "$ROOT" "$MNT"
             GUEST_UID=$(awk -F: '$1=="${cfg.userName}" {print $3}' "$MNT/etc/passwd" || true)
             if [ -n "$GUEST_UID" ]; then
               mkdir -p "$MNT/home/${cfg.userName}/.ssh"
@@ -158,14 +212,18 @@ in
         Type = "simple";
         # Root: it owns the raw disk and needs /dev/kvm.
         User = "root";
-        # The disk boots itself: GRUB lives in the guest image, so qemu gets no -kernel/-initrd/-append
-        # and the kernel command line (console, root) comes from the guest's own bootloader config.
+        # The disk boots itself: systemd-boot lives on the guest's ESP and the kernel carries the EFI
+        # stub, so qemu gets no -kernel/-initrd/-append and the kernel command line comes from the
+        # guest's own loader entries.  unit=0 is the read-only firmware, unit=1 the writable variable
+        # store buildvm-install seeds.
         # Keep notes outside ExecStart: systemd joins the backslash continuation lines into one
         # command line, so a # inside it would reach qemu as an argument.
         ExecStart = ''
           ${pkgs.qemu}/bin/qemu-system-x86_64 \
             -machine q35 -cpu host -enable-kvm \
             -smp ${toString cfg.cpus} -m ${toString cfg.memoryMiB} \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file=${cfg.firmware} \
+            -drive if=pflash,format=raw,unit=1,file=${cfg.efiVarsPath} \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0,bootindex=0 \
             -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \

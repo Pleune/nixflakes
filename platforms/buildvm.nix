@@ -12,9 +12,10 @@ in
       type = types.nullOr types.path;
       default = null;
       description = ''
-        Bootable raw disk image (MBR partition table + GRUB) for the guest partition, for reseeding
-        it by hand.  ai installs the seed image instead (platforms/buildvm-bootstrap.nix), and the
-        guest grows its own root partition on boot, so nothing resizes this image on the host.
+        Bootable raw disk image (GPT partition table + systemd-boot on its ESP) for the guest
+        partition, for reseeding it by hand.  ai installs the seed image instead
+        (platforms/buildvm-bootstrap.nix), and the guest grows its own root partition on boot, so
+        nothing resizes this image on the host.
       '';
     };
 
@@ -35,14 +36,14 @@ in
 
     networking.hostName = "buildvm";
 
-    # The guest boots its own disk: qemu gets no -kernel/-initrd/-append, so GRUB has to live in the
-    # partition and `nixos-rebuild switch` inside the guest has to be able to reinstall it.
+    # The guest boots its own disk: qemu gets no -kernel/-initrd/-append, so the loader has to live
+    # in the image and `nixos-rebuild switch` inside the guest has to be able to reinstall it.
     system.switch.enable = true;
-    boot.loader.grub.enable = true;
-    boot.loader.grub.efiSupport = false;
-    # The only virtio disk, which is also the device the image was installed onto.
-    boot.loader.grub.device = "/dev/vda";
-    boot.loader.efi.canTouchEfiVariables = false;
+    # The kernel's EFI stub is what OVMF boots, and systemd-boot is the loader on the ESP.
+    boot.loader.grub.enable = false;
+    boot.loader.systemd-boot.enable = true;
+    boot.loader.efi.canTouchEfiVariables = true;
+    boot.loader.systemd-boot.configurationLimit = 4;
 
     # The image's root partition is a few GiB; the disk it lands on is 1.82 TiB.  The guest grows
     # the partition and the filesystem itself, on boot, before anything else mounts root.
@@ -52,7 +53,9 @@ in
     # instead of timing out a device job in silence.
     boot.kernelParams = [ "console=ttyS0" "rd.shell=1" "panic=0" ];
 
-    # The initrd must have virtio and ext4 before it can mount root.
+    # The initrd must have virtio and ext4 before it can mount root.  The ESP is vfat but it is not
+    # needed for boot, so systemd mounts /boot after switch root, where modprobe can load vfat from
+    # the store.
     boot.initrd.kernelModules = [ "virtio_pci" "virtio_blk" "ext4" ];
 
     # Name root by the ext4 label make-disk-image writes (mkfs.ext4 -L buildvm) rather than
@@ -60,6 +63,9 @@ in
     # reads the initrd fstab, so a second definition of the same node makes the generator fail with
     # "Failed to create unit file ... as it already exists" and the guest drops into Emergency Mode.
     fileSystems."/" = { device = "/dev/disk/by-label/buildvm"; fsType = "ext4"; };
+
+    # The ESP systemd-boot lives on, labelled ESP by make-disk-image.
+    fileSystems."/boot" = { device = "/dev/disk/by-label/ESP"; fsType = "vfat"; noCheck = true; };
 
     # Skip the repo's default user: no password login, no home-manager in a build VM.
     nixflakes.makeUser = false;
@@ -86,14 +92,16 @@ in
       name = "buildvm-disk";
       label = "buildvm";
       format = "raw";
-      # MBR table with one ext4 partition, which is what boot.loader.grub above installs onto and
-      # what boot.growPartition grows.
-      partitionTableType = "legacy";
+      # GPT with an ESP and an ext4 root, matching the loader config above; the root is the partition
+      # boot.growPartition grows.
+      partitionTableType = "efi";
+      touchEFIVars = true;
       fsType = "ext4";
       # The partition is ~1.7 TiB; the image only needs the store plus headroom, and the guest
       # grows into the rest on its first boot.
       diskSize = "auto";
       additionalSpace = "4G";
+      bootSize = "512M";
     };
 
     environment.systemPackages = with pkgs; [
