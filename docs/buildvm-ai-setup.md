@@ -168,7 +168,9 @@ sudo ssh -p 2224 builder@127.0.0.1 'cat /home/builder/provisioned-commit'
 
 What it does, in order: wait for ssh; read the commit to apply (`/home/builder/deployed-commit`, the
 one `deploy-ai` recorded, falling back to the checkout's HEAD); skip if
-`/home/builder/provisioned-commit` already names it; otherwise `sudo nixos-rebuild switch --flake
+`/home/builder/provisioned-commit` already names it; `git checkout --detach` that commit in the
+guest's clone (the branch tip there can be ahead of or behind what ai runs, so the switch must not
+trust HEAD); then `sudo nixos-rebuild switch --flake
 /home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config`;
 record the commit; reboot the guest — qemu restarts it (`buildvm.service` `Restart = always`).
 `builder` is in `wheel` with NOPASSWD sudo, which is what makes that possible and also makes it a nix
@@ -297,10 +299,12 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
 | `buildvm-provision: no commit to apply (missing /home/builder/nixflakes?)` | the clone never happened — check the install unit's log and that `/var/lib/deploy-ai/repo` has branches |
 | `buildvm-provision: … is not in the guest's checkout` | `/home/builder/deployed-commit` names a commit the guest's clone predates.  Every `deploy-ai` run fetches the mirror the clone came from; to bring an existing checkout forward, run `git -C ~/nixflakes fetch origin` inside the guest (that needs §2) or reseed (§9), which re-clones from the mirror |
+| `buildvm-provision-start: line N: private: command not found` | `OVERRIDE` was assigned unquoted, so the shell ran `private` as a command. Fixed by quoting the value; only generations before that fix hit it |
+| `buildvm-provision: could not check out <sha> in /home/builder/nixflakes` | the guest's clone is dirty or the commit vanished; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'` |
 | `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had |
 | `buildvm-provision: guest did not come back after the switch` | the new system does not boot — the switch rewrote the ESP entries. Boot the previous loader entry from the guest's serial console (`journalctl -u buildvm -b`), or reseed (§9) |
 | the guest stays the seed image (no Xfce, no sudo) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means the agenix secret must exist — `ls -l /run/agenix/ai_buildvm_id_ed25519` |
-| Hermes terminal: `Load key "…": Permission denied`, then `Permission denied (publickey)` | the agenix secret is not `0640 root:hermes`, or `/run/agenix/ai_buildvm_id_ed25519` is missing because decryption failed — `journalctl -u agenix-install -b`. Decryption fails when `config.age.identityPaths` (default `/etc/ssh/ssh_host_ed25519_key`) is not the key the secret is encrypted for |
+| Hermes terminal: `Load key "…": Permission denied`, then `Permission denied (publickey)` | the agenix secret is not `0640 root:hermes`, or `/run/agenix/ai_buildvm_id_ed25519` is missing because decryption failed. Decryption happens in the activation script, not in a unit, so read `journalctl -b -u switch-to-configuration --no-pager | grep -A2 agenix`; it fails when `config.age.identityPaths` (default `/etc/ssh/ssh_host_ed25519_key`) is not a key the secret is encrypted for |
 | qemu: `pflash: file … does not exist` | `/var/lib/buildvm/efi-vars.fd` was deleted and `buildvm.service` started before `buildvm-install.service` seeded it — `systemctl start buildvm-install` |
 | guest drops to the UEFI shell / `Boot Failed` | no NVRAM entry and no ESP fallback path; the fallback needs `EFI/BOOT/BOOTX64.EFI` on the ESP, so re-run the bootloader phase in the guest (`nixos-rebuild switch --bootloader-only`) or reset `/var/lib/buildvm/efi-vars.fd` |
 | qemu starts, ssh times out | no `/dev/kvm` (`ls -l /dev/kvm`), or no loader on the ESP — read `journalctl -u buildvm -b`, which shows the guest's serial console |
