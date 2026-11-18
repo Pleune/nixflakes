@@ -520,6 +520,17 @@ in
             -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$ROOT_USER@127.0.0.1" "$@"
         }
 
+        # Hands a directory to the build user.  It has to be root doing this: the guest may already
+        # hold one of these paths owned by root, because generations before provisioning streamed
+        # placed the checkouts while mounting the image, and a root-owned directory makes both tar
+        # extraction and `git init` fail for ${cfg.userName} with nothing a builder login can do about
+        # it.  Ownership is fixed recursively so a stale tree becomes usable instead of fatal.
+        prepare_dir() {
+          DEST="$1"
+          gssh_root "mkdir -p '$DEST' && chown -R '$USER':'$USER' '$DEST'" \
+            || { echo "buildvm-provision: cannot hand $DEST to $USER" >&2; return 1; }
+        }
+
         # Streams a directory's contents into the guest, creating the directory first.  Tar over ssh
         # rather than scp because a tree arrives in one stream, an existing directory is refreshed in
         # place, and everything lands owned by the user sshd logged in as.  A tree that does not arrive
@@ -531,7 +542,7 @@ in
             echo "buildvm-provision: nothing to stream from $SRC" >&2
             return 1
           fi
-          gssh "mkdir -p '$DEST'" || return 1
+          prepare_dir "$DEST" || return 1
           tar -C "$SRC" -cf - . | gssh "tar -xf - -C '$DEST'" \
             || { echo "buildvm-provision: streaming $SRC into $DEST failed" >&2; return 1; }
         }
@@ -622,7 +633,7 @@ in
           echo "buildvm-provision: guest did not come back after the switch" >&2
           exit 1
         fi
-        echo "buildvm-provision: guest running its own config at $TARGET"
+        echo "buildvm-provision: guest running its own config at $SNAPSHOT"
       '';
     };
 
