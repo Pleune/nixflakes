@@ -401,21 +401,16 @@ in
     cpus = buildvm.cpus;
     memoryMiB = buildvm.memoryMiB;
     userName = buildvm.userName;
-    # Everything the guest gets from ai rather than from the git host, handed over on first boot.
-    # The nixflakes checkout comes from deploy-ai's own mirror of the repo it deployed, so the guest
-    # starts on exactly the commit ai is running; origin stays the git host so the agent can push.
-    repos = [
-      {
-        name = "nixflakes";
-        url = buildvm.gitHost;
-        source = "/var/lib/deploy-ai/repo";
-        home = "nixflakes";
-      }
-    ];
     provision = {
       enable = true;
       flakeAttr = "buildvm";
-      # The secrets tree ai itself evaluated, copied into the guest and passed as --override-input so
+      # The tree this machine was deployed from, streamed into the guest by buildvm-provision.  That is
+      # the whole point of doing it there: provisioning knows the commit ai runs, so the guest is put on
+      # exactly it instead of on whatever a clone's branch tip happens to be.
+      sourcePath = deployedSource;
+      origin = buildvm.gitHost;
+      targetCommit = deployedCommit;
+      # The secrets tree ai itself evaluated, streamed into the guest and passed as --override-input so
       # the switch never has to fetch the `private` input over ssh.
       secretsDir = "/home/${buildvm.userName}/secrets";
       secretsSource = private;

@@ -162,38 +162,6 @@ in
     # The user defined in platforms/buildvm.nix; its ~/.ssh is what the install unit provisions.
     userName = mkOption { type = types.str; default = "builder"; };
 
-    # Repos handed to the guest from ai instead of from the git host.  The guest is seeded from a
-    # repository already on this machine, so seeding and switching need no access to the git host at
-    # all; `origin` is still the real URL so the agent can push once that host accepts the key it was
-    # given.
-    repos = mkOption {
-      type = types.listOf (types.submodule {
-        options = {
-          name = mkOption { type = types.str; description = "Label used in log lines."; };
-          url = mkOption {
-            type = types.str;
-            description = "Upstream URL, left as the clone's origin and used if source is missing.";
-          };
-          source = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            example = "/var/lib/deploy-ai/repo";
-            description = ''
-              Bare repository on ai to clone from.  Null means clone straight from url, which needs
-              the deploy key the git host accepts.
-            '';
-          };
-          home = mkOption {
-            type = types.str;
-            example = "nixflakes";
-            description = "Directory to clone into, relative to the guest user's home.";
-          };
-        };
-      });
-      default = [ ];
-      description = "Repos to clone into the guest when it is seeded.";
-    };
-
     provision = {
       enable = mkEnableOption "applying the guest's own NixOS config inside the guest, once per change";
 
@@ -223,9 +191,39 @@ in
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path on ai whose contents are copied into secretsDir on every install pass, normally the
+          Path on ai whose contents are streamed into secretsDir by buildvm-provision, normally the
           `private` input ai itself evaluated against.  A plain copy, not a git checkout: the guest
           reads the same secrets ai used and needs no deploy key for the secrets repo.
+        '';
+      };
+
+      sourcePath = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "/nix/store/...-source";
+        description = ''
+          Directory on ai holding the nixflakes tree ai was built from, streamed into the guest's
+          workdir by buildvm-provision.  Provisioning rather than seeding because the guest must
+          switch to the tree this machine is running, which only exists once ai has been deployed.
+        '';
+      };
+
+      origin = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          Remote the guest's checkout is pointed at, so the agent inside the VM can push.  History is
+          fetched from it; with no access the streamed tree is still a working flake, it just has no
+          commits behind it.
+        '';
+      };
+
+      targetCommit = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          Commit the guest should be on, normally `self.rev` of the source ai was deployed from.  Empty
+          means fall back to the file deploy-ai records in the guest.
         '';
       };
 
@@ -311,46 +309,6 @@ in
         KEY=${escapeShellArg cfg.guestKeyPath}
         MNT=/mnt/buildvm
 
-        # Clone a repository into the guest's home, but only the first time: later passes never touch
-        # the agent's own checkout.  The source is a repository that already lives on ai, so seeding
-        # needs no git host; url is still recorded as origin for the day the guest pushes.
-        clone_home() {
-          TARGET="$MNT/home/$USER/$1"
-          [ -e "$TARGET/.git" ] && return 0
-          mkdir -p "$(dirname "$TARGET")"
-          SRC="$2"
-          if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
-            echo "buildvm: ${cfg.userName}: no local source for $1, falling back to its url" >&2
-            SRC="$3"
-          fi
-          git clone --quiet "$SRC" "$TARGET" \
-            || { echo "buildvm: clone of $SRC into $1 failed" >&2; return 0; }
-          # A bare mirror's HEAD can point at a branch it never fetched, which would leave the clone
-          # with no working tree, so pick a head that is actually there.
-          BR=$(git --git-dir="$SRC" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | grep -m1 '^main$')
-          [ -n "$BR" ] || BR=$(git --git-dir="$SRC" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | head -1)
-          if [ -n "$BR" ]; then
-            git -C "$TARGET" checkout --quiet -B "$BR" "origin/$BR" \
-              || echo "buildvm: cannot check out $BR in $1" >&2
-          fi
-          git -C "$TARGET" remote set-url origin "$3"
-          chown -R "$GUEST_UID:$GUEST_UID" "$TARGET"
-          echo "buildvm: cloned $1 into the guest from $SRC"
-        }
-
-        # The secrets tree is a plain copy, refreshed on every pass: ai evaluated the same tree, and
-        # the guest only ever reads it.  The store is read-only, hence the chmod.
-        copy_secrets() {
-          TARGET="$MNT/$2"
-          rm -rf "$TARGET"
-          mkdir -p "$TARGET"
-          cp -r "$1/." "$TARGET/" \
-            || { echo "buildvm: copy of secrets from $1 failed" >&2; return 0; }
-          chmod -R u+rwx "$TARGET"
-          chown -R "$GUEST_UID:$GUEST_UID" "$TARGET"
-          echo "buildvm: copied the secrets tree into the guest from $1"
-        }
-
         if [ ! -b "$DISK" ]; then
           echo "buildvm: $DISK is not a block device - partition it per docs/buildvm-ai-setup.md section 3" >&2
           exit 1
@@ -382,10 +340,11 @@ in
           qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
         fi
 
-        # Graft out-of-band guest files: the shared keypair and the repo checkouts.  This unit is
-        # Before= the qemu unit, so the VM is stopped and mounting its filesystem here is safe.  The
-        # uid goes in a plain variable: UID is readonly in bash, so assigning it fails and chown would
-        # run with root's uid.
+        # Graft out-of-band guest files: the keys.  Repos and secrets are placed by buildvm-provision,
+        # which runs once ai has been deployed and therefore knows which nixflakes tree this machine is
+        # running.  This unit is Before= the qemu unit, so the VM is stopped and mounting its filesystem
+        # here is safe.  The uid goes in a plain variable: UID is readonly in bash, so assigning it
+        # fails and chown would run with root's uid.
         MNT=/mnt/buildvm
         mkdir -p "$MNT"
         # The image's partitions live *inside* it, so the loop device has to scan its partition
@@ -494,14 +453,6 @@ in
             echo "buildvm: dropped the stale guest host key from ${cfg.provision.knownHostsFile}"
           fi
 
-          # Only the fallback clone above reaches the git host, and it uses the same key.
-          if [ -f "$KEY" ]; then
-            export GIT_SSH_COMMAND="ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-          fi
-          ${concatMapStringsSep "\n" (r: ''
-          clone_home ${escapeShellArg r.home} ${escapeShellArg r.source} ${escapeShellArg r.url} '') cfg.repos}
-          ${optionalString (cfg.provision.secretsSource != null) ''
-          copy_secrets ${escapeShellArg cfg.provision.secretsSource} ${escapeShellArg cfg.provision.secretsDir} ''}
         fi
 
         sync
@@ -512,12 +463,12 @@ in
 
     # Put the guest's own NixOS config onto the guest.  Until this runs, the machine behind
     # `ssh -p ${toString cfg.sshPort}` is the seed image (platforms/buildvm-bootstrap.nix): a
-    # shell with git and sshd, no desktop, no gc, no sudo.  Everything it needs is on the disk
-    # already - buildvm-install cloned the repos - so this is a reboot plus a switch, and it does
+    # shell with git and sshd, no desktop, no gc, no sudo.  This unit streams ai's deployed nixflakes
+    # tree and ai's secrets tree into the guest over ssh, then switches the guest onto that commit -
     # one pass per changed commit rather than a build on every boot.
     #
-    # The commit to apply is the one deploy-ai recorded, i.e. the tree the running ai came from;
-    # with no deploy recorded yet, the clone's own HEAD is used.
+    # The commit to apply is `provision.targetCommit`, else the one deploy-ai recorded, i.e. the tree
+    # the running ai came from.
     systemd.services.buildvm-provision = mkIf cfg.provision.enable {
       description = "Apply the buildvm guest's own NixOS config inside the guest";
       wantedBy = [ "multi-user.target" ];
@@ -530,7 +481,7 @@ in
         # A full guest system build (Xfce, Xvnc, nixVersions.latest) is slow; give it room.
         TimeoutStartSec = "45min";
       };
-      path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils ];
+      path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils pkgs.gnutar ];
       script = ''
         USER=${cfg.userName}
         ROOT_USER=${escapeShellArg cfg.provision.activationUser}
@@ -540,6 +491,14 @@ in
         ATTR=${escapeShellArg cfg.provision.flakeAttr}
         TARGET_FILE=${escapeShellArg cfg.provision.targetFile}
         MARKER=${escapeShellArg cfg.provision.markerFile}
+        SOURCE=${escapeShellArg (cfg.provision.sourcePath or "")}
+        ORIGIN=${escapeShellArg cfg.provision.origin}
+        SECRETS_SRC=${escapeShellArg (cfg.provision.secretsSource or "")}
+        SECRETS=${escapeShellArg (cfg.provision.secretsDir or "")}
+        COMMIT=${escapeShellArg cfg.provision.targetCommit}
+        # The snapshot's store name hashes its contents, so it says exactly what this machine runs,
+        # whether or not the deploy pointed at a commit.
+        SNAPSHOT=$(basename "$SOURCE")
         # Quote the whole flag: unquoted, `OVERRIDE=--override-input private /path` would assign
         # only the first word and then try to run `private` as a command.
         OVERRIDE=${optionalString (cfg.provision.secretsDir != null) (escapeShellArg "--override-input private ${cfg.provision.secretsDir}")}
@@ -561,6 +520,22 @@ in
             -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$ROOT_USER@127.0.0.1" "$@"
         }
 
+        # Streams a directory's contents into the guest, creating the directory first.  Tar over ssh
+        # rather than scp because a tree arrives in one stream, an existing directory is refreshed in
+        # place, and everything lands owned by the user sshd logged in as.  A tree that does not arrive
+        # must stop the run: switching whatever is already on disk would provision the wrong thing.
+        stream_dir() {
+          SRC="$1"
+          DEST="$2"
+          if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
+            echo "buildvm-provision: nothing to stream from $SRC" >&2
+            return 1
+          fi
+          gssh "mkdir -p '$DEST'" || return 1
+          tar -C "$SRC" -cf - . | gssh "tar -xf - -C '$DEST'" \
+            || { echo "buildvm-provision: streaming $SRC into $DEST failed" >&2; return 1; }
+        }
+
         # The guest boots asynchronously; sshd takes a few seconds, and a reseed takes longer.
         READY=0
         for i in $(seq 1 180); do
@@ -572,32 +547,58 @@ in
           exit 1
         fi
 
-        TARGET=$(gssh "cat '$TARGET_FILE' 2>/dev/null || git -C '$WORK' rev-parse HEAD" | tr -d ' \n')
-        if [ -z "$TARGET" ]; then
-          echo "buildvm-provision: no commit to apply (missing $WORK?)" >&2
-          exit 1
-        fi
-        if [ "$(gssh "cat '$MARKER' 2>/dev/null" | tr -d ' \n')" = "$TARGET" ]; then
-          echo "buildvm-provision: guest already at $TARGET"
+        # The snapshot decides whether there is anything to do.  A commit sha would not: a deploy from
+        # a dirty tree keeps the sha while its contents change, and skipping on the sha alone would
+        # leave the guest behind.
+        if [ "$(gssh "cat '$MARKER' 2>/dev/null" | tr -d ' \n')" = "$SNAPSHOT" ]; then
+          echo "buildvm-provision: guest already at $SNAPSHOT"
           exit 0
         fi
-        # The clone came from ai's deploy mirror when buildvm-install created it, so a commit deployed after
-# that only reaches the guest if it fetches.  The outbound key grafted into ~/.ssh is what the git
-# host accepts; a failed fetch is not fatal, the check below still works on what the clone has.
-gssh "GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git -C '$WORK' fetch --quiet origin" \
-  || echo "buildvm-provision: fetch from origin failed, using what the checkout already has"
-if ! gssh "git -C '$WORK' cat-file -e '$TARGET^{commit}'"; then
-          echo "buildvm-provision: $TARGET is not in the guest's checkout" >&2
-          exit 1
-        fi
-        # The clone's branch tip can be ahead of or behind the commit ai actually runs, so put the
-        # working tree on $TARGET before the switch instead of trusting HEAD.
-        if ! gssh "git -C '$WORK' checkout --quiet --detach '$TARGET'"; then
-          echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
-          exit 1
+
+        # Put the tree the running ai came from into the guest.  Streaming it here rather than seeding
+        # it in buildvm-install is the point: only provisioning knows what this machine runs.
+        stream_dir "$SOURCE" "$WORK" || exit 1
+        if [ -n "$SECRETS" ]; then
+          stream_dir "$SECRETS_SRC" "$SECRETS" || exit 1
         fi
 
-        echo "buildvm-provision: switching the guest to $TARGET"
+        # Give the checkout history only when the deploy pointed at a commit.  A dirty deploy records
+        # `<sha>-dirty`, which is no commit to check out, and the contents already on disk are what
+        # this machine runs; chasing history there would fail the run for nothing.
+        TARGET="$COMMIT"
+        if [ -z "$TARGET" ] && [ -n "$ORIGIN" ]; then
+          TARGET=$(gssh "cat '$TARGET_FILE' 2>/dev/null" | tr -d ' \n')
+        fi
+        # A dirty deploy records `<sha>-dirty`, which is no commit to check out.
+        TARGET=$(printf '%s' "$TARGET" | sed 's/-dirty$//')
+        if [ -z "$TARGET" ]; then
+          echo "buildvm-provision: no commit recorded, switching the streamed tree as it stands"
+        else
+          # A streamed tree has no history, and the agent inside the VM needs to push, so give it a
+          # remote and fetch through it.  The outbound key grafted into ~/.ssh is what the git host
+          # accepts; without that access the streamed tree is still a working flake, it just has no
+          # commits behind it, which the check below reports.
+          if ! gssh "test -d '$WORK/.git'"; then
+            gssh "git init -q '$WORK'" || { echo "buildvm-provision: cannot init $WORK" >&2; exit 1; }
+          fi
+          gssh "git -C '$WORK' remote add origin '$ORIGIN' 2>/dev/null || git -C '$WORK' remote set-url origin '$ORIGIN'" \
+            || echo "buildvm-provision: could not point $WORK at $ORIGIN" >&2
+          gssh "GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git -C '$WORK' fetch --quiet origin" \
+            || echo "buildvm-provision: fetch from origin failed, using what the checkout already has"
+          if ! gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
+            echo "buildvm-provision: $TARGET is not in the guest's checkout" >&2
+            exit 1
+          fi
+          # The streamed tree is the right *contents* but not the right *commit*, and the switch evaluates
+          # whatever is on disk, so put the working tree on $TARGET.  --force is needed because the streamed
+          # files are untracked and would otherwise block the checkout.
+          if ! gssh "git -C '$WORK' checkout --force --quiet --detach '$TARGET'"; then
+            echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
+            exit 1
+          fi
+        fi
+
+        echo "buildvm-provision: switching the guest to $SNAPSHOT"
         if ! gssh_root "nixos-rebuild switch --flake '$WORK#$ATTR' $OVERRIDE --accept-flake-config"; then
           echo "buildvm-provision: switch failed; guest left as it is" >&2
           exit 1
@@ -605,7 +606,7 @@ if ! gssh "git -C '$WORK' cat-file -e '$TARGET^{commit}'"; then
 
         # A switch changes the bootloader entries, so boot the new system rather than the one this
         # boot came from.  qemu restarts when the guest powers off (buildvm.service Restart=always).
-        gssh "echo '$TARGET' > '$MARKER'"
+        gssh "echo '$SNAPSHOT' > '$MARKER'"
         gssh_root "reboot" || true
         BACK=0
         for i in $(seq 1 120); do
