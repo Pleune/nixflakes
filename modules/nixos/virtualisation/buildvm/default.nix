@@ -119,6 +119,41 @@ in
       description = "Loopback port forwarded to the guest sshd (qemu user-mode networking).";
     };
 
+    # qemu's user-mode network is a NAT to whatever ai can reach, and pinning the subnet is what
+    # makes it usable: this qemu build's own defaults hand the guest an address in 240.0.0.0/24 with
+    # no default route and no resolver, so nothing the guest builds (nixpkgs, the git host) is
+    # reachable.  These four values are the guest's configuration too - see
+    # platforms/buildvm-network.nix, which mirrors them.
+    netSubnet = mkOption {
+      type = types.str;
+      default = "10.0.2.0/24";
+      description = "NAT subnet qemu hands the guest.";
+    };
+
+    netGateway = mkOption {
+      type = types.str;
+      default = "10.0.2.2";
+      description = "NAT gateway, i.e. the guest's default route.";
+    };
+
+    netDns = mkOption {
+      type = types.str;
+      default = "10.0.2.3";
+      description = ''
+        qemu's built-in resolver, which forwards to ai's resolver.  qemu only forwards UDP/53 to it
+        from inside its own NAT, so the guest cannot use ai's nameservers directly.
+      '';
+    };
+
+    netGuestAddress = mkOption {
+      type = types.str;
+      default = "10.0.2.15";
+      description = ''
+        Address qemu hands the guest (its DHCP pool starts here); platforms/buildvm-network.nix
+        assigns the same address statically instead of relying on DHCP.
+      '';
+    };
+
     # The guest boots UEFI, so qemu needs a firmware image plus somewhere to keep its variables.
     # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot (which would reject the
     # unsigned systemd-boot NixOS installs) and requires SMM, i.e. -machine q35,smm=on and a secure
@@ -735,7 +770,7 @@ in
             -drive if=pflash,format=raw,unit=1,file=${cfg.efiVarsPath} \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0,bootindex=0 \
-            -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \
+            -netdev user,id=n0,net=${cfg.netSubnet},host=${cfg.netGateway},dns=${cfg.netDns},dhcpstart=${cfg.netGuestAddress},hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \
             -device virtio-net-pci,netdev=n0 \
             -nographic
         '';

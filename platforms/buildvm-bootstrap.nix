@@ -20,6 +20,10 @@ let
   buildvm = import ../lib/buildvm { };
 in
 {
+  # The seed needs the same static addressing as the guest it is replaced by: provisioning sshes in
+  # on the forwarded port, and the first switch has to fetch nixpkgs, which needs a route.
+  imports = [ ./buildvm-network.nix ];
+
   system.stateVersion = "25.05";
   networking.hostName = "buildvm";
 

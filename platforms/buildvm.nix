@@ -7,6 +7,9 @@ let
   buildvm = import ../lib/buildvm { private = inputs.private; };
 in
 {
+  # Static address on qemu's NAT instead of DHCP; see that file for why.
+  imports = [ ./buildvm-network.nix ];
+
   options = {
     nixflakes.buildvm.diskImage = mkOption {
       type = types.nullOr types.path;

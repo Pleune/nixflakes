@@ -42,6 +42,33 @@ and `/home/builder/secrets`, and passes `--override-input private /home/builder/
 the dev box, and the agent needs push access to publish what it does there.  Everything else it fetches
 itself — `nix flake update`, an added input, `git pull` — goes to the URL left as `origin` too.
 
+### The guest's route out
+
+All of that needs the guest to reach the network, and it does so through qemu's user-mode NAT, not
+through anything on your LAN. `buildvm.service` pins the subnet rather than trusting qemu's defaults,
+which handed this guest `240.0.0.1/24` with **no default route and no resolver** — every fetch failed
+with `connect to address 209.222.120.168 port 2223: Network is unreachable`:
+
+```text
+-netdev user,id=n0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3,dhcpstart=10.0.2.15,hostfwd=tcp:127.0.0.1:2224-:22
+```
+
+`platforms/buildvm-network.nix` is the guest's half of that and says `networking.useDHCP = false`, a
+static `10.0.2.15/24` on `ens3`, gateway `10.0.2.2`, nameserver `10.0.2.3`. It is configured statically
+because DHCP is exactly what failed here; the four values are duplicated in the module's `netSubnet`,
+`netGateway`, `netDns` and `netGuestAddress` options, so change the two together. NAT means the guest
+is a client of `ai`'s connectivity: no inbound except the forwarded ssh port, and qemu's resolver
+(`10.0.2.3`) only forwards to `ai`'s own resolver.
+
+Check it from inside the guest:
+
+```bash
+ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'
+```
+
+which should show `default via 10.0.2.2 dev ens3` and an address. Without the `default` line nothing
+outbound works, however good the keys are.
+
 ## 3. Partition the disk
 
 Set the target explicitly — once the old pool UUID is gone there is nothing to derive it from:
@@ -376,7 +403,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision` waits forever, then `start operation timed out`, while `journalctl -u buildvm` shows `BdsDxe: No bootable option or device was found` | the guest is not running an OS, so nothing listens on 2224 and qemu's user-mode networking accepts your connection and resets it, which ssh reports as `kex_exchange_identification: read: Connection reset by peer` rather than "connection refused".  Usually `buildvm-install` never ran this boot, so the disk was never written: `sudo systemctl stop buildvm && sudo systemctl start buildvm-install && sudo systemctl start buildvm`.  If it is in a failed state from an earlier attempt, `sudo systemctl reset-failed buildvm-install` first, and check `journalctl -b -u buildvm-install` for why it stopped early. |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
 | `buildvm-provision: no commit recorded, switching the streamed tree as it stands` | informational: `provision.targetCommit` is empty (a deploy from a dirty tree, or no `deploy-ai` run yet), so there is nothing to tag or rebase and the streamed contents are switched as they are (§6) |
-| `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check the route from inside the guest — `ip route` showing no `default` line while `ip addr show ens3` has an address means user-mode networking gave no DHCP, and `ip route add default via <gateway> dev ens3` proves it.  Not fatal: the switch runs on the streamed contents |
+| `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check from inside the guest: `ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'` must show `default via 10.0.2.2 dev ens3` and resolve, otherwise `buildvm.service` is not passing the pinned `-netdev user,…,net=…,host=…,dns=…` arguments or `platforms/buildvm-network.nix` is not in the guest's config (§2).  Not fatal: the switch runs on the streamed contents |
 | `buildvm-provision: could not point /home/builder/nixflakes at ssh://…` | `git remote add`/`set-url` failed, which needs the checkout to be writable (§the permission row above) |
 | `buildvm-provision: <sha> is not in the guest's checkout, switching the streamed tree as it stands` | informational: that commit is not pushed to `origin`, so nothing is tagged or rebased and the guest switches the streamed contents, which are what `ai` runs.  Push the deploy (§7) and the next pass brings the history; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline -3 && git -C /home/builder/nixflakes tag -l'` shows what is there |
 | `buildvm-provision: could not tag <sha> as deployed`, `could not create main at <sha>`, or `could not reset main to deployed` | the checkout is not writable or is in a state git will not accept; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'`.  Provisioning stops rather than switching a checkout it cannot describe |
