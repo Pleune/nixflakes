@@ -527,7 +527,10 @@ in
         # it.  Ownership is fixed recursively so a stale tree becomes usable instead of fatal.
         prepare_dir() {
           DEST="$1"
-          gssh_root "mkdir -p '$DEST' && chown -R '$USER':'$USER' '$DEST'" \
+          # Owner only, no group: the guest's build user has no group of its own (NixOS puts
+          # isNormalUser in `users` unless told otherwise), so `builder:builder` is not a valid spec and
+          # chown would abort the whole run.
+          gssh_root "mkdir -p '$DEST' && chown -R '$USER' '$DEST'" \
             || { echo "buildvm-provision: cannot hand $DEST to $USER" >&2; return 1; }
         }
 
@@ -545,6 +548,10 @@ in
           prepare_dir "$DEST" || return 1
           tar -C "$SRC" -cf - . | gssh "tar -xf - -C '$DEST'" \
             || { echo "buildvm-provision: streaming $SRC into $DEST failed" >&2; return 1; }
+          # A Nix store tree is read-only (0444 files, 0555 directories) and tar keeps those modes, so a
+          # streamed checkout could never be rewritten by git.  Widen the owner's bits on the copy only.
+          gssh "chmod -R u+w '$DEST'" \
+            || { echo "buildvm-provision: could not make $DEST writable" >&2; return 1; }
         }
 
         # The guest boots asynchronously; sshd takes a few seconds, and a reseed takes longer.
