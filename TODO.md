@@ -182,10 +182,10 @@ Operator prerequisites before the first deploy: commit both key files in the sec
 
 ## Amendment (after the first ai deploy) — the sandbox key is not shareable
 
-T1/T2 as written put one keypair at `0640 root:hermes` and handed it to `deploy-ai`, `buildvm-provision`
-and Hermes.  That does not work: ssh ignores a private key the invoking user does not own, so the
-`hermes` units got `Load key "…": Permission denied` → `Permission denied (publickey)`, and a
-supplementary group cannot fix it (`0640`, `0644`, `0750` on a key you own are all refused).
+and Hermes.  That does not work: ssh refuses a private key whose permissions let anyone other than its
+owner read it, so the `0640 root:hermes` file made the hermes units report `Permissions … are too
+open` / `This private key will be ignored` → `Permission denied (publickey)`, and a supplementary
+group cannot make a shared key usable.
 
 - The agenix secret is the **guest's outbound identity**: `0600 root`, grafted into
   `~builder/.ssh/id_ed25519`, and used by root's `deploy-ai`.

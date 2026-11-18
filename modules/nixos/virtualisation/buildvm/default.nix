@@ -2,9 +2,12 @@
 with lib;
 let
   cfg = config.nixflakes.virtualisation.buildvm;
-  # Provisioning always gets a key of its own; loginKeys adds the other consumers (Hermes, tooling).
+  # Provisioning always gets a key of its own when it is enabled; loginKeys adds the other consumers
+  # (Hermes, tooling).
   loginKeyList =
-    [ { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; } ]
+    lib.optionals cfg.provision.enable [
+      { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; }
+    ]
     ++ attrValues cfg.loginKeys;
 in
 {
@@ -59,9 +62,10 @@ in
       '';
     };
 
-    # ssh ignores a private key that is readable by anyone but its owner (root is the one exception,
-    # and only when the readable group is root's primary group), so a key shared between users cannot
-    # be used by both.  Each consumer gets its own generated pair instead.
+    # ssh refuses to use a private key whose permissions let anyone other than its owner read it: on
+    # ai the hermes units reported `Permissions 0640 for '/run/agenix/ai_buildvm_id_ed25519' are too
+    # open` / `This private key will be ignored` for a root:hermes 0640 file.  A shared, group-readable
+    # key is therefore unusable, so each consumer gets its own generated pair.
     loginKeys = mkOption {
       type = types.attrsOf (types.submodule ({ name, ... }: {
         options = {
@@ -72,13 +76,16 @@ in
           };
           path = mkOption {
             type = types.str;
+            default = "${cfg.loginKeysDir}/${name}/id_ed25519";
             example = "/var/lib/buildvm/keys/hermes/id_ed25519";
             description = "Private key file, created by buildvm-install when it is missing.";
           };
           owner = mkOption {
             type = types.str;
             default = "root";
-            description = "User that runs ssh with this key, and therefore owns the file.";
+            description = ''
+              User that runs ssh with this key, and therefore owns the file.  Must exist on the host.
+            '';
           };
           group = mkOption {
             type = types.str;
@@ -401,6 +408,9 @@ in
           mkdir -p "$KEY_DIR"
           if [ ! -f "$1" ]; then
             ssh-keygen -q -t ed25519 -N "" -C "buildvm-login:$4" -f "$1" || { echo "buildvm: cannot generate $1" >&2; return 0; }
+          elif [ ! -f "$1.pub" ]; then
+            # A key kept but its pub lost would leave the guest authorizing nothing, so re-derive it.
+            ssh-keygen -y -f "$1" > "$1.pub" || { echo "buildvm: cannot derive $1.pub" >&2; return 0; }
           fi
           chown "$2:$3" "$KEY_DIR" "$1" "$1.pub"
           chmod 700 "$KEY_DIR"
@@ -424,9 +434,11 @@ in
           # Who may log into the guest: the generated login keys, plus the outbound key's public half
           # so root units on ai (deploy-ai) can still use the keypair they already hold.
           : > "$SSH_DIR/authorized_keys"
+          ${lib.optionalString (loginKeyList != [ ]) ''
           for PUB in ${escapeShellArgs (map (k: "${k.path}.pub") loginKeyList)}; do
-            [ -f "$PUB" ] && cat "$PUB" >> "$SSH_DIR/authorized_keys"
+            if [ -f "$PUB" ]; then cat "$PUB" >> "$SSH_DIR/authorized_keys"; fi
           done
+          ''}
           if [ -n "$PUBLIC_KEY" ]; then
             printf '%s\n' "$PUBLIC_KEY" >> "$SSH_DIR/authorized_keys"
             printf '%s\n' "$PUBLIC_KEY" > "$SSH_DIR/id_ed25519.pub"
