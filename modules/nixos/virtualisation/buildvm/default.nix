@@ -302,12 +302,6 @@ in
         else
           echo "buildvm: writing $IMAGE_FILE to $DISK"
           qemu-img convert -f raw -O raw "$IMAGE_FILE" "$DISK"
-          # A fresh image brings fresh sshd host keys, so the pinned fingerprint from the old
-          # guest is now wrong.  Drop it and let provisioning trust the new one on first use.
-          if [ -f ${escapeShellArg cfg.provision.knownHostsFile} ]; then
-            rm -f ${escapeShellArg cfg.provision.knownHostsFile}
-            echo "buildvm: dropped the stale guest host key from ${cfg.provision.knownHostsFile}"
-          fi
         fi
 
         # Graft out-of-band guest files: the shared keypair and the repo checkouts.  This unit is
@@ -362,6 +356,15 @@ in
           chmod 700 "$SSH_DIR"
           chown -R "$GUEST_UID:$GUEST_UID" "$SSH_DIR"
           echo "buildvm: grafted ssh keypair for ${cfg.userName}"
+
+          # Every graft pass rewrites the guest's keys, and a fresh image brings fresh sshd host
+          # keys, so whatever was pinned before this pass is suspect.  Drop it here rather than only
+          # on a reseed: a pass that skips the image write still has to clear a stale pin, or
+          # provisioning keeps failing with "REMOTE HOST IDENTIFICATION HAS CHANGED" forever.
+          if [ -f ${escapeShellArg cfg.provision.knownHostsFile} ]; then
+            rm -f ${escapeShellArg cfg.provision.knownHostsFile}
+            echo "buildvm: dropped the stale guest host key from ${cfg.provision.knownHostsFile}"
+          fi
 
           # Only the fallback clone above reaches the git host, and it uses the same key.
           if [ -f "$KEY" ]; then

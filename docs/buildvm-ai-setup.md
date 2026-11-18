@@ -248,8 +248,9 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 ```
 
 `wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
-It also drops `/var/lib/buildvm/guest-known_hosts`, because a new image carries new sshd host keys.
-The guest grows its own filesystem into the partition on boot, so nothing needs resizing.  Leave
+The installer also drops `/var/lib/buildvm/guest-known_hosts` on every pass where it grafts the
+guest, because a new image carries new sshd host keys.  The guest grows its own filesystem into the
+partition on boot, so nothing needs resizing.  Leave
 `/home/builder/provisioned-commit` alone and the reseeded guest re-applies the same commit on its next
 boot, which is what you want after wiping the disk.  To hand
 space back: stop the guest, shrink the inner root partition instead of the disk —
@@ -304,7 +305,8 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm: builder: no local source for nixflakes, falling back to its url` | `/var/lib/deploy-ai/repo` does not exist yet — no deploy has run since the guest started being seeded from it.  The fallback clone needs `ai` to reach the git host with the keypair (§2/§4) |
 | `buildvm: clone of /var/lib/deploy-ai/repo into nixflakes failed` | the mirror exists but has no branches yet — run a `deploy-ai` so its fetch populates it, then `sudo systemctl restart buildvm-install` |
 | `buildvm: copy of secrets from /nix/store/… failed` | the tree `ai` evaluated is no longer in its store; re-evaluate and `sudo systemctl restart buildvm-install` |
-| `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | the guest was reseeded so its sshd keys are new while an old fingerprint is pinned.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every reseed, so this row only applies to generations before that fix or to your own `ssh`: `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
+| `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | an old fingerprint is pinned while the guest's sshd keys are new.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every pass where it grafts the guest, so this row applies to generations before that fix, to a graft pass that found no user to graft, and to your own `ssh`: `sudo rm -f /var/lib/buildvm/guest-known_hosts` or `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
+| `buildvm-provision` waits forever, then `start operation timed out`, while `journalctl -u buildvm` shows `BdsDxe: No bootable option or device was found` | the guest is not running an OS, so nothing listens on 2224 and qemu's user-mode networking accepts your connection and resets it, which ssh reports as `kex_exchange_identification: read: Connection reset by peer` rather than "connection refused".  Usually `buildvm-install` never ran this boot, so the disk was never written: `sudo systemctl stop buildvm && sudo systemctl start buildvm-install && sudo systemctl start buildvm`.  If it is in a failed state from an earlier attempt, `sudo systemctl reset-failed buildvm-install` first, and check `journalctl -b -u buildvm-install` for why it stopped early. |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
 | `buildvm-provision: no commit to apply (missing /home/builder/nixflakes?)` | the clone never happened — check the install unit's log and that `/var/lib/deploy-ai/repo` has branches |
 | `buildvm-provision: … is not in the guest's checkout` | `/home/builder/deployed-commit` names a commit the guest's clone predates.  Every `deploy-ai` run fetches the mirror the clone came from; to bring an existing checkout forward, run `git -C ~/nixflakes fetch origin` inside the guest (that needs §2) or reseed (§9), which re-clones from the mirror |
