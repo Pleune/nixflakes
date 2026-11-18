@@ -581,7 +581,12 @@ in
           echo "buildvm-provision: guest already at $TARGET"
           exit 0
         fi
-        if ! gssh "git -C '$WORK' cat-file -e '$TARGET^{commit}'"; then
+        # The clone came from ai's deploy mirror when buildvm-install created it, so a commit deployed after
+# that only reaches the guest if it fetches.  The outbound key grafted into ~/.ssh is what the git
+# host accepts; a failed fetch is not fatal, the check below still works on what the clone has.
+gssh "GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git -C '$WORK' fetch --quiet origin" \
+  || echo "buildvm-provision: fetch from origin failed, using what the checkout already has"
+if ! gssh "git -C '$WORK' cat-file -e '$TARGET^{commit}'"; then
           echo "buildvm-provision: $TARGET is not in the guest's checkout" >&2
           exit 1
         fi
