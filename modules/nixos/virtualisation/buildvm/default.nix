@@ -549,7 +549,12 @@ in
 
         # The snapshot decides whether there is anything to do.  A commit sha would not: a deploy from
         # a dirty tree keeps the sha while its contents change, and skipping on the sha alone would
-        # leave the guest behind.
+        # leave the guest behind.  With no snapshot there is no identity to compare, and nothing to
+        # stream, so this is a configuration error rather than an up-to-date guest.
+        if [ -z "$SOURCE" ]; then
+          echo "buildvm-provision: provision.sourcePath is unset, so there is nothing to put in the guest" >&2
+          exit 1
+        fi
         if [ "$(gssh "cat '$MARKER' 2>/dev/null" | tr -d ' \n')" = "$SNAPSHOT" ]; then
           echo "buildvm-provision: guest already at $SNAPSHOT"
           exit 0
