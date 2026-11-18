@@ -9,6 +9,9 @@ let
       { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; }
     ]
     ++ attrValues cfg.loginKeys;
+  # The guest's ordinary user has no sudo, so activation can only run as root: keys the host runs as
+  # root are the ones authorized in the guest's /root/.ssh/authorized_keys.
+  rootKeyList = filter (k: k.owner == "root") loginKeyList;
 in
 {
   options.nixflakes.virtualisation.buildvm = {
@@ -236,6 +239,15 @@ in
         '';
       };
 
+      activationUser = mkOption {
+        type = types.str;
+        default = "root";
+        description = ''
+          Guest user that runs the activation (the switch and the reboot).  The ordinary guest user has
+          no sudo, so this must be a user buildvm-install authorized with a root-owned login key.
+        '';
+      };
+
       targetFile = mkOption {
         type = types.str;
         default = "/home/${cfg.userName}/deployed-commit";
@@ -455,6 +467,24 @@ in
           chown -R "$GUEST_UID:$GUEST_UID" "$SSH_DIR"
           echo "buildvm: grafted ssh keypair for ${cfg.userName}"
 
+          # Root inside the guest, authorized with the keys the host runs as root.  The guest's user
+          # has no sudo, so the provisioning switch and the reboot have to arrive as root.
+          ROOT_DIR="$MNT/root/.ssh"
+          mkdir -p "$ROOT_DIR"
+          : > "$ROOT_DIR/authorized_keys"
+          ${lib.optionalString (rootKeyList != [ ]) ''
+          for PUB in ${escapeShellArgs (map (k: "${k.path}.pub") rootKeyList)}; do
+            if [ -f "$PUB" ]; then cat "$PUB" >> "$ROOT_DIR/authorized_keys"; fi
+          done
+          ''}
+          if [ -n "$PUBLIC_KEY" ]; then
+            printf '%s\n' "$PUBLIC_KEY" >> "$ROOT_DIR/authorized_keys"
+          fi
+          chmod 700 "$ROOT_DIR"
+          chmod 600 "$ROOT_DIR/authorized_keys"
+          chown -R 0:0 "$ROOT_DIR"
+          echo "buildvm: authorized root in the guest"
+
           # Every graft pass rewrites the guest's keys, and a fresh image brings fresh sshd host
           # keys, so whatever was pinned before this pass is suspect.  Drop it here rather than only
           # on a reseed: a pass that skips the image write still has to clear a stale pin, or
@@ -503,6 +533,7 @@ in
       path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils ];
       script = ''
         USER=${cfg.userName}
+        ROOT_USER=${escapeShellArg cfg.provision.activationUser}
         PORT=${toString cfg.sshPort}
         KEY=${escapeShellArg cfg.provision.loginKey}
         WORK=${escapeShellArg cfg.provision.workdir}
@@ -521,6 +552,13 @@ in
         gssh() {
           ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$USER@127.0.0.1" "$@"
+        }
+
+        # Activation runs as root: ${cfg.userName} has no sudo in the guest, and buildvm-install
+        # authorizes this same key for ${cfg.provision.activationUser}.
+        gssh_root() {
+          ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$ROOT_USER@127.0.0.1" "$@"
         }
 
         # The guest boots asynchronously; sshd takes a few seconds, and a reseed takes longer.
@@ -555,7 +593,7 @@ in
         fi
 
         echo "buildvm-provision: switching the guest to $TARGET"
-        if ! gssh "sudo nixos-rebuild switch --flake '$WORK#$ATTR' $OVERRIDE --accept-flake-config"; then
+        if ! gssh_root "nixos-rebuild switch --flake '$WORK#$ATTR' $OVERRIDE --accept-flake-config"; then
           echo "buildvm-provision: switch failed; guest left as it is" >&2
           exit 1
         fi
@@ -563,7 +601,7 @@ in
         # A switch changes the bootloader entries, so boot the new system rather than the one this
         # boot came from.  qemu restarts when the guest powers off (buildvm.service Restart=always).
         gssh "echo '$TARGET' > '$MARKER'"
-        gssh "sudo reboot" || true
+        gssh_root "reboot" || true
         BACK=0
         for i in $(seq 1 120); do
           sleep 3

@@ -74,11 +74,9 @@ in
       isNormalUser = true;
       shell = pkgs.bash;
       home = "/home/${buildvm.userName}";
-      # In wheel on purpose: the switch that makes this guest what it is runs *inside* the guest
-      # (modules/nixos/virtualisation/buildvm -> buildvm-provision.service runs
-      # `sudo nixos-rebuild switch --flake .#buildvm`).  That is all it can activate - the guest is
-      # disposable and shares nothing with ai - and `config/nixos/core/nix` makes @wheel a nix
-      # trusted user, which the flake workflow needs.
+      # In wheel for nix trust only: `config/nixos/core/nix` makes @wheel a nix trusted user, which the
+      # in-guest flake switch needs.  There is deliberately no sudo here (see below), so this group
+      # grants no privileges beyond nix.
       extraGroups = [ "wheel" ];
       openssh.authorizedKeys.keys = lib.optionals (buildvm.publicKey != "") [ buildvm.publicKey ];
     };
@@ -87,15 +85,18 @@ in
       enable = true;
       settings = {
         PasswordAuthentication = false;
-        PermitRootLogin = "no";
+        # Key-only root login.  buildvm-install grafts the provisioning key into /root/.ssh, and the
+        # switch that makes this guest what it is arrives as root over ssh
+        # (modules/nixos/virtualisation/buildvm -> buildvm-provision.service).
+        PermitRootLogin = "prohibit-password";
       };
     };
 
-    # The provisioning pass and the agent both need root inside the guest without a password, and
-    # there is no password to give: sshd is key-only and PermitRootLogin stays "no".  NixOS ships
-    # wheel with sudo rights already; this only removes the password prompt.
+    # The guest user has no sudo at all: it has no password, and nixpkgs' wheel rule therefore makes
+    # `sudo` fail rather than fall back to the password-less `%wheel` rule.  Anything that needs root
+    # inside the guest comes in over ssh as root, which keeps one auditable path instead of a
+    # passwordless root shell for whatever runs as the builder user.
     security.sudo.extraConfig = ''
-      %wheel ALL=(ALL) NOPASSWD: ALL
       Defaults !lecture
     '';
 

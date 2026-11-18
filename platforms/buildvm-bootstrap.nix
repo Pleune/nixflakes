@@ -73,7 +73,9 @@ in
   services.openssh = {
     enable = true;
     settings.PasswordAuthentication = false;
-    settings.PermitRootLogin = "no";
+    # Key-only root login: buildvm-install grafts the provisioning key into /root/.ssh here, and the
+    # first switch (this seed -> .#buildvm) has to run as root because the builder user has no sudo.
+    settings.PermitRootLogin = "prohibit-password";
   };
 
   # Same identity the full guest uses, so the host's ssh forward and the deploy key keep working

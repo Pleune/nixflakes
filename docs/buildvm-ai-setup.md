@@ -100,10 +100,11 @@ nixflakes.virtualisation.buildvm.loginKeys.hermes = {
 };
 ```
 
-`buildvm-install` chowns each pair to its `owner`, and appends every public half — plus the guest's
-own public half, so root's `deploy-ai` keeps working — to `~builder/.ssh/authorized_keys` on every
-pass.  `buildvm-provision` uses the pair it owns (`provision.loginKey`, root's own), and Hermes
-`terminal.ssh_key` points at the `hermes` pair.
+`buildvm-install` chowns each pair to its `owner`, appends every public half — plus the guest's own
+public half, so root's `deploy-ai` keeps working — to `~builder/.ssh/authorized_keys` on every pass,
+and puts the public halves of the root-owned pairs (plus that same guest key) into the guest's
+`/root/.ssh/authorized_keys`.  `buildvm-provision` uses the pair it owns (`provision.loginKey`,
+root's own), and Hermes `terminal.ssh_key` points at the `hermes` pair.
 
 agenix decrypts with `config.age.identityPaths`, whose default is `/etc/ssh/ssh_host_ed25519_key`, so
 `ai` needs nothing beyond that host key and a secret encrypted for it:
@@ -191,9 +192,15 @@ What it does, in order: wait for ssh; read the commit to apply (`/home/builder/d
 one `deploy-ai` recorded, falling back to the checkout's HEAD); skip if
 `/home/builder/provisioned-commit` already names it; `git checkout --detach` that commit in the
 guest's clone (the branch tip there can be ahead of or behind what ai runs, so the switch must not
-trust HEAD); then `sudo nixos-rebuild switch --flake
+trust HEAD); then `nixos-rebuild switch --flake
 /home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config`;
 record the commit; reboot the guest — qemu restarts it (`buildvm.service` `Restart = always`).
+
+The switch and the reboot run as **root over ssh** (`provision.activationUser`, default `root`), the
+file and git work as `builder`.  `builder` has no sudo in the guest — it is in `wheel` only so
+`config/nixos/core/nix` trusts `@wheel` as a nix user, and with no password `sudo` simply fails — so
+root is the one privileged path.  Both guests set `PermitRootLogin = "prohibit-password"`, and
+`buildvm-install` authorizes the root-owned login keys in `/root/.ssh` on every graft pass.
 
 Its ssh uses the keypair `buildvm-install` generates for root (`provision.loginKey`) and trusts the
 guest on first use into `/var/lib/buildvm/guest-known_hosts`, its own file rather than root's
@@ -202,14 +209,13 @@ So a reseed re-trusts the guest's new sshd keys automatically, while a key that 
 running guest still fails as a real warning.  A stale entry in `/root/.ssh/known_hosts` from an
 earlier guest does not affect provisioning, but it will break your own `ssh -p 2224`:
 `sudo ssh-keygen -R '[127.0.0.1]:2224'`.
-`builder` is in `wheel` with NOPASSWD sudo, which is what makes that possible and also makes it a nix
-trusted user (`config/nixos/core/nix` trusts `@wheel`).  So on a fresh disk the first boot ends with
+So on a fresh disk the first boot ends with
 the guest running `platforms/buildvm.nix`: Xfce and Xvnc, nix gc, deploy-rs, and a root filesystem
 grown to fill the partition.
 
 ```bash
 sudo ssh -p 2224 builder@127.0.0.1 'df -h / && findmnt -T /'
-sudo ssh -p 2224 builder@127.0.0.1 'sudo -n systemctl is-system-running'
+sudo ssh -p 2224 root@127.0.0.1 'systemctl is-system-running'
 ```
 
 To test that the guest can reach the git host on its own — the thing provisioning deliberately avoids
@@ -337,7 +343,8 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had |
 | `buildvm-provision: guest did not come back after the switch` | the new system does not boot — the switch rewrote the ESP entries. Boot the previous loader entry from the guest's serial console (`journalctl -u buildvm -b`), or reseed (§9) |
 | `journalctl -b -u switch-to-configuration`: `[agenix] decrypting …` then `chmod: cannot access '/run/agenix.d/N/<name>.tmp': No such file or directory`, `mv: cannot stat …`, `Activation script snippet 'agenixInstall' failed (1)` | no identity in `config.age.identityPaths` could open the file, i.e. the secret is encrypted for a different key. Nothing else reports this, and the activation errors are not fatal, so the switch finishes with an empty `/run/agenix`. Re-encrypt for `ssh -p … 'cat /etc/ssh/ssh_host_ed25519_key.pub'` (§4) |
-| the guest stays the seed image (no Xfce, no sudo) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means `provision.loginKey` must exist, which `buildvm-install` generates — `ls -l /var/lib/buildvm/keys/provision` |
+| the guest stays the seed image (no Xfce, no activated config) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means `provision.loginKey` must exist, which `buildvm-install` generates — `ls -l /var/lib/buildvm/keys/provision` |
+| `buildvm-provision`: `Permission denied (publickey)` from the switch, while the builder-side checks work | the guest's `/root/.ssh/authorized_keys` has no root-owned key, i.e. the running guest predates the root graft or `buildvm-install` never ran after it: `sudo ssh -p 2224 root@127.0.0.1 true`, then `sudo systemctl restart buildvm-install`.  `builder` cannot do this work — it has no sudo, by design |
 | Hermes terminal: `Load key "…": Permission denied`, then `Permission denied (publickey)` | the unit's own key is missing or unreadable — Hermes uses `/var/lib/buildvm/keys/hermes/id_ed25519`, which `buildvm-install` creates, so `ls -l /var/lib/buildvm/keys/hermes` and `systemctl status buildvm-install` first.  `Permission denied (publickey)` with a readable key means the guest does not authorize it: the pass that generated it did not graft (`journalctl -u buildvm-install -b`) |
 | ssh says `Permissions … for '<key>' are too open` / `This private key will be ignored` | ssh refuses a private key that someone other than its owner can read.  `buildvm-install` writes every key it generates `0600` to its own `owner` and the agenix secret `0600 root`, so this means something rewrote them, or a unit is pointed at a key it does not own: `ls -l <key>` and `sudo chmod 600 <key>`, or give that consumer its own `loginKeys` entry |
 | qemu: `pflash: file … does not exist` | `/var/lib/buildvm/efi-vars.fd` was deleted and `buildvm.service` started before `buildvm-install.service` seeded it — `systemctl start buildvm-install` |

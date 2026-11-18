@@ -194,3 +194,17 @@ group cannot make a shared key usable.
   its owner, and appends every public half plus the guest's public half to `~builder/.ssh/authorized_keys`.
 - `buildvm-provision` uses `provision.loginKey` (root's own pair), so its `ConditionPathExists` and
   `KEY=` no longer reference the agenix file; Hermes `terminal.ssh_key` is the `hermes` pair.
+
+## Amendment (after the key split) — the guest user has no sudo
+
+Earlier text here (line 27, T5, the `sudo nixos-rebuild switch` step in §"guest activation") assumed
+`builder` had NOPASSWD sudo so provisioning could activate as `builder`.  Superseded:
+
+- `platforms/buildvm.nix` drops `%wheel ALL=(ALL) NOPASSWD: ALL`; `builder` keeps `wheel` only because
+  `config/nixos/core/nix` makes `@wheel` a nix trusted user, and with no password `sudo` now fails.
+- Activation (switch + reboot) runs over ssh as `provision.activationUser`, default `root`; file and
+  git work still runs as `builder` so `.git` objects and the marker files stay owned by it.
+- Both guest configs set `services.openssh.settings.PermitRootLogin = "prohibit-password"` (the seed
+  image needs it too: the first switch arrives while the guest is still the seed), and
+  `buildvm-install` writes the root-owned login keys' public halves, plus the guest's own, into
+  `/root/.ssh/authorized_keys` on every graft pass.
