@@ -608,16 +608,21 @@ in
             || echo "buildvm-provision: could not point $WORK at $ORIGIN" >&2
           gssh "GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git -C '$WORK' fetch --quiet origin" \
             || echo "buildvm-provision: fetch from origin failed, using what the checkout already has"
+          # History is a convenience, not a requirement.  The streamed tree is exactly what this machine
+          # runs, so a commit that cannot be reached (the deploy was pushed nowhere yet, or the guest has
+          # no access to the git host) still provisions: it switches the contents instead of refusing.
           if ! gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
-            echo "buildvm-provision: $TARGET is not in the guest's checkout" >&2
-            exit 1
+            TARGET=""
+            echo "buildvm-provision: no commit reachable for the checkout, switching the streamed tree as it stands"
           fi
-          # The streamed tree is the right *contents* but not the right *commit*, and the switch evaluates
-          # whatever is on disk, so put the working tree on $TARGET.  --force is needed because the streamed
-          # files are untracked and would otherwise block the checkout.
-          if ! gssh "git -C '$WORK' checkout --force --quiet --detach '$TARGET'"; then
-            echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
-            exit 1
+          if [ -n "$TARGET" ]; then
+            # The streamed tree is the right *contents* but not a checked-out *commit*, and the switch
+            # evaluates whatever is on disk, so put the working tree on $TARGET.  --force is needed
+            # because the streamed files are untracked and would otherwise block the checkout.
+            if ! gssh "git -C '$WORK' checkout --force --quiet --detach '$TARGET'"; then
+              echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
+              exit 1
+            fi
           fi
         fi
 
