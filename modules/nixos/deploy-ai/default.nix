@@ -121,10 +121,15 @@ in
     # change to a protected path.
     environment.etc."deploy-ai/deployed-commit".text = cfg.deployedCommit + "\n";
 
+    # The store path, not its contents: deploy-ai reads the baseline out of here.
+    environment.etc."deploy-ai/deployed-source".text =
+      lib.optionalString (cfg.deployedSource != null) (cfg.deployedSource + "\n");
+
     # Holding this in the system's dependencies keeps the store path alive across GC for as long
     # as this generation is reachable (current or rollback), which is exactly as long as the diff
     # baseline is meaningful.
-    system.extraDependencies = lib.optionals (cfg.deployedSource != null) [ cfg.deployedSource ];
+    system.extraDependencies =
+      lib.optionals (cfg.deployedSource != null) [ cfg.deployedSource ];
 
     systemd.tmpfiles.rules = [
       "d ${cfg.stateDir} 0700 root root -"

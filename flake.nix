@@ -197,13 +197,17 @@
 
               # Snapshot of this flake's own source, kept in the ai system's roots.  deploy-ai
               # diffs a candidate tree against it, which is how "what is deployed" is answerable
-              # without a git repository on the host.  .git is excluded: history is the candidate
-              # tree's business, the baseline is about content.
+              # without a git repository on the host.  Nix copies the *tracked* files here, so
+              # `.git`, untracked scratch (`state.json`, `.ralph/`) and gitignored paths are already
+              # out; the filter only catches tracked names we never want shipped.
+              #
+              # Note the filter's second argument is the file *type* (`"regular"`, `"directory"`),
+              # not the base name — match on `baseNameOf path` if you ever need names.
               nixflakesSource = builtins.path {
                 path = ./.;
                 name = "nixflakes-source";
-                filter = path: baseName:
-                  ! builtins.elem baseName [ ".git" ".direnv" ".ralph" "result" "state.json" "secrets" ];
+                filter = path: _type:
+                  ! builtins.elem (baseNameOf path) [ ".direnv" "result" "state.json" "secrets" ];
               };
 
               # The Hermes agent's execution host.  Its disk image is never installed by ai: the

@@ -17,7 +17,7 @@ umask 022
 # unprivileged user; the defaults are what the NixOS module installs.
 STATE=${DEPLOY_AI_STATE:-/var/lib/deploy-ai}
 ALLOWLIST=${DEPLOY_AI_ALLOWLIST:-/etc/deploy-ai/allowlist}
-BASELINE=${DEPLOY_AI_BASELINE:-/etc/deploy-ai/deployed-source}
+BASELINE_FILE=${DEPLOY_AI_BASELINE_FILE:-/etc/deploy-ai/deployed-source}
 BASELINE_COMMIT=${DEPLOY_AI_BASELINE_COMMIT:-/etc/deploy-ai/deployed-commit}
 MIRROR=$STATE/repo
 AI=ai
@@ -33,6 +33,13 @@ if [ -z "$BUILD_KEY" ] && [ -r "$BUILD_KEY_FILE" ]; then
   BUILD_KEY=$(head -n 1 "$BUILD_KEY_FILE")
 fi
 BUILD_KEY=${BUILD_KEY:-/var/lib/buildvm/secrets/id_ed25519}
+# The module writes the *path* of the deployed source into /etc; the store path itself is held by the
+# system's dependencies, so it survives GC exactly as long as the generation that needs it does.
+BASELINE=${DEPLOY_AI_BASELINE:-}
+if [ -z "$BASELINE" ] && [ -r "$BASELINE_FILE" ]; then
+  BASELINE=$(head -n 1 "$BASELINE_FILE")
+fi
+BASELINE=${BASELINE:-$BASELINE_FILE}
 BUILD_TIMEOUT=3600
 GUEST_CANDIDATE=${DEPLOY_AI_GUEST_CANDIDATE:-/home/builder/deploy-candidate}
 RECORDED_COMMIT=/home/builder/deployed-commit

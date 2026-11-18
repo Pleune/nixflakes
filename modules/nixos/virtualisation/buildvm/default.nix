@@ -212,9 +212,21 @@ in
         type = types.str;
         default = "";
         description = ''
-          Remote the guest's checkout is pointed at, so the agent inside the VM can push.  History is
-          fetched from it; with no access the streamed tree is still a working flake, it just has no
-          commits behind it.
+          Remote the guest's checkout is pointed at, so the agent inside the VM can push, and the
+          source provisioning fetches commits from.  It uses the outbound keypair buildvm-install
+          grafts into `~${cfg.userName}/.ssh`.  A deploy built from a commit that was never pushed has
+          nothing here to fetch, which provisioning reports and then works around by switching the
+          streamed tree as it stands.
+        '';
+      };
+
+      rebaseDir = mkOption {
+        type = types.str;
+        default = "${cfg.provision.workdir}-rebase";
+        description = ''
+          Scratch worktree used to rebase the guest's `main` onto the applied commit.  The checkout
+          itself is dirty by design (it holds the streamed tree), and `git rebase` refuses a dirty
+          worktree, so the rebase runs in its own.
         '';
       };
 
@@ -481,7 +493,7 @@ in
         # A full guest system build (Xfce, Xvnc, nixVersions.latest) is slow; give it room.
         TimeoutStartSec = "45min";
       };
-      path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils pkgs.gnutar ];
+      path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils pkgs.gnutar pkgs.gnused ];
       script = ''
         USER=${cfg.userName}
         ROOT_USER=${escapeShellArg cfg.provision.activationUser}
@@ -496,6 +508,7 @@ in
         SECRETS_SRC=${escapeShellArg (cfg.provision.secretsSource or "")}
         SECRETS=${escapeShellArg (cfg.provision.secretsDir or "")}
         COMMIT=${escapeShellArg cfg.provision.targetCommit}
+        REBASE=${escapeShellArg cfg.provision.rebaseDir}
         # The snapshot's store name hashes its contents, so it says exactly what this machine runs,
         # whether or not the deploy pointed at a commit.
         SNAPSHOT=$(basename "$SOURCE")
@@ -578,6 +591,20 @@ in
           exit 0
         fi
 
+        # Capture the agent's own uncommitted work before anything is streamed.  Streaming overwrites
+        # files in place, so stashing afterwards would capture the host's tree rather than the agent's
+        # edits, which is the opposite of what the stash is for.
+        STASHED=""
+        if gssh "git -C '$WORK' rev-parse --git-dir >/dev/null 2>&1" \
+           && [ -n "$(gssh "git -C '$WORK' status --porcelain")" ]; then
+          if gssh "git -C '$WORK' stash push -u -m 'buildvm pre-provision'"; then
+            STASHED=1
+            echo "buildvm-provision: stashed the guest's uncommitted changes"
+          else
+            echo "buildvm-provision: could not stash the guest's uncommitted changes; streaming will overwrite them" >&2
+          fi
+        fi
+
         # Put the tree the running ai came from into the guest.  Streaming it here rather than seeding
         # it in buildvm-install is the point: only provisioning knows what this machine runs.
         stream_dir "$SOURCE" "$WORK" || exit 1
@@ -585,44 +612,79 @@ in
           stream_dir "$SECRETS_SRC" "$SECRETS" || exit 1
         fi
 
-        # Give the checkout history only when the deploy pointed at a commit.  A dirty deploy records
-        # `<sha>-dirty`, which is no commit to check out, and the contents already on disk are what
-        # this machine runs; chasing history there would fail the run for nothing.
+        # The commit to apply.  A deploy records `<sha>-dirty`, which is no commit, so the suffix goes
+        # off; with nothing recorded, fall back to what deploy-ai wrote in the guest.
         TARGET="$COMMIT"
-        if [ -z "$TARGET" ] && [ -n "$ORIGIN" ]; then
+        if [ -z "$TARGET" ] && [ -n "$TARGET_FILE" ]; then
           TARGET=$(gssh "cat '$TARGET_FILE' 2>/dev/null" | tr -d ' \n')
         fi
-        # A dirty deploy records `<sha>-dirty`, which is no commit to check out.
         TARGET=$(printf '%s' "$TARGET" | sed 's/-dirty$//')
-        if [ -z "$TARGET" ]; then
-          echo "buildvm-provision: no commit recorded, switching the streamed tree as it stands"
-        else
-          # A streamed tree has no history, and the agent inside the VM needs to push, so give it a
-          # remote and fetch through it.  The outbound key grafted into ~/.ssh is what the git host
-          # accepts; without that access the streamed tree is still a working flake, it just has no
-          # commits behind it, which the check below reports.
-          if ! gssh "test -d '$WORK/.git'"; then
-            gssh "git init -q '$WORK'" || { echo "buildvm-provision: cannot init $WORK" >&2; exit 1; }
-          fi
+
+        if ! gssh "git -C '$WORK' rev-parse --git-dir >/dev/null 2>&1"; then
+          gssh "git init -q '$WORK'" || { echo "buildvm-provision: cannot init $WORK" >&2; exit 1; }
+        fi
+        if [ -n "$ORIGIN" ]; then
           gssh "git -C '$WORK' remote add origin '$ORIGIN' 2>/dev/null || git -C '$WORK' remote set-url origin '$ORIGIN'" \
             || echo "buildvm-provision: could not point $WORK at $ORIGIN" >&2
-          gssh "GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git -C '$WORK' fetch --quiet origin" \
-            || echo "buildvm-provision: fetch from origin failed, using what the checkout already has"
-          # History is a convenience, not a requirement.  The streamed tree is exactly what this machine
-          # runs, so a commit that cannot be reached (the deploy was pushed nowhere yet, or the guest has
-          # no access to the git host) still provisions: it switches the contents instead of refusing.
-          if ! gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
-            TARGET=""
-            echo "buildvm-provision: no commit reachable for the checkout, switching the streamed tree as it stands"
-          fi
-          if [ -n "$TARGET" ]; then
-            # The streamed tree is the right *contents* but not a checked-out *commit*, and the switch
-            # evaluates whatever is on disk, so put the working tree on $TARGET.  --force is needed
-            # because the streamed files are untracked and would otherwise block the checkout.
-            if ! gssh "git -C '$WORK' checkout --force --quiet --detach '$TARGET'"; then
-              echo "buildvm-provision: could not check out $TARGET in $WORK" >&2
-              exit 1
+          # Commits come from the git host, with the outbound keypair buildvm-install grafted into
+          # ~builder/.ssh.  Not fatal: a deploy built from an unpushed commit has nothing on the
+          # server, and the switch then runs on the streamed contents.  Branches land under
+          # `origin/*` so the agent's own branches are untouched; host tags replace the guest's,
+          # which is what makes `deployed` mean the commit actually running.  accept-new because the
+          # guest has never seen the git host's key.
+          gssh "cd '$WORK' && GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' git fetch --quiet --force origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'" \
+            || echo "buildvm-provision: could not fetch from $ORIGIN; the guest keeps whatever commits it already had"
+        fi
+
+        # Put history behind the streamed tree.  The guest's `main` is rebased onto `deployed` so the
+        # agent's commits stay on top of the baseline; if that cannot be done the host's config wins for
+        # what runs, and the agent's branch is kept as a tag rather than dropped.
+        if [ -z "$TARGET" ]; then
+          echo "buildvm-provision: no commit recorded, switching the streamed tree as it stands"
+        elif ! gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
+          echo "buildvm-provision: $TARGET is not in the guest's checkout, switching the streamed tree as it stands"
+          TARGET=""
+        else
+          gssh "git -C '$WORK' tag -f deployed '$TARGET' >/dev/null" \
+            || { echo "buildvm-provision: could not tag $TARGET as deployed" >&2; exit 1; }
+          if ! gssh "git -C '$WORK' show-ref --verify --quiet refs/heads/main"; then
+            gssh "git -C '$WORK' branch main '$TARGET'" \
+              || { echo "buildvm-provision: could not create main at $TARGET" >&2; exit 1; }
+          else
+            # The checkout is dirty by design (it holds the streamed tree), and rebase will not run in a
+            # dirty worktree, so the guest's branch is rebased in a scratch worktree of its own.
+            gssh "git -C '$WORK' worktree prune"
+            if gssh "git -C '$WORK' worktree add --quiet --detach '$REBASE' main"; then
+              if gssh "git -C '$REBASE' rebase --quiet deployed main"; then
+                echo "buildvm-provision: main rebased onto deployed"
+              else
+                OLD=$(gssh "git -C '$WORK' rev-parse main" | tr -d ' \n')
+                gssh "git -C '$REBASE' rebase --abort"
+                gssh "git -C '$WORK' tag -f agent-work '$OLD' >/dev/null" || true
+                gssh "git -C '$WORK' branch -f main 'deployed'" \
+                  || { echo "buildvm-provision: could not reset main to deployed" >&2; exit 1; }
+                echo "buildvm-provision: main would not rebase onto deployed; main reset, the guest's work kept on tag agent-work ($OLD)"
+              fi
+              gssh "git -C '$WORK' worktree remove --force '$REBASE'"
+            else
+              echo "buildvm-provision: could not create the rebase worktree at $REBASE; leaving main as it is" >&2
             fi
+          fi
+          # The switch evaluates whatever is on disk, so the tree has to be the applied branch, not
+          # whatever the stream left behind.  --force because streamed files are untracked.
+          if ! gssh "git -C '$WORK' checkout --force --quiet main"; then
+            echo "buildvm-provision: could not check out main in $WORK" >&2
+            exit 1
+          fi
+        fi
+
+        # Put the agent's own edits back.  A stash that no longer applies stays in the stash (the agent
+        # can find it with `git stash list`) and the tree is reset, because switching a half-merged
+        # working tree would deploy something nobody wrote.
+        if [ "$STASHED" = 1 ]; then
+          if ! gssh "git -C '$WORK' stash apply 'stash@{0}'"; then
+            echo "buildvm-provision: the guest's stashed changes do not apply onto the applied tree; kept in the stash" >&2
+            gssh "git -C '$WORK' checkout --force --quiet ." || true
           fi
         fi
 
