@@ -5,11 +5,16 @@
 #   * platforms/buildvm-bootstrap.nix - the seed image, which is evaluated *without* the secrets
 #                                       input and therefore gets no public key of its own
 #
-# There is one ai <-> buildvm keypair.  Its private half lives in the secrets repo as
-# ai_buildvm_id_ed25519.age, decryptable with ai's host key, and ai exposes it through agenix at
-# nixflakes.virtualisation.buildvm.privateKeyPath: deploy-ai, the Hermes terminal, and
-# buildvm-install all use it, and buildvm-install grafts it into the guest as builder's own
+# There is one ai <-> buildvm keypair, and it is the *guest's* identity: its private half lives in the
+# secrets repo as ai_buildvm_id_ed25519.age, decryptable with ai's host key, ai exposes it through
+# agenix at nixflakes.virtualisation.buildvm.privateKeyPath root-owned and 0600, deploy-ai uses it to
+# reach the gate and the git host, and buildvm-install grafts it into the guest as builder's own
 # ~/.ssh/id_ed25519 so the guest authenticates outbound with the same identity.
+#
+# Users on ai who log *into* the guest cannot share that file: ssh ignores a private key the invoking
+# user does not own.  buildvm-install generates one keypair per consumer instead (module option
+# `loginKeys`, plus `provision.loginKey` for the provisioning unit) and authorizes all of them, and
+# this keypair's public half, in the guest's authorized_keys on every install pass.
 #
 # The public half is read from the same repo (`ai_buildvm_id_ed25519.pub`).  That is an eval-time
 # read of a fetched flake input, not of a derivation, so it introduces no IFD; it does mean the
@@ -39,9 +44,9 @@ rec {
   # Paths on ai.
   inherit stateDir;
 
-  # Private half of the keypair, as an agenix-generated path on ai (platforms/ai.nix wires it to
-  # config.age.secrets."ai_buildvm_id_ed25519", mode 0640 root:hermes so the gateway units can read
-  # it).  Kept as a plain default so the module stays usable without agenix.
+  # Private half of the guest's keypair, as an agenix-generated path on ai (platforms/ai.nix wires it
+  # to config.age.secrets."ai_buildvm_id_ed25519", root:root 0600).  Kept as a plain default so the
+  # module stays usable without agenix.
   privateKeyPath = "${stateDir}/secrets/id_ed25519";
 
   # Where the agent's checkout comes from and what it works in.  Both are guest-side paths/URLs.

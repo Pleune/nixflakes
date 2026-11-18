@@ -179,3 +179,18 @@ Add to the same module as `pkgs.writeShellScript` + unit:
 
 Operator prerequisites before the first deploy: commit both key files in the secrets repo and run
 `nix flake update private`; reseeding (§9) is required for a guest seeded under the old pubkey.
+
+## Amendment (after the first ai deploy) — the sandbox key is not shareable
+
+T1/T2 as written put one keypair at `0640 root:hermes` and handed it to `deploy-ai`, `buildvm-provision`
+and Hermes.  That does not work: ssh ignores a private key the invoking user does not own, so the
+`hermes` units got `Load key "…": Permission denied` → `Permission denied (publickey)`, and a
+supplementary group cannot fix it (`0640`, `0644`, `0750` on a key you own are all refused).
+
+- The agenix secret is the **guest's outbound identity**: `0600 root`, grafted into
+  `~builder/.ssh/id_ed25519`, and used by root's `deploy-ai`.
+- `buildvm-install` generates one keypair per host consumer under `loginKeysDir`
+  (`/var/lib/buildvm/keys/<name>/id_ed25519`, `loginKeys` attrset with `owner`/`group`), chowns each to
+  its owner, and appends every public half plus the guest's public half to `~builder/.ssh/authorized_keys`.
+- `buildvm-provision` uses `provision.loginKey` (root's own pair), so its `ConditionPathExists` and
+  `KEY=` no longer reference the agenix file; Hermes `terminal.ssh_key` is the `hermes` pair.
