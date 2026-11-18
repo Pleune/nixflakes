@@ -227,12 +227,15 @@ and the secrets tree into `~builder/secrets`, both over one `tar` pipe so files 
 `+refs/heads/*:refs/remotes/origin/*` and `+refs/tags/*:refs/tags/*` — host branches land under
 `origin/*` so the agent's own branches are untouched, and host tags replace the guest's; tag the
 applied commit `deployed`;
-rebase the guest's `main` onto `deployed` in a scratch worktree (`~builder/nixflakes-rebase`), and if
-that rebase cannot be done reset `main` to `deployed` and keep the agent's branch as the tag
-`agent-work`; `git checkout --force main` so the tree on disk is the tree being switched; `git stash
-apply` the agent's work back; then `nixos-rebuild switch --flake
-/home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config`;
-record the snapshot; reboot the guest — qemu restarts it (`buildvm.service` `Restart = always`).
+point the guest's `main` at that commit (`git update-ref refs/heads/main <sha>`) and keep whatever
+`main` pointed at before on the tag `agent-work`, then `git checkout --force main` so the tree on disk is
+the tree being switched; commit the streamed tree if it is not already what `main` points at (nix builds
+*tracked* files, so an untracked file from the deploy would otherwise be invisible to the switch, and
+that commit stays untagged so `deployed` keeps meaning the host's commit); `nixos-rebuild switch --flake
+/home/builder/nixflakes#buildvm --override-input private /home/builder/secrets --accept-flake-config` — the
+switch sees only that tree, so half-finished work in the guest cannot break the system it is switching
+into; only then does `git stash apply` put the agent's work back; record the snapshot; reboot the guest —
+qemu restarts it (`buildvm.service` `Restart = always`).
 
 A deploy from a dirty tree records `<sha>-dirty`, which is no commit to check out; the suffix is
 stripped, and with nothing left to check out provisioning switches the streamed tree as it stands, which
@@ -241,9 +244,17 @@ is exactly what `ai` ran.
 The streamed tree has no `.git` — Nix copies tracked files into the store and never the repository — so
 the fetch is what makes the checkout comparable to the dev box: `deployed` names the commit `ai` ran,
 `origin/main` is what the agent pulls, and its own branches stay its own.  `deployed` is a tag rather
-than a branch because a tag is harder for an agent to move by accident: the branch the agent works on is
-`main`, and provisioning rebases that onto `deployed` each time.  Divergence is expected — newer commits
-on `main`, working-tree edits, both — and the stash/rebase/restore cycle is what keeps it.
+than a branch because a tag is harder for an agent to move by accident.  The branch the agent works on is
+`main`, and provisioning points `main` at `deployed` on every pass: the guest's own commits are snapshots
+of trees provisioning streamed, so they share no history with the host's repository and cannot be rebased
+onto it — which is why anything the guest had that is not this deploy goes to `agent-work` rather than
+into the deploy's history.  Divergence is expected — newer commits on `main`, working-tree edits, both —
+and the stash/point/restore cycle is what keeps it.
+
+The switch runs as root while the checkout is owned by `builder`, so it first runs `git config --global
+--replace-all safe.directory /home/builder/nixflakes`.  That is scoped to this one repository rather than
+`safe.directory '*'`, because a wildcard would make any repository the agent creates in the guest trusted
+by root's nix.
 
 A commit that was never pushed is not on the git server, and provisioning says so and switches the
 streamed contents anyway: those are exactly what `ai` runs, and inventing a commit on the guest would
@@ -251,8 +262,12 @@ make `deployed` mean two different shas on two machines.  Streaming means the co
 `ai` runs, so a stream that fails is fatal — switching whatever was left on disk would provision the
 wrong thing — while a fetch that fails is not.
 
-Files the target commit deleted stay on disk as untracked leftovers of the previous deploy — nothing
-references them, and cleaning them would delete the agent's own work.
+Files the target commit deleted are handled differently on the two paths.  When the commit is reachable,
+`git checkout --force main` removes them, because they are tracked in the commit the checkout moves to.
+On the streamed-tree paths nothing removes them: streaming only writes files, so leftovers of the previous
+deploy sit next to the new tree and the pre-switch `git add -A` commits them into what the guest builds.
+That is deliberate — cleaning them would delete the agent's own untracked work — but it means a deploy that
+renamed or removed a file can leave the old copy on the guest until a deploy whose commit is reachable.
 
 The switch and the reboot run as **root over ssh** (`provision.activationUser`, default `root`), the
 file and git work as `builder`.  `builder` has no sudo in the guest — it is in `wheel` only so
@@ -402,18 +417,20 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | an old fingerprint is pinned while the guest's sshd keys are new.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every pass where it grafts the guest, so this row applies to generations before that fix, to a graft pass that found no user to graft, and to your own `ssh`: `sudo rm -f /var/lib/buildvm/guest-known_hosts` or `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
 | `buildvm-provision` waits forever, then `start operation timed out`, while `journalctl -u buildvm` shows `BdsDxe: No bootable option or device was found` | the guest is not running an OS, so nothing listens on 2224 and qemu's user-mode networking accepts your connection and resets it, which ssh reports as `kex_exchange_identification: read: Connection reset by peer` rather than "connection refused".  Usually `buildvm-install` never ran this boot, so the disk was never written: `sudo systemctl stop buildvm && sudo systemctl start buildvm-install && sudo systemctl start buildvm`.  If it is in a failed state from an earlier attempt, `sudo systemctl reset-failed buildvm-install` first, and check `journalctl -b -u buildvm-install` for why it stopped early. |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
-| `buildvm-provision: no commit recorded, switching the streamed tree as it stands` | informational: `provision.targetCommit` is empty (a deploy from a dirty tree, or no `deploy-ai` run yet), so there is nothing to tag or rebase and the streamed contents are switched as they are (§6) |
+| `buildvm-provision: no commit recorded; the guest runs the streamed tree` | informational: `provision.targetCommit` is empty (a deploy from a dirty tree, or no `deploy-ai` run yet), so there is nothing to tag and the streamed contents are switched as they are (§6) |
 | `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check from inside the guest: `ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'` must show `default via 10.0.2.2 dev ens3` and resolve, otherwise `buildvm.service` is not passing the pinned `-netdev user,…,net=…,host=…,dns=…` arguments or `platforms/buildvm-network.nix` is not in the guest's config (§2).  Not fatal: the switch runs on the streamed contents |
 | `buildvm-provision: could not point /home/builder/nixflakes at ssh://…` | `git remote add`/`set-url` failed, which needs the checkout to be writable (§the permission row above) |
-| `buildvm-provision: <sha> is not in the guest's checkout, switching the streamed tree as it stands` | informational: that commit is not pushed to `origin`, so nothing is tagged or rebased and the guest switches the streamed contents, which are what `ai` runs.  Push the deploy (§7) and the next pass brings the history; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline -3 && git -C /home/builder/nixflakes tag -l'` shows what is there |
-| `buildvm-provision: could not tag <sha> as deployed`, `could not create main at <sha>`, or `could not reset main to deployed` | the checkout is not writable or is in a state git will not accept; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'`.  Provisioning stops rather than switching a checkout it cannot describe |
-| `buildvm-provision: could not create the rebase worktree at /home/builder/nixflakes-rebase; leaving main as it is` | the scratch worktree could not be made (leftover directory, or `main` missing).  `main` keeps whatever the agent had, so the applied commit is still tagged `deployed` and the switch evaluates the streamed tree |
-| `buildvm-provision: main rebased onto deployed` | the normal case: the agent's commits sit on top of the applied commit (§6) |
-| `buildvm-provision: main would not rebase onto deployed; main reset, the guest's work kept on tag agent-work (<sha>)` | the agent's branch and the applied commit cannot be rebased cleanly.  What runs is the host's config; the agent's branch is intact at `agent-work`, so `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline agent-work -5'` is the way back to it |
-| `buildvm-provision: the guest's stashed changes do not apply onto the applied tree; kept in the stash` | the agent's edits conflict with the new tree.  They stay in `git stash list` rather than being merged by hand, and tracked files are reset so the switch evaluates a clean tree |
+| `buildvm-provision: <sha> is not in the guest's checkout; the guest runs the streamed tree` | informational: that commit is not pushed to `origin`, so nothing is tagged and the guest switches the streamed contents, which are what `ai` runs.  Push the deploy (§7) and the next pass brings the history; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline -3 && git -C /home/builder/nixflakes tag -l'` shows what is there |
+| `buildvm-provision: could not tag <sha> as deployed` or `could not point main at <sha>` | the checkout is not writable or is in a state git will not accept; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'`.  Provisioning stops rather than switching a checkout it cannot describe |
+| `buildvm-provision: the guest's previous main is kept on tag agent-work (<sha>)` | the normal case when the agent committed in the guest: `main` now points at the applied commit, and the guest's own commits are intact at `agent-work`, so `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline agent-work -5'` is the way back to them (§6) |
+| `buildvm-provision: could not commit the streamed tree in /home/builder/nixflakes` | fatal.  nix builds a git flake from tracked files only, so a deploy's new file that never got committed would silently not exist in the guest's build; the commit is also what makes the switch's tree exactly what `ai` ran |
+| `error: opening Git repository "/home/builder/nixflakes": repository path '/home/builder/nixflakes' is not owned by current user (libgit2 error code = 7)` while fetching `git+file:///home/builder/nixflakes` | the switch runs as root against a `builder`-owned checkout and root's git does not trust it.  Provisioning sets `safe.directory` for that path before the switch, so check `sudo ssh -p 2224 root@127.0.0.1 'git config --global --get-all safe.directory'` and whether root's HOME is writable (§6) |
+| `buildvm-provision: could not mark /home/builder/nixflakes as safe for <user>; the switch will fail` | root's `git config --global` could not be written, which means root's HOME is not writable in the guest.  The message is a warning so the log shows the cause, and the switch then fails with the libgit2 ownership error in the row above |
+| `buildvm-provision: guest running its own config at <snapshot>` | success: the guest switched and is rebooting into it, and `buildvm-provision` will not run again for this snapshot (§6) |
+| `buildvm-provision: the guest's stashed changes do not apply onto the applied tree; kept in the stash` | the agent's edits conflict with the new tree.  They stay in `git stash list` rather than being merged by hand, and tracked files are reset so the checkout matches the commit that was switched (§6) |
 | `buildvm-provision: could not stash the guest's uncommitted changes; streaming will overwrite them` | `git stash` refused (usually an unborn `HEAD` in a freshly initialized checkout).  Streaming continues, so those edits are lost — read them off the guest first if they matter |
 | `buildvm-provision: could not check out main in /home/builder/nixflakes` | the checkout exists but the forced checkout failed; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'` |
-| `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had |
+| `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had.  The agent's stashed work is still restored before provisioning exits, so nothing in the checkout is lost — and the marker is not written, so the next deploy retries |
 | `buildvm-provision: guest did not come back after the switch` | the new system does not boot — the switch rewrote the ESP entries. Boot the previous loader entry from the guest's serial console (`journalctl -u buildvm -b`), or reseed (§9) |
 | `journalctl -b -u switch-to-configuration`: `[agenix] decrypting …` then `chmod: cannot access '/run/agenix.d/N/<name>.tmp': No such file or directory`, `mv: cannot stat …`, `Activation script snippet 'agenixInstall' failed (1)` | no identity in `config.age.identityPaths` could open the file, i.e. the secret is encrypted for a different key. Nothing else reports this, and the activation errors are not fatal, so the switch finishes with an empty `/run/agenix`. Re-encrypt for `ssh -p … 'cat /etc/ssh/ssh_host_ed25519_key.pub'` (§4) |
 | the guest stays the seed image (no Xfce, no activated config) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means `provision.loginKey` must exist, which `buildvm-install` generates — `ls -l /var/lib/buildvm/keys/provision` |

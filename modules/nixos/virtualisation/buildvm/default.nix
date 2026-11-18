@@ -255,16 +255,6 @@ in
         '';
       };
 
-      rebaseDir = mkOption {
-        type = types.str;
-        default = "${cfg.provision.workdir}-rebase";
-        description = ''
-          Scratch worktree used to rebase the guest's `main` onto the applied commit.  The checkout
-          itself is dirty by design (it holds the streamed tree), and `git rebase` refuses a dirty
-          worktree, so the rebase runs in its own.
-        '';
-      };
-
       targetCommit = mkOption {
         type = types.str;
         default = "";
@@ -543,7 +533,6 @@ in
         SECRETS_SRC=${escapeShellArg (cfg.provision.secretsSource or "")}
         SECRETS=${escapeShellArg (cfg.provision.secretsDir or "")}
         COMMIT=${escapeShellArg cfg.provision.targetCommit}
-        REBASE=${escapeShellArg cfg.provision.rebaseDir}
         # The snapshot's store name hashes its contents, so it says exactly what this machine runs,
         # whether or not the deploy pointed at a commit.
         SNAPSHOT=$(basename "$SOURCE")
@@ -656,7 +645,9 @@ in
         TARGET=$(printf '%s' "$TARGET" | sed 's/-dirty$//')
 
         if ! gssh "git -C '$WORK' rev-parse --git-dir >/dev/null 2>&1"; then
-          gssh "git init -q '$WORK'" || { echo "buildvm-provision: cannot init $WORK" >&2; exit 1; }
+          # -b main because the rebase logic below only speaks of `main`; a `git init` default of
+          # `master` would leave the first branch named something the rest of the script never looks at.
+          gssh "git init -q -b main '$WORK'" || { echo "buildvm-provision: cannot init $WORK" >&2; exit 1; }
         fi
         if [ -n "$ORIGIN" ]; then
           gssh "git -C '$WORK' remote add origin '$ORIGIN' 2>/dev/null || git -C '$WORK' remote set-url origin '$ORIGIN'" \
@@ -671,51 +662,63 @@ in
             || echo "buildvm-provision: could not fetch from $ORIGIN; the guest keeps whatever commits it already had"
         fi
 
-        # Put history behind the streamed tree.  The guest's `main` is rebased onto `deployed` so the
-        # agent's commits stay on top of the baseline; if that cannot be done the host's config wins for
-        # what runs, and the agent's branch is kept as a tag rather than dropped.
+        # Point the guest's branch at the deploy.  The guest's own commits are snapshots of trees this
+        # service streamed, so they share no history with the host's repository and cannot be rebased
+        # onto it; `main` therefore always ends up at the deployed commit, and whatever the guest had
+        # that is not this deploy is kept on a tag instead of dropped.
         if [ -z "$TARGET" ]; then
-          echo "buildvm-provision: no commit recorded, switching the streamed tree as it stands"
+          echo "buildvm-provision: no commit recorded; the guest runs the streamed tree"
         elif ! gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
-          echo "buildvm-provision: $TARGET is not in the guest's checkout, switching the streamed tree as it stands"
+          echo "buildvm-provision: $TARGET is not in the guest's checkout; the guest runs the streamed tree"
           TARGET=""
         else
           gssh "git -C '$WORK' tag -f deployed '$TARGET' >/dev/null" \
             || { echo "buildvm-provision: could not tag $TARGET as deployed" >&2; exit 1; }
-          if ! gssh "git -C '$WORK' show-ref --verify --quiet refs/heads/main"; then
-            gssh "git -C '$WORK' branch main '$TARGET'" \
-              || { echo "buildvm-provision: could not create main at $TARGET" >&2; exit 1; }
-          else
-            # The checkout is dirty by design (it holds the streamed tree), and rebase will not run in a
-            # dirty worktree, so the guest's branch is rebased in a scratch worktree of its own.
-            gssh "git -C '$WORK' worktree prune"
-            if gssh "git -C '$WORK' worktree add --quiet --detach '$REBASE' main"; then
-              if gssh "git -C '$REBASE' rebase --quiet deployed main"; then
-                echo "buildvm-provision: main rebased onto deployed"
-              else
-                OLD=$(gssh "git -C '$WORK' rev-parse main" | tr -d ' \n')
-                gssh "git -C '$REBASE' rebase --abort"
-                gssh "git -C '$WORK' tag -f agent-work '$OLD' >/dev/null" || true
-                gssh "git -C '$WORK' branch -f main 'deployed'" \
-                  || { echo "buildvm-provision: could not reset main to deployed" >&2; exit 1; }
-                echo "buildvm-provision: main would not rebase onto deployed; main reset, the guest's work kept on tag agent-work ($OLD)"
-              fi
-              gssh "git -C '$WORK' worktree remove --force '$REBASE'"
-            else
-              echo "buildvm-provision: could not create the rebase worktree at $REBASE; leaving main as it is" >&2
+          if gssh "git -C '$WORK' show-ref --verify --quiet refs/heads/main"; then
+            OLD=$(gssh "git -C '$WORK' rev-parse main" | tr -d ' \n')
+            if [ "$OLD" != "$TARGET" ]; then
+              gssh "git -C '$WORK' tag -f agent-work '$OLD' >/dev/null" || true
+              echo "buildvm-provision: the guest's previous main is kept on tag agent-work ($OLD)"
             fi
           fi
-          # The switch evaluates whatever is on disk, so the tree has to be the applied branch, not
-          # whatever the stream left behind.  --force because streamed files are untracked.
+          gssh "git -C '$WORK' update-ref refs/heads/main '$TARGET'" \
+            || { echo "buildvm-provision: could not point main at $TARGET" >&2; exit 1; }
+          # nix builds the commit `main` points at, so the worktree has to match it rather than keep
+          # whatever the stream left behind.  --force because the streamed files are dirty/untracked.
           if ! gssh "git -C '$WORK' checkout --force --quiet main"; then
             echo "buildvm-provision: could not check out main in $WORK" >&2
             exit 1
           fi
         fi
 
-        # Put the agent's own edits back.  A stash that no longer applies stays in the stash (the agent
-        # can find it with `git stash list`) and the tree is reset, because switching a half-merged
-        # working tree would deploy something nobody wrote.
+        # nix builds a git flake from *tracked* files: committed content plus modifications to tracked
+        # files, while an untracked file is invisible to it (nix says so: `git -C <dir> add -N <file>`).
+        # So the tree this deploy streamed only reaches the guest once it is tracked, which means
+        # committing it.  The commit is deliberately untagged - `deployed` names the commit the git host
+        # has, and a sha invented inside the guest would not be the sha the dev box has.
+        if [ -n "$(gssh "cd '$WORK' && git status --porcelain")" ]; then
+          gssh "cd '$WORK' && git add -A && git -c user.name=buildvm-provision -c user.email=buildvm-provision@localhost commit -q -m 'buildvm-provision: streamed tree'" \
+            || { echo "buildvm-provision: could not commit the streamed tree in $WORK" >&2; exit 1; }
+        fi
+
+        echo "buildvm-provision: switching the guest to $SNAPSHOT"
+        # The switch runs as root (the guest's user has no sudo) while $WORK belongs to $USER, and
+        # libgit2 refuses a repository owned by someone else: the first deploy after `git init` died
+        # with `repository path '/home/builder/nixflakes' is not owned by current user (libgit2 error
+        # code = 7)`.  Naming the one path in root's git config is enough; `safe.directory '*'` would
+        # make root accept any foreign repository on the box.
+        gssh_root "git config --global --replace-all safe.directory '$WORK'" \
+          || echo "buildvm-provision: could not mark $WORK as safe for $ROOT_USER; the switch will fail" >&2
+        SWITCHED=1
+        if ! gssh_root "nixos-rebuild switch --flake '$WORK#$ATTR' $OVERRIDE --accept-flake-config"; then
+          echo "buildvm-provision: switch failed; guest left as it is" >&2
+          SWITCHED=0
+        fi
+
+        # Put the agent's own edits back, and only after the switch: nix would otherwise build them into
+        # the running config, so half-finished work could take down the guest's own rebuild.  A stash
+        # that no longer applies stays in the stash (the agent finds it with `git stash list`) and the
+        # tree is reset, because leaving a half-merged working tree is worse than losing the edits.
         if [ "$STASHED" = 1 ]; then
           if ! gssh "git -C '$WORK' stash apply 'stash@{0}'"; then
             echo "buildvm-provision: the guest's stashed changes do not apply onto the applied tree; kept in the stash" >&2
@@ -723,11 +726,7 @@ in
           fi
         fi
 
-        echo "buildvm-provision: switching the guest to $SNAPSHOT"
-        if ! gssh_root "nixos-rebuild switch --flake '$WORK#$ATTR' $OVERRIDE --accept-flake-config"; then
-          echo "buildvm-provision: switch failed; guest left as it is" >&2
-          exit 1
-        fi
+        [ "$SWITCHED" = 1 ] || exit 1
 
         # A switch changes the bootloader entries, so boot the new system rather than the one this
         # boot came from.  qemu restarts when the guest powers off (buildvm.service Restart=always).
