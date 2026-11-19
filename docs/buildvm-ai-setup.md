@@ -202,6 +202,9 @@ journalctl -u buildvm-install -u buildvm -u buildvm-provision -b --no-pager | ta
 `--flake '.#ai'` builds `ai` and the seed image and nothing else: the guest's own system is no longer
 part of the host build, and no kernel, initrd or guest closure is rooted in ai's store. Once the
 partition is written, the seed image is an ordinary unrooted store path, so `nix gc` reclaims it.
+That `nixos-rebuild` is the operator's switch: it runs from a working tree on `ai`, needs no gate, and
+is how the first deploy and every emergency happens.  After it, `ai` records what it runs (§7), and
+the agent's own deploys go through the gate instead — *The agent's route onto `ai`*, below.
 
 `buildvm-install.service` writes the image's `nixos.img` onto the partition and then grafts, on every
 start, everything the guest needs but cannot fetch itself:
@@ -225,6 +228,77 @@ kernel's EFI stub through systemd-boot, which reads its entries from the ESP, an
 only systemd, nix, git and sshd. `buildvm-provision.service` (§6) installs the real guest from inside
 it: the switch rewrites the loader entries and copies the new kernel onto the guest's own ESP, so the
 boot chain survives it.
+
+### The agent's route onto `ai`
+
+There is no repository on `ai`, and `builder` has no route to `ai`'s root (§4, §8).  The agent's
+deploy is a patch on stdin to the `deployer` account:
+
+```bash
+cd /home/builder/nixflakes
+git add -A && git commit -m 'guest: …'
+git format-patch --stdout deployed..main | ssh -p 22 deployer@10.0.2.2 'deploy-ai --submit'
+```
+
+`deployed` is the tag provisioning moves to the commit `ai` runs (§6), so `deployed..main` is the
+agent's own work and nothing else.  `10.0.2.2` is qemu's gateway — `ai` as the guest sees it — and
+port 22 is ai's own sshd, not the 2224 forward that runs the other way and reaches the guest (§6).
+The grafted key in `~builder/.ssh` (§4) is the half `nixflakes.deploy-ai.publicKey` authorizes for
+`deployer`, so no `-i` is needed.
+
+`deployer` cannot open a shell.  Its login shell is `deploy-ai-gate`
+(`modules/nixos/deploy-ai/default.nix`), which accepts only `deploy-ai …` and runs it as root through
+a `NOPASSWD` sudo rule scoped to `/run/current-system/sw/bin/deploy-ai`.  A submitted series arrives
+as `deploy-ai --submit` with the patch on stdin.
+
+Nothing the guest sent is trusted as a tree.  `deploy-ai` unpacks `/etc/deploy-ai/deployed-source`
+— the snapshot `ai` was built from (§7) — applies the series onto it with `git apply`, and vets the
+result:
+
+* `nixflakes.deploy-ai.allowlist` — the same scope rule `--repo`/`--ref` uses (§7).
+* `nixflakes.deploy-ai.submit.denylist` — the deployment machinery itself: the gate's module, its
+  script, `flake.lock`, `secrets/`.  A patch touching one is refused, because the thing doing the
+  vetting cannot vet a change to itself.
+* `nixflakes.deploy-ai.policyDigest` — the check under *The policy digest* below.
+* `nixflakes.deploy-ai.submit.maxBytes` (262144 here) — the series lands in
+  `/var/lib/deploy-ai/inbox`, `0700 root`, as the record of what arrived, readable only by root.
+
+**What a submission switches.**  If every changed path sits inside
+`nixflakes.deploy-ai.submit.guestOnlyPaths` — `platforms/buildvm.nix` and
+`platforms/buildvm-bootstrap.nix` on this host — the submission is `class guest`.  `deploy-ai` builds
+`nixosConfigurations.buildvm` inside the VM, compares the output path the VM printed against the one
+`ai` evaluates from the same tree, and switches the guest as root using the key named by
+`/etc/deploy-ai/guest-root-key`.  `ai` keeps running what it runs now, and nothing is copied back.
+Anything else is `class ai` and takes the full path from §7: build in the VM, `nix-copy-closure`,
+health probe of the current system, timed reboot guard, switch, rollback if the probes go red.  A
+guest-only switch is the common case, and it is the one the agent can do without putting the host at
+risk.
+
+That guest-root key is a separate authorization from `builder`'s.  `/etc/deploy-ai/guest-root-key`
+holds the *path* of `nixflakes.virtualisation.buildvm.provision.loginKey` — the root-owned keypair
+`buildvm-install` generates and whose public half it grafts into the guest's
+`/root/.ssh/authorized_keys` (§6).  The guest switch runs over `127.0.0.1:2224` as `root`, on the
+same forward Hermes' shell uses; `builder`'s key is not in that file, so a submit cannot become guest
+root by itself.
+
+**The policy digest.**  `nixflakes.deploy-ai.policyDigest` is a sha256 of everything a patch must not
+be able to move: the allowlist, the gate's key, the build key, the state dir, the submit cap, the
+guest-only paths, the denylist, the sudo rules, the users and their authorized keys, sshd's settings,
+nix's `trusted-users`, and the buildvm paths provisioning switches on.  `ai` writes its own digest to
+`/etc/deploy-ai/policy-digest`, and `deploy-ai` evaluates the same option out of the patched tree.
+A submission whose digest differs is refused before anything is built or applied.  The denylist alone
+cannot do this: a digest move is legal inside an allowed prefix, so the digest is what stops a patch
+rewriting the rules it is vetted against.
+
+**Rehearsal.**  `--vet` runs every check above and applies nothing:
+
+```bash
+git format-patch --stdout deployed..main | ssh -p 22 deployer@10.0.2.2 'deploy-ai --vet'
+```
+
+It prints the reconstructed commit, the base it was applied to, the class, one line per changed path,
+and the digest it computed.  `deploy-ai --submit --dry-run` is the same verdict.  Run `--vet` first
+and send `--submit` only when the printed class is the one you expected.
 
 ## 6. The guest's own system, and checking it
 
@@ -396,6 +470,10 @@ ssh deployer@127.0.0.1 'sudo deploy-ai --repo ssh://builder@127.0.0.1:2224/home/
 ssh deployer@127.0.0.1 'sudo deploy-ai --repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes --ref main'
 ```
 
+That route needs the commit to be reachable from a repository root can read.  The commit in the
+guest's own checkout is, because the guest *is* that repository — and the shorter route is a patch
+straight from the guest to the gate, which needs no push at all (§5).
+
 `deploy-ai` mirrors that repo, refuses anything outside `nixflakes.deploy-ai.allowlist` or outside the
 deployed commit's history, builds `nixosConfigurations.ai` on the VM from a plain copy of the tree,
 copies the closure back, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which streams
@@ -512,6 +590,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
 | a guest build *you* run fails on the `secrets` input | it fetched the input over ssh: §2 (deploy key) plus `known_hosts` for port 2223. Provisioning avoids this with `--override-input private` (§6) |
 | gate refuses `outside the deploy-ai allowlist` | correct; the refusal names the nearest allowed prefix — widen `nixflakes.deploy-ai.allowlist` only deliberately |
+| `deploy-ai: refusing: the patch changes the deployment policy (allowlist, keys, users, sudoers); the operator must apply that out-of-band` | the submitted tree evaluates to a different `nixflakes.deploy-ai.policyDigest` than `/etc/deploy-ai/policy-digest`, so the patch moves one of the settings the gate enforces against it — the allowlist, a key, a user, a sudo rule, nix's `trusted-users`, a buildvm path (§5).  Nothing was built or applied.  `deploy-ai --vet` reproduces the refusal without a submission, and the change is the operator's to deploy by hand (§5) |
 | gate refuses `does not have the deployed commit … in its history` | ref rebased or unrelated; rebase onto the deployed commit |
 | a reboot you did not ask for | the 60-minute guard armed before a switch; `systemctl cancel --when` |
 | state to inspect | `/var/lib/deploy-ai/{toplevel,commit,refs.log,lock,rollback-pending,rollback-previous,log/build.log}` |

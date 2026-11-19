@@ -6,6 +6,7 @@
   lib,
   pkgs,
   modulesPath,
+  root,
   hermes-agent,
   hermes-webui,
   # Secrets repo: the ai <-> buildvm keypair is read out of it at eval time and decrypted at boot.
@@ -316,6 +317,17 @@ in
 
       compression.enabled = true;
 
+      # The deploy skill, read from the same tree the tool ships in.  Hermes looks for
+      # `<dir>/<name>/SKILL.md` in, in order: trusted project dir, `$HERMES_HOME/skills`,
+      # `skills.create_dir`, `skills.external_dirs` (`hermes-agent/agent/skill_utils.py`
+      # `get_skill_search_roots`).  Only directories that exist are used, and the entries here are
+      # absolute, so they are not taken as relative to `HERMES_HOME`.
+      #
+      # `/etc/hermes-skills` is built by the `environment.etc` entry below, straight out of the repo,
+      # so the text the agent reads is the text the tool was installed with and a switch updates both
+      # together.  `/var/lib/hermes/.hermes/skills` stays the place for skills the agent writes itself.
+      skills.external_dirs = [ "/etc/hermes-skills" ];
+
       # Disk and power commands stay the operator's: every wipe, partition and reset step in
       # docs/buildvm-ai-setup.md and `nixos-rebuild` runs out of band.  These fnmatch globs are
       # floors — `tools/approval_floors.py` applies them even under yolo or `mode = "off"`.
@@ -480,6 +492,12 @@ in
   # then builds in the guest, copies the closure back, health-probes, switches, and rolls back
   # automatically if the probes go red; the reboot guard is armed immediately before the switch so
   # a long failing build cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.sh.
+  # What Hermes loads from `/etc/hermes-skills` (`skills.external_dirs` above).  One directory per
+  # skill, and the file is the repo's own, so the deployment notes the agent reads cannot drift away
+  # from the tool they describe; a switch moves both at once.  It is a symlink into the store, so it
+  # is read-only — the agent writes its own skills under `$HERMES_HOME/skills` instead.
+  environment.etc."hermes-skills/deploy-ai/SKILL.md".source = root + /pkgs/deploy-ai/SKILL.md;
+
   nixflakes.deploy-ai = {
     enable = true;
     publicKey = guestPublicKey;
@@ -501,6 +519,17 @@ in
       "docs/"
       "README.md"
     ];
+
+    # Submit: the guest sends a patch instead of naming a ref.  A patch confined to the guest's own
+    # platform files is built as `#buildvm` and applied to the guest over ssh, so ai keeps running;
+    # anything else follows the normal path above -- build in the VM, copy the closure back,
+    # health-probe, switch under the timed reboot guard, roll back if the probes go red.
+    submit.enable = true;
+    submit.guestOnlyPaths = [
+      "platforms/buildvm.nix"
+      "platforms/buildvm-bootstrap.nix"
+    ];
+    submit.maxBytes = 262144;
   };
 
   # Firewall on, for the sake of the model endpoint above.  openssh opens 22 itself, and Strata
@@ -513,7 +542,10 @@ in
   # `networking.firewall` assignment.
   networking.firewall = {
     enable = true;
-    allowedTCPPorts = [ 8642 9119 ];
+    allowedTCPPorts = [
+      8642
+      9119
+    ];
     allowedUDPPorts = [ 5353 ];
   };
 
