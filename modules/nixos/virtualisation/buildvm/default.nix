@@ -393,6 +393,7 @@ in
         # running.  This unit is Before= the qemu unit, so the VM is stopped and mounting its filesystem
         # here is safe.  The uid goes in a plain variable: UID is readonly in bash, so assigning it
         # fails and chown would run with root's uid.
+        GUEST_SSH_TARGET=${escapeShellArg "[127.0.0.1]:${toString cfg.sshPort}"}
         MNT=/mnt/buildvm
         mkdir -p "$MNT"
         # The image's partitions live *inside* it, so the loop device has to scan its partition
@@ -435,6 +436,31 @@ in
           chmod 700 "$KEY_DIR"
           chmod 600 "$1"
           chmod 644 "$1.pub"
+        }
+
+        # A consumer's own known_hosts, cleared of the guest's entry.  Everyone sshes to
+        # 127.0.0.1:<sshPort> with StrictHostKeyChecking=accept-new, which pins whatever it saw
+        # first, and every graft pass replaces the guest's sshd host keys, so Hermes, root and
+        # deploy-ai would otherwise fail with "REMOTE HOST IDENTIFICATION HAS CHANGED" on the first
+        # command after a reseed.  Only this entry goes: a consumer's other pins (the git host on
+        # 2223, say) belong to it, not to the guest.
+        drop_guest_host_key() {
+          # $1 owner, $2 group
+          local HOME KN OUT
+          HOME=$(getent passwd "$1" 2>/dev/null | cut -d: -f6)
+          [ -n "$HOME" ] || return 0
+          KN="$HOME/.ssh/known_hosts"
+          [ -f "$KN" ] || return 0
+          # ssh-keygen -R exits 0 whether or not it removed anything, so its output is the signal.
+          OUT=$(ssh-keygen -R "$GUEST_SSH_TARGET" -f "$KN" 2>&1) || return 0
+          case "$OUT" in
+            # "not found" also contains "found", so check the miss first.
+            *"not found"*) return 0 ;;
+            *found*)
+              chown "$1:$2" "$KN" "$KN.old" 2>/dev/null || true
+              echo "buildvm: dropped the stale $GUEST_SSH_TARGET entry from $KN"
+              ;;
+          esac
         }
 
         mount "$ROOT" "$MNT"
@@ -500,6 +526,10 @@ in
             rm -f ${escapeShellArg cfg.provision.knownHostsFile}
             echo "buildvm: dropped the stale guest host key from ${cfg.provision.knownHostsFile}"
           fi
+
+          for PAIR in ${escapeShellArgs (lib.unique ((map (k: k.owner + ":" + k.group) loginKeyList) ++ [ "root:root" ]))}; do
+            drop_guest_host_key "''${PAIR%%:*}" "''${PAIR##*:}"
+          done
 
         fi
 

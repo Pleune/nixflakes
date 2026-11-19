@@ -174,10 +174,11 @@ into `~builder/.ssh` while the VM is stopped (§5), which is why the guest is re
 first boot.
 
 The guest gets the private half as its own `~builder/.ssh/id_ed25519`, so outbound ssh from the guest
-authenticates with the identity §2 already authorizes. Nothing else is grafted: `known_hosts` is not
-written, because provisioning never contacts the git host (§2), and the first real ssh from the guest
-to `git.pleunetowne.com:2223` should be answered with `ssh-keyscan -p 2223 git.pleunetowne.com >>
-~builder/.ssh/known_hosts`.
+authenticates with the identity §2 already authorizes.  Nothing else is grafted: no `known_hosts` is
+written into the image.  Provisioning's own fetch trusts the git host on first use
+(`StrictHostKeyChecking=accept-new`, §6), which is deliberate — a pinned file baked into a store-built
+image would go stale the moment the server's key changes.  To pin it anyway, run `ssh-keyscan -p 2223
+git.pleunetowne.com >> /home/builder/.ssh/known_hosts` in the guest once.
 
 ## 5. Seed the guest, then switch `ai`
 
@@ -295,9 +296,16 @@ Its ssh uses the keypair `buildvm-install` generates for root (`provision.loginK
 guest on first use into `/var/lib/buildvm/guest-known_hosts`, its own file rather than root's
 `known_hosts`, and `buildvm-install` deletes that file on every pass where it grafts the guest.
 So a reseed re-trusts the guest's new sshd keys automatically, while a key that changes under a
-running guest still fails as a real warning.  A stale entry in `/root/.ssh/known_hosts` from an
-earlier guest does not affect provisioning, but it will break your own `ssh -p 2224`:
-`sudo ssh-keygen -R '[127.0.0.1]:2224'`.
+running guest still fails as a real warning.
+
+Everyone else pins into their own `~/.ssh/known_hosts`: Hermes' shell backend
+(`tools/environments/ssh.py`, `StrictHostKeyChecking=accept-new`, no `UserKnownHostsFile` of its
+own), `deploy-ai` running as root, and your interactive `ssh`.  A graft pass therefore also removes
+the `[127.0.0.1]:<sshPort>` entry from each login key owner's home (resolved with `getent passwd`)
+plus `/root/.ssh/known_hosts`, and chowns the result back to its owner.  Only that entry goes: a
+consumer's other pins, the git host on 2223 for instance, are not the guest's business.  Nothing
+else rewrites those files, so an entry left by an older guest is cleared by the next graft pass;
+to do it by hand, `ssh-keygen -R '[127.0.0.1]:2224' -f ~/.ssh/known_hosts`.
 So on a fresh disk the first boot ends with
 the guest running `platforms/buildvm.nix`: Xfce and Xvnc, nix gc, deploy-rs, and a root filesystem
 grown to fill the partition.  Growing it takes both halves: `boot.growPartition` enlarges the
@@ -374,8 +382,9 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 ```
 
 `wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
-The installer also drops `/var/lib/buildvm/guest-known_hosts` on every pass where it grafts the
-guest, because a new image carries new sshd host keys.  The guest grows its own partition and
+The installer also drops `/var/lib/buildvm/guest-known_hosts`, and the guest's entry from every
+consumer's `~/.ssh/known_hosts` (§7), on every pass where it grafts the guest, because a new image
+carries new sshd host keys.  The guest grows its own partition and
 filesystem on boot (`boot.growPartition` plus `autoResize`), so nothing needs resizing.  If a guest
 reports a filesystem far smaller than its partition, the fstab entry is missing `x-systemd.growfs`:
 `sudo ssh -p 2224 root@127.0.0.1 'findmnt -n -o OPTIONS /; df -h /'` and grow it once with
@@ -436,12 +445,12 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision: cannot hand /home/builder/nixflakes to builder`, or `/home/builder/nixflakes/.git: Permission denied` followed by `cannot init` | the path exists but belongs to root — generations before provisioning streamed created the checkouts while mounting the image, and sshd logs you in as `builder`, which cannot write there.  Provisioning now hands those directories over as root before streaming, so this row applies to generations before that fix or to a guest where root's authorized key is missing (`sudo ssh -p 2224 root@127.0.0.1 'ls -ld /home/builder/nixflakes'`) |
 | `chown: invalid group: 'builder:builder'` inside `cannot hand …` | generations that asked for a group named after the user.  The guest's build user has no such group (NixOS puts `isNormalUser` in `users`), so provisioning now chowns the owner alone |
 | `git checkout` / `error: unable to write file …: Permission denied` after streaming | the Nix store is read-only (0444 files, 0555 directories) and tar keeps those modes, so the streamed checkout was unwritable.  Provisioning now runs `chmod -R u+w` on the copy in the guest |
-| `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | an old fingerprint is pinned while the guest's sshd keys are new.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every pass where it grafts the guest, so this row applies to generations before that fix, to a graft pass that found no user to graft, and to your own `ssh`: `sudo rm -f /var/lib/buildvm/guest-known_hosts` or `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` — from provisioning, from Hermes' shell, from `deploy-ai`, or from your own `ssh` | an old fingerprint is pinned while the guest's sshd keys are new.  A graft pass clears `/var/lib/buildvm/guest-known_hosts` and the `[127.0.0.1]:2224` entry out of every login key owner's `~/.ssh/known_hosts` (§7), so this row applies to generations before those fixes, to a graft pass that found no user to graft (`skipping grafting` in `journalctl -u buildvm-install`), and to a consumer whose home `getent passwd` cannot resolve: `sudo rm -f /var/lib/buildvm/guest-known_hosts` or `ssh-keygen -R '[127.0.0.1]:2224' -f ~/.ssh/known_hosts` |
 | `buildvm-provision` waits forever, then `start operation timed out`, while `journalctl -u buildvm` shows `BdsDxe: No bootable option or device was found` | the guest is not running an OS, so nothing listens on 2224 and qemu's user-mode networking accepts your connection and resets it, which ssh reports as `kex_exchange_identification: read: Connection reset by peer` rather than "connection refused".  Usually `buildvm-install` never ran this boot, so the disk was never written: `sudo systemctl stop buildvm && sudo systemctl start buildvm-install && sudo systemctl start buildvm`.  If it is in a failed state from an earlier attempt, `sudo systemctl reset-failed buildvm-install` first, and check `journalctl -b -u buildvm-install` for why it stopped early. |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
 | `nc -z 127.0.0.1 2224` says OPEN and `ssh -vv` prints `Connection established` then `Local version string …` and waits forever, with no banner and no `Permission denied`, even for `root` with a key the log says was grafted | qemu's user-mode network accepts the forward on `ai` and then cannot reach the guest, so the guest has no address on the pinned subnet. `journalctl -u buildvm -b` showing `[ OK ] Started SSH Daemon.` rules out sshd, and `ip a` inside the guest showing the card `state DOWN` with no address confirms it. Two ways that happens: `networking.useNetworkd = false` with `networking.useDHCP = false` leaves `systemd.network.networks` as `{ }`, so nothing manages the interface; or a unit matched on an interface name the guest no longer uses (`ens3` on one generation, `enp0s3` on the next). Check `nix eval '.#nixosConfigurations.buildvm.config.systemd.network.networks'` — it should show the `40-buildvm-nat` unit with `matchConfig.MACAddress` (§2) |
 | `buildvm-provision: no commit recorded; the guest runs the streamed tree` | informational: `provision.targetCommit` is empty (a deploy from a dirty tree, or no `deploy-ai` run yet), so there is nothing to tag and the streamed contents are switched as they are (§6) |
-| `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check from inside the guest: `ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'` must show `default via 10.0.2.2 dev ens3` and resolve, otherwise `buildvm.service` is not passing the pinned `-netdev user,…,net=…,host=…,dns=…` arguments or `platforms/buildvm-network.nix` is not in the guest's config (§2).  Not fatal: the switch runs on the streamed contents |
+| `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check from inside the guest: `ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'` must show `default via 10.0.2.2 dev <interface>` and resolve, otherwise `buildvm.service` is not passing the pinned `-netdev user,…,net=…,host=…,dns=…` arguments or `platforms/buildvm-network.nix` is not in the guest's config (§2).  The unit matches by MAC, so the interface name is whatever predictable naming gives this boot (`ens3`, `enp0s3`, …) and is not itself the thing to check.  Not fatal: the switch runs on the streamed contents |
 | `buildvm-provision: could not point /home/builder/nixflakes at ssh://…` | `git remote add`/`set-url` failed, which needs the checkout to be writable (§the permission row above) |
 | `buildvm-provision: <sha> is not in the guest's checkout; the guest runs the streamed tree` | informational: that commit is not pushed to `origin`, so nothing is tagged and the guest switches the streamed contents, which are what `ai` runs.  Push the deploy (§7) and the next pass brings the history; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes log --oneline -3 && git -C /home/builder/nixflakes tag -l'` shows what is there |
 | `buildvm-provision: could not tag <sha> as deployed` or `could not point main at <sha>` | the checkout is not writable or is in a state git will not accept; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'`.  Provisioning stops rather than switching a checkout it cannot describe |
