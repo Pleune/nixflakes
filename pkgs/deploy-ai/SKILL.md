@@ -1,45 +1,87 @@
 ---
 name: deploy-ai
 description: Deploy changes you made in this build VM to the `ai` host. Use when asked to deploy,
-  roll back, or check what ai is running, or when a deploy is refused.
+  roll back, or check what ai is running, or when a deploy or an ssh command to `deployer` is refused.
 ---
 
 # Deploying `ai` from this VM
 
-You are `builder` inside the build VM on `ai`. You can edit, commit and build; you cannot switch
-`ai` yourself. Everything goes through `deploy-ai`, over ssh, as the `deployer` account on the host.
+You are `builder` inside the build VM on `ai`. You can edit, commit and build here; you cannot
+switch `ai` yourself. Everything goes through `deploy-ai`, over ssh, as the `deployer` account on
+the host, and the gate vets the patch before anything is applied.
+
+## Before you send anything
 
 ```bash
 cd /home/builder/nixflakes
 git add -A && git commit -m '…'
-git log --oneline deployed..main                      # what you are about to send
+git log --oneline deployed..main     # must list your commits; empty means nothing to send
+git diff --stat deployed..main       # every path here has to be on the allowlist
 ```
 
 `deployed` is the tag provisioning moves to the commit `ai` runs, so `deployed..main` is your own
-work and nothing else.
+work and nothing else. A patch series is accepted only if all four hold:
 
-## The route you use: submit a patch
+1. it applies onto the commit `ai` runs, so it must be based on `deployed` — rebase first if
+   `deployed..main` is not a straight line of your commits;
+2. every changed path is on the allowlist and none is on the denylist;
+3. it does not change the deployment policy (keys, users, sudo, sshd, the allowlist itself);
+4. the whole series is under `/etc/deploy-ai/submit-max-bytes`.
 
-Send the series to the host. Nothing reaches ai until the gate has vetted it, so rehearse first.
+Rehearse, then send. Nothing is applied until `--submit` passes the same checks:
 
 ```bash
 git format-patch --stdout deployed..main \
   | ssh -p 22 deployer@10.0.2.2 'deploy-ai --vet'      # checks only, prints the verdict
 
 git format-patch --stdout deployed..main \
-  | ssh -p 22 deployer@10.0.2.2 'deploy-ai --submit'   # vet, then apply
+  | ssh -p 22 deployer@10.0.2.2 'deploy-ai --submit'   # vet, then build, probe, switch
+
+cat /home/builder/deployed-commit                      # what the guest runs now
+ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'       # what ai runs, and any pending rollback
 ```
 
-`10.0.2.2` is `ai` on the qemu user-mode network; port 22 is ai's own sshd, not the 2224 forward
-that runs the other way. The key already in `~builder/.ssh` is the one `deployer` accepts, so no `-i`.
+`10.0.2.2` is `ai` on the qemu user-mode network, and port 22 is ai's own sshd. Port 2224 is the
+forward that reaches *this VM* from ai; `deployer` does not exist there. The key already in
+`~builder/.ssh` is the one `deployer` accepts, so no `-i`.
 
-`deployer` cannot open a shell: its login shell is a gate that only accepts a `deploy-ai …` command,
-so `--submit` has to be the whole command, with the patch on stdin.
+The `|` above is on your side of the ssh. The remote command is the one quoted string.
 
-sshd hands your command to that gate as one string, so quote it once:
-`ssh deployer@10.0.2.2 'deploy-ai --repo <url> --list'`. The gate splits that string into arguments
-and refuses anything containing `;`, `&`, `|`, `<`, `>`, `$`, a backtick, or `*` — not as a sandbox,
-but so nothing reaches `deploy-ai` that its own argument parser would reject.
+## Addressing the gate
+
+`deployer` has no shell: its login shell is the gate, which takes the single string sshd hands it,
+splits it into arguments, and runs `sudo deploy-ai <those arguments>`. So: quote it once, send one
+command per ssh, and keep shell punctuation out of the string.
+
+| Command | Result |
+| --- | --- |
+| `ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'` | works |
+| `ssh -p 22 deployer@10.0.2.2 deploy-ai --status` | works too — ssh joins the words — but a local `*` or `$` expands before ssh sees it, so quote |
+| `ssh -p 22 deployer@10.0.2.2 'deploy-ai --list'` | refused: `--list` reads a repository, so it needs `--repo <url>` |
+| `ssh -p 22 deployer@10.0.2.2 'deploy-ai --status; echo done'` | refused by the gate: `;` |
+| `ssh -p 22 deployer@10.0.2.2 'deploy-ai --vet && deploy-ai --status'` | refused by the gate: `&&` |
+| `ssh -p 22 deployer@10.0.2.2 'deploy-ai --submit > /tmp/out'` | refused by the gate: `>`; `--submit` writes its own record under `/var/lib/deploy-ai/inbox` |
+| `ssh -p 22 deployer@ai 'deploy-ai --status'` | works from inside this VM only if `ai` resolves; prefer the explicit `deployer@10.0.2.2` |
+
+The gate refuses `;`, `&`, `|`, `<`, `>`, `$`, a backtick and `*` because they cannot reach
+`deploy-ai`'s parser intact, not as a sandbox. Two commands in one ssh is not a thing you can do
+here: send them one at a time.
+
+**Read who said no.** They mean different problems:
+
+| You see | What happened |
+| --- | --- |
+| `deploy-ai gate: only 'deploy-ai ...' is accepted here.` | The string did not start with `deploy-ai`. Nothing was attempted. Fix the string, not your keys. |
+| `deploy-ai gate: refusing a command containing '<char>'.` | Same: the command never reached `deploy-ai`. |
+| `deploy-ai: refusing: <reason>` | `deploy-ai` ran and applied nothing; the reason is in the message. |
+| `deploy-ai` usage text, exit 1 | No flags it recognized, or an unknown flag. |
+| `Permission denied (publickey)` | A real key problem: the key in `~builder/.ssh` is not the one `deployer` accepts (`nixflakes.deploy-ai.publicKey`). `ls -l ~/.ssh` first — ssh ignores a key that is group-readable. |
+
+Do not "work around" a refusal by patching the checkout yourself. `git apply`/`patch` onto
+`/home/builder/nixflakes` leaves `.rej` and `.orig` files behind, and the tree there is not what the
+gate vets — the gate applies your series onto ai's own deployed source, which it unpacks from
+`/etc/deploy-ai/deployed-source`. If you want to test locally, use `git apply --check` and clean up
+after yourself.
 
 ## What the gate checks, in order
 
@@ -87,13 +129,14 @@ it must survive; the gate's record only tells you what is live.
 | Message | What it means |
 | --- | --- |
 | `deploy-ai gate: only 'deploy-ai ...' is accepted here.` | The string sshd passed did not start with `deploy-ai`. Quote the command once, with no shell punctuation in it. |
-| `deploy-ai gate: refusing a command containing '<char>'.` | That character is not reachable safely here; run one command at a time and keep `<char>` out of arguments. |
+| `deploy-ai gate: refusing a command containing '<char>'.` | That character is not reachable safely here; send one command per ssh and keep `<char>` out of arguments. |
+| `deploy-ai: refusing: --repo is required` | `--list` and `--ref` read a repository: add `--repo <url>`. |
 | `the patch does not apply to the deployed commit <base>; rebase it onto <base> and submit again` | Your base moved; rebase onto `deployed`. |
 | `refusing: '<path>' is outside the deploy-ai allowlist.` | That file is not yours; ask the operator. |
 | `refusing: '<path>' is on the deploy-ai denylist.` | The gate's own code, `flake.lock`, or secrets. |
 | `the patch changes the deployment policy (allowlist, keys, users, sudoers); …` | It moves ssh keys, sudo, or the rules above. |
 | `patch too large: N bytes, over the M limit in /etc/deploy-ai/submit-max-bytes` | Split the series. |
-| `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed. |
+| `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed, or you piped from the wrong range. |
 | `the guest switch failed; ai is unchanged` | The guest's rebuild or switch failed; ai is untouched. |
 | `… is missing; the running system was built without nixflakes.deploy-ai.deployedSource` | ai has no baseline to patch onto; the operator must switch. |
 | A probe failure or `VM did not become reachable` | ai stays on the old system. |
@@ -101,10 +144,13 @@ it must survive; the gate's record only tells you what is live.
 ## Checking state
 
 ```bash
-ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'                       # what ai runs, pending rollback
-ssh -p 22 deployer@10.0.2.2 'deploy-ai --repo <url> --list'            # a repository's refs
+ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'                        # what ai runs, pending rollback
+ssh -p 22 deployer@10.0.2.2 'deploy-ai --repo <url> --list'             # a repository's refs
 ssh -p 22 deployer@10.0.2.2 'deploy-ai --repo <url> --ref <rev> --dry-run'
 ```
+
+The URL for your own work is the checkout on this VM:
+`--repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes`.
 
 `--repo`/`--ref` is the operator's route, which fetches from a repository. You normally use
 `--submit`; the repository route asks the git host as `builder`, so it only works once your key is
