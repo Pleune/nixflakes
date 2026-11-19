@@ -154,6 +154,17 @@ in
       '';
     };
 
+    netGuestMac = mkOption {
+      type = types.str;
+      default = "52:54:00:12:34:56";
+      description = ''
+        MAC address qemu gives the guest's NIC.  It is pinned because the guest configures that
+        interface by matching this MAC: predictable interface names are not stable across generations
+        of this VM, and a network unit that stops matching leaves the card DOWN with no address.
+        platforms/buildvm-network.nix mirrors this value.
+      '';
+    };
+
     # The guest boots UEFI, so qemu needs a firmware image plus somewhere to keep its variables.
     # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot (which would reject the
     # unsigned systemd-boot NixOS installs) and requires SMM, i.e. -machine q35,smm=on and a secure
@@ -770,7 +781,7 @@ in
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0,bootindex=0 \
             -netdev user,id=n0,net=${cfg.netSubnet},host=${cfg.netGateway},dns=${cfg.netDns},dhcpstart=${cfg.netGuestAddress},hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22 \
-            -device virtio-net-pci,netdev=n0 \
+            -device virtio-net-pci,netdev=n0,mac=${cfg.netGuestMac} \
             -nographic
         '';
         # qemu exits when the guest powers off; bring it back as a real host would.
