@@ -4,3 +4,6 @@ result
 *.iso
 __pycache__
 /hermes-agent/
+# Agent-loop state written by the ralph extension; nothing in it is source.
+/.ralph/
+/state.json
