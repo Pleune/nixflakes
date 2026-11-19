@@ -58,7 +58,11 @@ let
   # The login shell of `deployer`.  sshd runs it as `-c "<command>"`, and the gate reads the command
   # from there or from SSH_ORIGINAL_COMMAND; only a deploy-ai invocation reaches sudo.  Guardrail
   # against mistakes, not a sandbox -- see pkgs/deploy-ai/gate.nix.
-  gate = pkgs.deploy-ai.gate;
+  #
+  # sudo is named as the setuid copy under `security.wrapperDir`: sshd's PATH resolves a bare `sudo`
+  # to the store copy, which has no setuid bit, and sudo then refuses every command with `must be
+  # owned by uid 0 and have the setuid bit set`.
+  gate = pkgs.deploy-ai.gateFor "${config.security.wrapperDir}/sudo";
 in
 {
   options.nixflakes.deploy-ai = {
@@ -166,6 +170,14 @@ in
         message = ''
           nixflakes.deploy-ai.submit needs publicKey and submit.guestOnlyPaths: with no key no guest
           can reach the gate, and with no guest-only paths every submitted patch restarts ai.
+        '';
+      }
+      {
+        assertion = config.security.sudo.enable;
+        message = ''
+          nixflakes.deploy-ai needs security.sudo.enable: the gate reaches deploy-ai through the setuid
+          copy of sudo under ${config.security.wrapperDir}, and with sudo disabled that copy does not
+          exist, so every command from the build VM fails.
         '';
       }
     ];

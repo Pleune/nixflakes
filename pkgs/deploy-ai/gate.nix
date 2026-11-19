@@ -9,10 +9,14 @@
 # cannot start a second command.  Metacharacters are refused anyway, so the only strings that reach
 # deploy-ai are ones deploy-ai's own parser accepts.  This is a guardrail against mistakes, not a
 # sandbox: what it protects is that `deployer` can run deploy-ai and nothing else.
+# The setuid copy of sudo, not the store path.  sshd runs this shell with its own PATH, where `sudo`
+# resolves to the read-only store copy (`-r-xr-xr-x`), and sudo refuses to run unless it is root-owned
+# *with* the setuid bit: `sudo must be owned by uid 0 and have the setuid bit set`.  NixOS puts that
+# bit on the copy under `security.wrapperDir`, which the module passes explicitly.
 {
   pkgs,
   lib,
-  sudoPath ? lib.getExe pkgs.sudo,
+  sudoPath ? "/run/wrappers/bin/sudo",
   name ? "deploy-ai-gate",
 }:
 pkgs.writeShellScriptBin name ''
@@ -43,5 +47,15 @@ pkgs.writeShellScriptBin name ''
   set -- ''${cmd}
   set +f
   shift
-  exec ${sudoPath} -n /run/current-system/sw/bin/deploy-ai "$@"
+
+  # sudo comes from the setuid wrapper directory, which only exists when sudo is enabled; saying so
+  # here beats sudo's `must be owned by uid 0 and have the setuid bit set`.
+  SUDO=${lib.escapeShellArg sudoPath}
+  if [ ! -x "$SUDO" ]; then
+    echo "deploy-ai gate: $SUDO is not executable, so nothing can be deployed." >&2
+    echo "deploy-ai gate: ai needs security.sudo.enable for the setuid copy of sudo to exist." >&2
+    exit 1
+  fi
+
+  exec "$SUDO" -n /run/current-system/sw/bin/deploy-ai "$@"
 ''

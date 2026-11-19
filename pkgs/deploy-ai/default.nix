@@ -15,6 +15,10 @@ let
     pkgs.gnutar
     pkgs.systemd
   ];
+  # The gate has to name sudo's setuid copy, which lives wherever NixOS puts setuid wrappers.  The
+  # default is that path; the module passes `config.security.wrapperDir` so the gate follows the host
+  # rather than a guess.
+  gateFor = sudoPath: pkgs.callPackage ./gate.nix { inherit sudoPath; };
 in
 pkgs.writeShellScriptBin "deploy-ai" ''
   # ssh, tar, curl, and systemctl all come from here; a login shell's PATH under the gate has
@@ -24,8 +28,10 @@ pkgs.writeShellScriptBin "deploy-ai" ''
 ''
 // {
   # The login shell of `deployer`, shipped in the same package so the gate and the tool it guards
-  # cannot drift apart.  The module wires it into /run/current-system/sw and /etc/passwd.
-  gate = pkgs.callPackage ./gate.nix { };
+  # cannot drift apart.  The module wires it into /run/current-system/sw and /etc/passwd, and builds
+  # its own with `gateFor` to name the host's setuid sudo.
+  gateFor = gateFor;
+  gate = gateFor "/run/wrappers/bin/sudo";
 
   # The scope guard needs root on a live host, so its logic is tested here against synthetic trees
   # instead: temp state dir, synthetic baseline, and every path passed through the environment.

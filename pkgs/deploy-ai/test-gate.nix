@@ -17,9 +17,11 @@ let
   gate = pkgs.callPackage gateModule {
     sudoPath = lib.getExe stub;
   };
+  # Built with no sudoPath, so the path baked into it is the one a real host gets.
+  gateDefault = pkgs.callPackage gateModule { };
 in
 pkgs.runCommand "deploy-ai-gate-test"
-  { nativeBuildInputs = [ pkgs.bash ]; }
+  { nativeBuildInputs = [ pkgs.bash pkgs.gnugrep ]; }
   ''
     mkdir -p "$out"
     gate=${gate}/bin/deploy-ai-gate
@@ -81,6 +83,18 @@ pkgs.runCommand "deploy-ai-gate-test"
     }
 
     target=/run/current-system/sw/bin/deploy-ai
+
+    # The default sudo path is the setuid copy, not the store path: sshd's PATH resolves `sudo` to a
+    # read-only store copy whose lack of the setuid bit makes sudo refuse every command.
+    default_gate=${gateDefault}/bin/deploy-ai-gate
+    if grep -qF '/run/wrappers/bin/sudo' "$default_gate" && grep -qF 'exec "$SUDO" -n' "$default_gate"; then
+      echo "ok   - the default gate execs the setuid copy of sudo"
+      pass=$((pass + 1))
+    else
+      echo "FAIL - the default gate does not exec /run/wrappers/bin/sudo:"
+      tail -3 "$default_gate"
+      fail=$((fail + 1))
+    fi
 
     # sshd's login-shell wiring: `-c <command>`.
     run "$gate" -c 'deploy-ai --status'
