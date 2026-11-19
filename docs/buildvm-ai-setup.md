@@ -149,11 +149,12 @@ nixflakes.virtualisation.buildvm.loginKeys.hermes = {
 };
 ```
 
-`buildvm-install` chowns each pair to its `owner`, appends every public half — plus the guest's own
-public half, so root's `deploy-ai` keeps working — to `~builder/.ssh/authorized_keys` on every pass,
-and puts the public halves of the root-owned pairs (plus that same guest key) into the guest's
-`/root/.ssh/authorized_keys`.  `buildvm-provision` uses the pair it owns (`provision.loginKey`,
-root's own), and Hermes `terminal.ssh_key` points at the `hermes` pair.
+`buildvm-install` chowns each pair to its `owner`, appends every public half to
+`~builder/.ssh/authorized_keys` on every pass, and puts the public halves of the **root-owned** pairs
+into the guest's `/root/.ssh/authorized_keys`.  The guest's own outbound key is authorized for
+`builder` only: it is a git deploy key sitting in the agent's home, so accepting it for guest root
+would let anything holding it become root in the guest.  `buildvm-provision` uses the pair it owns
+(`provision.loginKey`, root's own), and Hermes `terminal.ssh_key` points at the `hermes` pair.
 
 agenix decrypts with `config.age.identityPaths`, whose default is `/etc/ssh/ssh_host_ed25519_key`, so
 `ai` needs nothing beyond that host key and a secret encrypted for it:
@@ -376,6 +377,38 @@ registry rejects, or `execute_code` gated by `approvals.unattended_mode` on the 
 `sudo systemctl show hermes-agent -p Environment` and the effective config in `$HERMES_HOME`.
 The bot desktop follows the shell backend (`bot_desktop.placement = "auto"`), so Xvnc/Xfce now run
 inside the guest with software rendering; set `placement = "gateway"` to move them back to `ai`.
+
+### Applying a change the agent made in the guest
+
+The agent edits and commits in `/home/builder/nixflakes`; it does **not** switch the guest.  `builder`
+has no sudo, and the key in its `~/.ssh` is not in the guest's `/root/.ssh/authorized_keys` (§4), so
+there is no route from the agent to guest root.  Activation goes through the gate on `ai`, which is
+the only place holding a root-authorized key:
+
+```bash
+git add -A && git commit -m 'guest: …'      # as builder, in /home/builder/nixflakes
+```
+
+Then on `ai`, the agent's own account reaches the deployer (`§7`), which has sudo for `deploy-ai`:
+
+```bash
+ssh deployer@127.0.0.1 'sudo deploy-ai --repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes --ref main --dry-run'
+ssh deployer@127.0.0.1 'sudo deploy-ai --repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes --ref main'
+```
+
+`deploy-ai` mirrors that repo, refuses anything outside `nixflakes.deploy-ai.allowlist` or outside the
+deployed commit's history, builds `nixosConfigurations.ai` on the VM from a plain copy of the tree,
+copies the closure back, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which streams
+the same tree back into the guest and moves tag `deployed` to that commit (§6) — so the guest ends up
+running exactly what `ai` runs.
+
+Two consequences worth knowing:
+
+* A commit the agent never pushed is still deployable through the VM repo, but provisioning cannot fetch
+  it from `origin`, so it logs `<sha> is not in the guest's checkout` and switches the streamed tree.
+  `git push origin main` makes the history real on both sides.
+* Committed-but-unpushed `main` is reset to the deployed commit on the next pass; the old tip survives
+  only as tag `agent-work` (§6, §11).  Uncommitted work is stashed and restored (§6).
 
 ## 9. Reset or shrink the guest
 

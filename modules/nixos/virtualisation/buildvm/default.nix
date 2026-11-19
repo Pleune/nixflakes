@@ -40,7 +40,9 @@ in
       default = "";
       description = ''
         Public half of the guest's outbound key (the git host's deploy key), written into its ~/.ssh
-        and authorized for the guest's root so units on ai can log in too.  Empty means "no key".
+        and authorized for its ordinary user only.  It is a deploy key for the git host and lives in
+        the agent's home, so it is deliberately *not* in the guest's authorized_keys for root: nothing
+        that holds it may become root inside the guest.  Empty means "no key".
       '';
     };
 
@@ -485,8 +487,9 @@ in
           chown -R "$GUEST_UID:$GUEST_UID" "$SSH_DIR"
           echo "buildvm: grafted ssh keypair for ${cfg.userName}"
 
-          # Root inside the guest, authorized with the keys the host runs as root.  The guest's user
-          # has no sudo, so the provisioning switch and the reboot have to arrive as root.
+          # Root inside the guest, authorized only with the keys ai's own root units hold.  The guest's
+          # user has no sudo and its outbound key is not accepted here, so activation reaches root only
+          # through ai (deploy-ai / buildvm-provision), never from inside the guest.
           ROOT_DIR="$MNT/root/.ssh"
           mkdir -p "$ROOT_DIR"
           : > "$ROOT_DIR/authorized_keys"
@@ -495,9 +498,6 @@ in
             if [ -f "$PUB" ]; then cat "$PUB" >> "$ROOT_DIR/authorized_keys"; fi
           done
           ''}
-          if [ -n "$PUBLIC_KEY" ]; then
-            printf '%s\n' "$PUBLIC_KEY" >> "$ROOT_DIR/authorized_keys"
-          fi
           chmod 700 "$ROOT_DIR"
           chmod 600 "$ROOT_DIR/authorized_keys"
           chown -R 0:0 "$ROOT_DIR"
