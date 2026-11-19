@@ -1,62 +1,53 @@
 # The seed image for the buildvm disk.
 #
-# Its only jobs are to make the raw partition bootable and to be reachable over ssh, so that the
-# real guest system (platforms/buildvm.nix) can be built and switched to from inside the guest.
-# Nothing else lives here, and that is the point:
+# Makes the raw partition bootable and reachable over ssh, so the real guest system
+# (platforms/buildvm.nix) can be built and switched to from inside it.  Nothing else lives here:
 #
-# * Evaluated on its own - no ./modules/nixos, no ./config/nixos - so building it needs neither the
-#   secrets input nor any host module, and it stays cheap enough to rebuild on a whim.
-# * ai passes no kernel or initrd to qemu.  systemd-boot is written into the image's ESP, so the
-#   host's store keeps no copy of the guest's system: `image` is a build-time path the garbage
-#   collector reclaims once the partition has been written (docs/buildvm-ai-setup.md section 5).
+# * Evaluated on its own - no ./modules/nixos, no ./config/nixos - so it needs neither the secrets
+#   input nor a host module, and stays cheap to rebuild.
+# * ai passes no kernel or initrd to qemu; systemd-boot lives in the image's ESP, so `image` is a
+#   build-time path the GC reclaims once the partition is written.
 #
-# The image is small (a bare ext4 root sized to its own closure plus headroom) while the partition
-# it lands on is 1.82 TiB.  boot.growPartition enlarges the partition on boot and `autoResize` on the
-# root filesystem grows ext4 into it, so the host never resizes anything.  Both halves are needed:
-# growpart alone leaves the filesystem at the image's size.
+# The image is small while its partition is 1.82 TiB; boot.growPartition widens the partition on boot
+# and `autoResize` grows ext4 into it.  growpart alone leaves the filesystem at the image's size.
 { config, lib, pkgs, ... }:
 let
-  # No secrets input here by design, so no public key at all: buildvm-install grafts the keypair into
-  # the guest before its first boot, and this closure is streamed into the installer, so keeping the
-  # secrets input out of it keeps the seed image free of key material.
-  #
+  # No secrets input by design, and no public key: buildvm-install grafts the keypair before the first
+  # boot, and this closure is streamed into the installer, so the seed image holds no key material.
   # Must match the name platforms/buildvm.nix and buildvm-install use.
   userName = "builder";
 in
 {
-  # The seed needs the same static addressing as the guest it is replaced by: provisioning sshes in
-  # on the forwarded port, and the first switch has to fetch nixpkgs, which needs a route.
+  # Same static addressing as the guest it is replaced by: provisioning sshes in on the forwarded port,
+  # and the first switch fetches nixpkgs, which needs a route.
   imports = [ ./buildvm-network.nix ];
 
   system.stateVersion = "25.05";
   networking.hostName = "buildvm";
 
   # ── Booting the disk itself ────────────────────────────────────────────────────────
-  # make-disk-image runs switch-to-configuration boot inside a chroot of this system, which is what
-  # installs systemd-boot onto the ESP it creates.  The kernel carries the EFI stub, so OVMF loads
-  # vmlinuz directly; the loader is unsigned, hence ai runs plain pkgs.OVMF rather than OVMFFull.
+  # switch-to-configuration boot runs in make-disk-image's chroot, which installs systemd-boot on the
+  # ESP it creates.  The kernel carries the EFI stub; the loader is unsigned, hence plain pkgs.OVMF.
   system.switch.enable = true;
   boot.loader.grub.enable = false;
   boot.loader.systemd-boot.enable = true;
-  # Writes the boot entry into NVRAM.  That works when the guest runs under ai's OVMF with a
-  # writable variable store; bootctl also installs the ESP fallback path, so a fresh store still
-  # boots without any entry.
+  # Writes the boot entry into NVRAM, which ai's writable variable store allows; bootctl also installs
+  # the ESP fallback path, so a fresh store boots without an entry.
   boot.loader.efi.canTouchEfiVariables = true;
   # Each generation copies its kernel and initrd onto the ESP, so cap how many are kept.
   boot.loader.systemd-boot.configurationLimit = 4;
 
   boot.growPartition = true;
 
-  # Serial console because qemu runs -nographic.  rd.shell=1 so a boot failure lands in a shell on
-  # this console instead of a job that times out silently.
+  # Serial console because qemu runs -nographic; rd.shell=1 puts a boot failure in a shell instead of a
+  # job that times out silently.
   boot.kernelParams = [ "console=ttyS0" "rd.shell=1" "panic=0" ];
   # Only what stage 1 needs to reach root; the ESP is mounted after switch root, where vfat can be
   # loaded from the store.
   boot.initrd.kernelModules = [ "virtio_pci" "virtio_blk" "ext4" ];
 
-  # Matches the ext4 label make-disk-image puts on the image's root partition (the second one under
-  # GPT).  Keep it equal to nixflakes.buildvm.diskImage's label below so a switched system mounts
-  # the same root.
+  # The ext4 label make-disk-image gives the root partition (the second one under GPT).  Keep it equal
+  # to the diskImage label below so a switched system mounts the same root.
   fileSystems."/" = {
     device = "/dev/disk/by-label/buildvm";
     fsType = "ext4";
@@ -64,7 +55,7 @@ in
     autoResize = true;
   };
 
-  # make-disk-image formats the ESP with -n ESP, so label rather than index survives a re-partition.
+  # make-disk-image formats the ESP with -n ESP, so the label survives a re-partition.
   # noCheck: fsck.vfat is not in the initrd.
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/ESP";
@@ -75,8 +66,8 @@ in
   # ── Just enough to build and switch ────────────────────────────────────────────────
   nix.package = pkgs.nixVersions.latest;
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
-  # The agent/human runs `nix nixos-rebuild switch --flake .#buildvm --accept-flake-config` as the
-  # builder user, and trusting a flake's own config requires a trusted user.
+  # The builder user runs `nixos-rebuild switch --flake .#buildvm --accept-flake-config`, and trusting a
+  # flake's own config requires a trusted user.
   nix.settings.allowed-users = [ "*" ];
   nix.settings.trusted-users = [ "root" userName ];
 

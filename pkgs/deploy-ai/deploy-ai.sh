@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# deploy-ai — the only path from "a commit exists somewhere" to "ai is running it".
+# deploy-ai - the only way anything changes ai's system.  Runs as root, normally through the
+# forced-command account deployer, which the build VM's key is authorized for.
 #
-# Runs as root on ai, normally reached through the forced-command account deployer, which the
-# build VM's key is authorized for.  Three guards, in this order:
-#   1. the deployed commit must be an ancestor of the requested commit,
-#   2. the tree diff against the source that produced the running system must stay in the allowlist,
-#   3. a timed reboot guard runs a recorded rollback if the new system is unhealthy.
+# Guards, in order: the deployed commit must be an ancestor of --ref, and the tree diff against the
+# source of the running system must stay inside nixflakes.deploy-ai.allowlist.  After the switch a
+# failed health probe rolls back, backed by a timed reboot guard.
 #
-# The flake is built inside the build VM (qemu on this host) and the resulting store closure is
-# copied back with nix-copy-closure.  Nothing about the repo lives on ai: the caller names a repo
-# with --repo every time.
+# The flake is built inside the build VM (qemu on this host) and its store closure copied back with
+# nix-copy-closure.  No repo lives on ai, so --repo names one on every call that fetches.
 set -euo pipefail
 umask 022
 
@@ -17,33 +15,35 @@ umask 022
 # unprivileged user; the defaults are what the NixOS module installs.
 STATE=${DEPLOY_AI_STATE:-/var/lib/deploy-ai}
 ALLOWLIST=${DEPLOY_AI_ALLOWLIST:-/etc/deploy-ai/allowlist}
-BASELINE_FILE=${DEPLOY_AI_BASELINE_FILE:-/etc/deploy-ai/deployed-source}
-BASELINE_COMMIT=${DEPLOY_AI_BASELINE_COMMIT:-/etc/deploy-ai/deployed-commit}
 MIRROR=$STATE/repo
 AI=ai
 
+# Baseline: the source and revision that produced the running system, recorded in /etc by the
+# module.  DEPLOY_AI_BASELINE names the source directly, DEPLOY_AI_BASELINE_COMMIT the commit file.
+BASELINE_FILE=${DEPLOY_AI_BASELINE_FILE:-/etc/deploy-ai/deployed-source}
+BASELINE_COMMIT=${DEPLOY_AI_BASELINE_COMMIT:-/etc/deploy-ai/deployed-commit}
+BASELINE=${DEPLOY_AI_BASELINE:-}
+if [ -z "$BASELINE" ] && [ -r "$BASELINE_FILE" ]; then
+  BASELINE=$(head -n 1 "$BASELINE_FILE")
+fi
+BASELINE=${BASELINE:-$BASELINE_FILE}
+
+# The guest is ssh as builder on the port qemu forwards, using a key the buildvm module generates.
+# Only its location is published in /etc, so nothing here hardcodes a buildvm path.
 BUILD_HOST=127.0.0.1
 BUILD_PORT=2224
 BUILDER=builder
-# The key the gate uses to reach the guest.  The module writes its location into /etc so the
-# script does not hardcode a path that belongs to the buildvm module.
 BUILD_KEY_FILE=${DEPLOY_AI_BUILD_KEY_FILE:-/etc/deploy-ai/build-key}
 BUILD_KEY=${DEPLOY_AI_BUILD_KEY:-}
 if [ -z "$BUILD_KEY" ] && [ -r "$BUILD_KEY_FILE" ]; then
   BUILD_KEY=$(head -n 1 "$BUILD_KEY_FILE")
 fi
 BUILD_KEY=${BUILD_KEY:-/var/lib/buildvm/secrets/id_ed25519}
-# The module writes the *path* of the deployed source into /etc; the store path itself is held by the
-# system's dependencies, so it survives GC exactly as long as the generation that needs it does.
-BASELINE=${DEPLOY_AI_BASELINE:-}
-if [ -z "$BASELINE" ] && [ -r "$BASELINE_FILE" ]; then
-  BASELINE=$(head -n 1 "$BASELINE_FILE")
-fi
-BASELINE=${BASELINE:-$BASELINE_FILE}
-BUILD_TIMEOUT=3600
 GUEST_CANDIDATE=${DEPLOY_AI_GUEST_CANDIDATE:-/home/builder/deploy-candidate}
 RECORDED_COMMIT=/home/builder/deployed-commit
+BUILD_TIMEOUT=3600
 
+# Health probe and the reboot guard that backs the rollback.
 HEALTH_RETRIES=24
 HEALTH_WAIT=5
 API=http://127.0.0.1:8642/api/v1/health
@@ -86,9 +86,8 @@ need() {
   [ -r "$ALLOWLIST" ] || die "$ALLOWLIST is missing; enable nixflakes.deploy-ai on ai first"
 }
 
-# git over ssh: the guest key is the only identity that certainly exists on ai.  For a repo on the
-# VM it is the only identity accepted, so IdentitiesOnly; for the git host it is offered alongside
-# whatever root has, so a host-side deploy key can still cover that fetch.
+# git over ssh, using the guest key.  For a repo on the VM it is the only identity accepted, so
+# IdentitiesOnly; for a git host it is offered alongside whatever root has.
 ssh_command() {
   case $REPO in
     *127.0.0.1:* | *localhost:*)
@@ -116,6 +115,13 @@ mirror() {
     || die "cannot fetch $REPO; check the URL and that root's key (or the VM key) is authorized"
 }
 
+acquire_lock() {
+  mkdir "$STATE" 2>/dev/null || true
+  mkdir "$STATE/lock" 2>/dev/null || die "another deploy-ai is running ($STATE/lock exists); wait for it"
+}
+
+# ------------------------------------------------------------------ scope and history guards
+
 parse_allowlist() {
   awk 'NF && $1 !~ /^#/ { print $1 }' "$ALLOWLIST"
 }
@@ -139,8 +145,7 @@ in_scope() {
   return 1
 }
 
-# Makes a refusal actionable: names the allowlist entries that already cover the refused path's
-# neighbourhood, so the agent can move the change instead of guessing.
+# Makes a refusal actionable by naming the entries that already cover the refused path's area.
 nearest_dir() {
   local path=$1 dir entry hits=
   dir=$(dirname "$path")
@@ -155,12 +160,10 @@ nearest_dir() {
   done <<< "$(parse_allowlist)"
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits"
-  else
-    if [ "$dir" = "." ]; then
+  elif [ "$dir" = "." ]; then
     printf 'no top-level files are allowed\n'
   else
     printf 'nothing under %s is allowed\n' "$dir"
-  fi
   fi
 }
 
@@ -182,8 +185,8 @@ baseline_commit() {
   else
     die "no baseline commit recorded; ask the operator to deploy $AI once out-of-band"
   fi
-  # A switch built from a dirty tree records `<rev>-dirty`, which is no commit.  Compare against
-  # the commit the snapshot came from; the uncommitted part is still caught by the content diff.
+  # A switch from a dirty tree records `<rev>-dirty`, which is no commit; compare against the
+  # commit the snapshot came from, since the uncommitted part is caught by the content diff.
   case $base in
     *-dirty)
       base=${base%-dirty}
@@ -193,12 +196,12 @@ baseline_commit() {
   printf '%s\n' "$base"
 }
 
-# Every path that differs between the source the running system came from and the candidate tree.
-# Content comparison, not just names: a rewritten history cannot hide a changed file.
+# Every path that differs between the baseline source and the candidate tree.  Content comparison,
+# not names: a rewritten history cannot hide a changed file.
 changed_paths() {
   local candidate=$1 out
-  # diff exits 1 when files differ, which under `set -o pipefail` would otherwise abort the caller
-  # on every deploy that actually changes something.
+  # diff exits 1 when files differ; under pipefail that would abort every deploy that changes
+  # something.
   out=$(diff -rq \
     --exclude=.git --exclude=.direnv --exclude=.ralph --exclude=result \
     --exclude=state.json --exclude=secrets --exclude=nix-support \
@@ -209,8 +212,8 @@ changed_paths() {
         print p; next
       }
       /^Only in / {
-        # diff -rq names a whole new/removed directory rather than the files inside it; refusing
-        # the directory is the right granularity, but the path must stay repo-relative.
+        # diff -rq names a new or removed directory, not the files in it; that is the right
+        # granularity to refuse, and the path stays repo-relative.
         p = $0; sub(/^Only in /, "", p);
         dir = p; sub(/: .*$/, "", dir);
         name = p; sub(/^.*: /, "", name);
@@ -236,33 +239,17 @@ check_scope() {
   done <<< "$(changed_paths "$candidate")"
 }
 
-acquire_lock() {
-  mkdir "$STATE" 2>/dev/null || true
-  mkdir "$STATE/lock" 2>/dev/null || die "another deploy-ai is running ($STATE/lock exists); wait for it"
-}
-
-arm_guard() {
-  [ "$DRY_RUN" -eq 1 ] && return 0
-  if systemctl reboot --when "+${GUARD_MINUTES}m" 2>/dev/null; then
-    echo "deploy-ai: guard armed: reboot in ${GUARD_MINUTES}m unless cancelled by a healthy switch"
-  else
-    echo "deploy-ai: warning: timed reboot unavailable; no automatic reboot on a hang" >&2
-  fi
-}
-
-cancel_guard() {
-  systemctl cancel --when 2>/dev/null || true
-}
-
 # ------------------------------------------------------------------ build
 
+# ssh into the guest.  Guest-side paths are single-quoted inside the command and are only ever
+# values set above, never guest-supplied text, so the guest cannot reach outside /home/builder.
 vm_ssh() {
   ssh -i "$BUILD_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
       -o ConnectTimeout=10 -p "$BUILD_PORT" "$BUILDER@$BUILD_HOST" "$@"
 }
 
-# Hand the candidate tree to the VM as plain files.  The VM does not need repo access to build;
-# only its own key for the flake inputs that are git-hosted.
+# Hand the candidate tree over as plain files; the VM needs no repo access to build, only its own
+# key for git-hosted flake inputs.
 send_candidate() {
   git --git-dir="$MIRROR" archive --format=tar "$SHA" \
     | vm_ssh "rm -rf '$GUEST_CANDIDATE' && mkdir -p '$GUEST_CANDIDATE' && tar -x -C '$GUEST_CANDIDATE'" \
@@ -356,6 +343,20 @@ record_in_guest() {
     || echo "deploy-ai: warning: could not write $RECORDED_COMMIT in the VM" >&2
 }
 
+# The guard is a timed reboot: if the new system hangs, boot finds the recorded rollback.
+arm_guard() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  if systemctl reboot --when "+${GUARD_MINUTES}m" 2>/dev/null; then
+    echo "deploy-ai: guard armed: reboot in ${GUARD_MINUTES}m unless cancelled by a healthy switch"
+  else
+    echo "deploy-ai: warning: timed reboot unavailable; no automatic reboot on a hang" >&2
+  fi
+}
+
+cancel_guard() {
+  systemctl cancel --when 2>/dev/null || true
+}
+
 # ------------------------------------------------------------------ commands
 
 do_status() {
@@ -380,8 +381,8 @@ do_deploy() {
 
   acquire_lock
   WORK=$(mktemp -d /tmp/deploy-ai-tree.XXXXXXXX)
-  # One trap for both resources: a second `trap … EXIT` would replace the first, and the lock
-  # directory would outlive the run.
+  # One trap for both resources: a second `trap ... EXIT` would replace the first and leave the
+  # lock directory behind.
   trap 'rm -rf "$WORK"; rmdir "$STATE/lock" 2>/dev/null || true' EXIT INT TERM
   git --git-dir="$MIRROR" archive --format=tar "$SHA" | tar -x -C "$WORK"
   check_scope "$WORK"
@@ -391,6 +392,7 @@ do_deploy() {
   CURRENT=$(current_system)
   record_rollback "$CURRENT"
 
+  # The current system must be healthy before a switch, or the switch hides an existing break.
   if ! check_health; then
     clear_rollback
     die "the CURRENT system is already unhealthy; switching would hide that.  Fix it out-of-band or reboot $AI"

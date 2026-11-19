@@ -116,10 +116,9 @@ in
       };
     };
 
-    # The guest user has no sudo at all: it has no password, and nixpkgs' wheel rule therefore makes
-    # `sudo` fail rather than fall back to the password-less `%wheel` rule.  Anything that needs root
-    # inside the guest comes in over ssh as root, which keeps one auditable path instead of a
-    # passwordless root shell for whatever runs as the builder user.
+    # The guest user has no sudo: it has no password, so nixpkgs' wheel rule fails rather than falling
+    # back to the password-less `%wheel` rule.  Root work arrives over ssh as root, which keeps one
+    # auditable path instead of a passwordless root shell for the builder user.
     security.sudo.extraConfig = ''
       Defaults !lecture
     '';
@@ -129,7 +128,7 @@ in
       name = "buildvm-disk";
       label = "buildvm";
       format = "raw";
-      # GPT with an ESP and an ext4 root, matching the loader config above; the root is the partition
+      # GPT with an ESP and an ext4 root, matching the loader above; root is the partition
       # boot.growPartition grows.
       partitionTableType = "efi";
       touchEFIVars = true;

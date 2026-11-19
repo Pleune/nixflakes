@@ -2,8 +2,7 @@
 with lib;
 let
   cfg = config.nixflakes.virtualisation.buildvm;
-  # Provisioning always gets a key of its own when it is enabled; loginKeys adds the other consumers
-  # (Hermes, tooling).
+  # Provisioning always gets its own key; loginKeys add the other consumers (Hermes, tooling).
   loginKeyList =
     lib.optionals cfg.provision.enable [
       { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; }
@@ -21,8 +20,8 @@ in
       type = types.str;
       example = "/dev/disk/by-partlabel/buildvm";
       description = ''
-        Raw block device passed straight through as the guest's only disk.  Created by hand
-        (docs/buildvm-ai-setup.md section 3); the guest owns its partition table and filesystem, so
+        Raw block device passed through as the guest's only disk, created by hand
+        (docs/buildvm-ai-setup.md section 3).  The guest owns its partition table and filesystem, so
         the host never mounts it.
       '';
     };
@@ -31,9 +30,8 @@ in
       type = types.nullOr types.path;
       default = null;
       description = ''
-        make-disk-image output directory, whose `*.img` is the bootable raw image (GPT partition
-        table, systemd-boot on its ESP) written onto disk on first boot.  The image is a build-time
-        path, not a runtime root: nothing in the host's store belongs to the guest.
+        make-disk-image output directory whose `*.img` is written onto disk on first boot: a bootable
+        raw image with a GPT table and systemd-boot on its ESP.
       '';
     };
 
@@ -41,9 +39,8 @@ in
       type = types.str;
       default = "";
       description = ''
-        Public half of the keypair the guest authenticates *outbound* with (the git host's deploy key),
-        written into the guest's ~/.ssh and left in its authorized_keys so root units on ai can also
-        log in with it.  Empty means "write no key".
+        Public half of the guest's outbound key (the git host's deploy key), written into its ~/.ssh
+        and authorized for the guest's root so units on ai can log in too.  Empty means "no key".
       '';
     };
 
@@ -51,8 +48,8 @@ in
       type = types.str;
       default = "/var/lib/buildvm/secrets/id_ed25519";
       description = ''
-        Private half of the guest's outbound keypair, decrypted by agenix and grafted into the guest as
-        the build user's own ssh identity.  Only root reads it on the host, so it can stay 0600.
+        Private half of the guest's outbound key: agenix-decrypted, grafted in as the build user's ssh
+        identity, root-only on the host so it stays 0600.
       '';
     };
 
@@ -60,15 +57,13 @@ in
       type = types.str;
       default = "/var/lib/buildvm/keys";
       description = ''
-        Where buildvm-install generates the host-side keypairs that log *into* the guest, one directory
-        per consumer.
+        Where buildvm-install generates the host-side logins, one directory per consumer.
       '';
     };
 
-    # ssh refuses to use a private key whose permissions let anyone other than its owner read it: on
-    # ai the hermes units reported `Permissions 0640 for '/run/agenix/ai_buildvm_id_ed25519' are too
-    # open` / `This private key will be ignored` for a root:hermes 0640 file.  A shared, group-readable
-    # key is therefore unusable, so each consumer gets its own generated pair.
+    # ssh ignores a private key anyone else can read (on ai: `Permissions 0640 for
+    # '/run/agenix/ai_buildvm_id_ed25519' are too open`), so a shared key is unusable and every
+    # consumer gets its own generated pair.
     loginKeys = mkOption {
       type = types.attrsOf (types.submodule ({ name, ... }: {
         options = {
@@ -99,8 +94,8 @@ in
       }));
       default = { };
       description = ''
-        Host keypairs buildvm-install generates on first run and authorizes in the guest.  Give one per
-        user that sshes into the guest (Hermes, ad-hoc tooling); provisioning has its own option.
+        Host keypairs buildvm-install generates on first run and authorizes in the guest, one per user
+        that sshes in.  Provisioning has its own option.
       '';
     };
 
@@ -108,8 +103,8 @@ in
       type = types.str;
       default = cfg.privateKeyPath;
       description = ''
-        Where the private half is written inside the guest, as builder's own ssh key, so the guest
-        authenticates outbound with the identity the git host and ai already trust.
+        Where the private half lands inside the guest as builder's ssh key, so the guest authenticates
+        outbound with the identity the git host and ai already trust.
       '';
     };
 
@@ -119,11 +114,9 @@ in
       description = "Loopback port forwarded to the guest sshd (qemu user-mode networking).";
     };
 
-    # qemu's user-mode network is a NAT to whatever ai can reach, and pinning the subnet is what
-    # makes it usable: this qemu build's own defaults hand the guest an address in 240.0.0.0/24 with
-    # no default route and no resolver, so nothing the guest builds (nixpkgs, the git host) is
-    # reachable.  These four values are the guest's configuration too - see
-    # platforms/buildvm-network.nix, which mirrors them.
+    # Pinning the NAT subnet is what makes the guest reachable: this qemu build's defaults give it an
+    # address in 240.0.0.0/24 with no route and no resolver.  platforms/buildvm-network.nix mirrors
+    # these values as the guest's own configuration.
     netSubnet = mkOption {
       type = types.str;
       default = "10.0.2.0/24";
@@ -140,8 +133,8 @@ in
       type = types.str;
       default = "10.0.2.3";
       description = ''
-        qemu's built-in resolver, which forwards to ai's resolver.  qemu only forwards UDP/53 to it
-        from inside its own NAT, so the guest cannot use ai's nameservers directly.
+        qemu's built-in resolver, forwarding to ai's.  qemu forwards UDP/53 only from inside its NAT,
+        so the guest cannot use ai's nameservers directly.
       '';
     };
 
@@ -149,8 +142,7 @@ in
       type = types.str;
       default = "10.0.2.15";
       description = ''
-        Address qemu hands the guest (its DHCP pool starts here); platforms/buildvm-network.nix
-        assigns the same address statically instead of relying on DHCP.
+        Address qemu hands the guest (its DHCP pool starts here); the guest assigns it statically.
       '';
     };
 
@@ -158,17 +150,15 @@ in
       type = types.str;
       default = "52:54:00:12:34:56";
       description = ''
-        MAC address qemu gives the guest's NIC.  It is pinned because the guest configures that
-        interface by matching this MAC: predictable interface names are not stable across generations
-        of this VM, and a network unit that stops matching leaves the card DOWN with no address.
-        platforms/buildvm-network.nix mirrors this value.
+        MAC of the guest's NIC.  It is pinned because the guest matches its network unit on the MAC:
+        predictable interface names are not stable in this VM, and a unit that stops matching leaves
+        the card DOWN with no address.
       '';
     };
 
-    # The guest boots UEFI, so qemu needs a firmware image plus somewhere to keep its variables.
-    # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot (which would reject the
-    # unsigned systemd-boot NixOS installs) and requires SMM, i.e. -machine q35,smm=on and a secure
-    # pflash global, for features a local build VM has no use for.
+    # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot, which would reject the
+    # unsigned systemd-boot NixOS installs, and needs SMM plus a second pflash for features a local
+    # build VM has no use for.
     firmware = mkOption {
       type = types.path;
       default = pkgs.OVMF.firmware;
@@ -187,8 +177,8 @@ in
       type = types.str;
       default = "/var/lib/buildvm/efi-vars.fd";
       description = ''
-        Writable OVMF variable store, so the boot entry the guest writes into NVRAM survives a
-        reboot.  Deleting it resets the firmware to the template above.
+        Writable OVMF variable store, so the boot entry the guest writes into NVRAM survives a reboot.
+        Deleting it resets the firmware to the template above.
       '';
     };
 
@@ -196,8 +186,8 @@ in
       type = types.str;
       default = "buildvm";
       description = ''
-        ext4 label of the guest's root partition, used to find it inside the image during
-        provisioning.  Under GPT the root is the second partition, not the first.
+        ext4 label of the guest's root partition, used to find it inside the image.  Under GPT the root
+        is the second partition, not the first.
       '';
     };
 
@@ -227,9 +217,9 @@ in
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Where the secrets tree lands in the guest, passed as `--override-input private` so the
-          switch resolves the `private` input from disk instead of over ssh.  It is a copy of the
-          whole `private` input, flake.nix included, so that override is a valid flake.
+          Where the secrets tree lands in the guest, passed as `--override-input private` so the switch
+          reads secrets from disk instead of over ssh.  A copy of the whole `private` input including
+          its flake.nix, so the override is a valid flake.
         '';
       };
 
@@ -237,9 +227,8 @@ in
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path on ai whose contents are streamed into secretsDir by buildvm-provision, normally the
-          `private` input ai itself evaluated against.  A plain copy, not a git checkout: the guest
-          reads the same secrets ai used and needs no deploy key for the secrets repo.
+          Path on ai streamed into secretsDir, normally the `private` input ai evaluated against.  A
+          plain copy, so the guest reads the same secrets without a key for the secrets repo.
         '';
       };
 
@@ -249,8 +238,8 @@ in
         example = "/nix/store/...-source";
         description = ''
           Directory on ai holding the nixflakes tree ai was built from, streamed into the guest's
-          workdir by buildvm-provision.  Provisioning rather than seeding because the guest must
-          switch to the tree this machine is running, which only exists once ai has been deployed.
+          workdir.  Placed by provisioning, not seeding: the tree to switch to only exists once ai has
+          been deployed.
         '';
       };
 
@@ -258,11 +247,10 @@ in
         type = types.str;
         default = "";
         description = ''
-          Remote the guest's checkout is pointed at, so the agent inside the VM can push, and the
-          source provisioning fetches commits from.  It uses the outbound keypair buildvm-install
-          grafts into `~${cfg.userName}/.ssh`.  A deploy built from a commit that was never pushed has
-          nothing here to fetch, which provisioning reports and then works around by switching the
-          streamed tree as it stands.
+          The guest's `origin`: what provisioning fetches commits from and what the agent pushes to,
+          using the outbound key buildvm-install grafts into `~${cfg.userName}/.ssh`.  A commit that was
+          never pushed has nothing to fetch here, which provisioning warns about and works around by
+          switching the streamed tree as it stands.
         '';
       };
 
@@ -270,8 +258,8 @@ in
         type = types.str;
         default = "";
         description = ''
-          Commit the guest should be on, normally `self.rev` of the source ai was deployed from.  Empty
-          means fall back to the file deploy-ai records in the guest.
+          Commit the guest should be on, normally `self.rev` of ai's deploy.  Empty falls back to the
+          file deploy-ai records in the guest.
         '';
       };
 
@@ -279,9 +267,8 @@ in
         type = types.str;
         default = "${cfg.loginKeysDir}/provision/id_ed25519";
         description = ''
-          Root-owned keypair provisioning logs into the guest with, generated by buildvm-install.  It is
-          deliberately not the guest's outbound key: ssh needs a key the invoking user owns, and that
-          key is grafted into the guest.
+          Root-owned keypair provisioning sshes with, generated by buildvm-install.  Deliberately not
+          the guest's outbound key: ssh needs a key its invoking user owns.
         '';
       };
 
@@ -289,8 +276,8 @@ in
         type = types.str;
         default = "root";
         description = ''
-          Guest user that runs the activation (the switch and the reboot).  The ordinary guest user has
-          no sudo, so this must be a user buildvm-install authorized with a root-owned login key.
+          Guest user that runs the switch and the reboot.  The ordinary guest user has no sudo, so this
+          must be one buildvm-install authorized with a root-owned login key.
         '';
       };
 
@@ -298,8 +285,7 @@ in
         type = types.str;
         default = "/home/${cfg.userName}/deployed-commit";
         description = ''
-          Guest file naming the commit to apply.  deploy-ai writes it after each successful ai
-          deploy, so the guest ends up on the same tree the deploy was cut from.
+          Guest file naming the commit to apply; deploy-ai writes it after each successful deploy.
         '';
       };
 
@@ -307,9 +293,8 @@ in
         type = types.str;
         default = "/var/lib/buildvm/guest-known_hosts";
         description = ''
-          Root-owned known_hosts holding the guest's sshd host key, used only by the provisioning
-          ssh.  buildvm-install deletes it when it writes a fresh image, so a reseed re-trusts the
-          guest's new key instead of failing on a changed fingerprint.
+          Root-owned known_hosts for the provisioning ssh.  buildvm-install deletes it when it writes a
+          fresh image, so a reseed re-trusts the guest's new host key.
         '';
       };
 
@@ -540,13 +525,11 @@ in
     };
 
     # Put the guest's own NixOS config onto the guest.  Until this runs, the machine behind
-    # `ssh -p ${toString cfg.sshPort}` is the seed image (platforms/buildvm-bootstrap.nix): a
-    # shell with git and sshd, no desktop, no gc, no sudo.  This unit streams ai's deployed nixflakes
-    # tree and ai's secrets tree into the guest over ssh, then switches the guest onto that commit -
-    # one pass per changed commit rather than a build on every boot.
+    # `ssh -p ${toString cfg.sshPort}` is the seed image (platforms/buildvm-bootstrap.nix): git and
+    # sshd, no desktop, no gc, no sudo.  This unit streams ai's nixflakes and secrets trees into the
+    # guest over ssh and switches the guest onto that commit - one pass per changed snapshot.
     #
-    # The commit to apply is `provision.targetCommit`, else the one deploy-ai recorded, i.e. the tree
-    # the running ai came from.
+    # The commit is `provision.targetCommit`, else what deploy-ai recorded: the tree ai came from.
     systemd.services.buildvm-provision = mkIf cfg.provision.enable {
       description = "Apply the buildvm guest's own NixOS config inside the guest";
       wantedBy = [ "multi-user.target" ];
@@ -574,16 +557,15 @@ in
         SECRETS_SRC=${escapeShellArg (cfg.provision.secretsSource or "")}
         SECRETS=${escapeShellArg (cfg.provision.secretsDir or "")}
         COMMIT=${escapeShellArg cfg.provision.targetCommit}
-        # The snapshot's store name hashes its contents, so it says exactly what this machine runs,
-        # whether or not the deploy pointed at a commit.
+        # The snapshot's store name hashes its contents, so it identifies what this machine runs even
+        # when the deploy pointed at no commit.
         SNAPSHOT=$(basename "$SOURCE")
-        # Quote the whole flag: unquoted, `OVERRIDE=--override-input private /path` would assign
-        # only the first word and then try to run `private` as a command.
+        # Quote the whole flag: unquoted, `OVERRIDE=--override-input private /path` would bind only the
+        # first word and then run `private` as a command.
         OVERRIDE=${optionalString (cfg.provision.secretsDir != null) (escapeShellArg "--override-input private ${cfg.provision.secretsDir}")}
 
-        # Trust-on-first-use against a file of our own: the guest key is not in root's known_hosts,
-        # and buildvm-install deletes this file whenever it writes a fresh image, so a reseed re-trusts
-        # automatically while a key that changes under a running guest still fails.
+        # Trust-on-first-use against our own file: buildvm-install deletes it on a fresh image, so a
+        # reseed re-trusts while a key changing under a running guest still fails.
         KNOWN=${escapeShellArg cfg.provision.knownHostsFile}
         mkdir -p "$(dirname "$KNOWN")"
         gssh() {
@@ -591,31 +573,27 @@ in
             -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$USER@127.0.0.1" "$@"
         }
 
-        # Activation runs as root: ${cfg.userName} has no sudo in the guest, and buildvm-install
-        # authorizes this same key for ${cfg.provision.activationUser}.
+        # Activation is root: ${cfg.userName} has no sudo, and buildvm-install authorizes this key for
+        # ${cfg.provision.activationUser}.
         gssh_root() {
           ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$KNOWN" -p "$PORT" "$ROOT_USER@127.0.0.1" "$@"
         }
 
-        # Hands a directory to the build user.  It has to be root doing this: the guest may already
-        # hold one of these paths owned by root, because generations before provisioning streamed
-        # placed the checkouts while mounting the image, and a root-owned directory makes both tar
-        # extraction and `git init` fail for ${cfg.userName} with nothing a builder login can do about
-        # it.  Ownership is fixed recursively so a stale tree becomes usable instead of fatal.
+        # Hand a directory to the build user, as root: an earlier generation may have left it root-owned
+        # while mounting the image, and that makes tar extraction and `git init` fail for
+        # ${cfg.userName}.  Recursive, so a stale tree becomes usable instead of fatal.
         prepare_dir() {
           DEST="$1"
-          # Owner only, no group: the guest's build user has no group of its own (NixOS puts
-          # isNormalUser in `users` unless told otherwise), so `builder:builder` is not a valid spec and
-          # chown would abort the whole run.
+          # Owner only: the guest's build user has no group of its name (NixOS puts isNormalUser in
+          # `users` unless told otherwise), so `builder:builder` would abort the run.
           gssh_root "mkdir -p '$DEST' && chown -R '$USER' '$DEST'" \
             || { echo "buildvm-provision: cannot hand $DEST to $USER" >&2; return 1; }
         }
 
-        # Streams a directory's contents into the guest, creating the directory first.  Tar over ssh
-        # rather than scp because a tree arrives in one stream, an existing directory is refreshed in
-        # place, and everything lands owned by the user sshd logged in as.  A tree that does not arrive
-        # must stop the run: switching whatever is already on disk would provision the wrong thing.
+        # Stream a directory into the guest, creating it first.  Tar over ssh, not scp: one stream, an
+        # existing directory refreshed in place, everything owned by the logged-in user.  A tree that
+        # fails to arrive stops the run, because switching what is on disk provisions the wrong thing.
         stream_dir() {
           SRC="$1"
           DEST="$2"
@@ -626,8 +604,7 @@ in
           prepare_dir "$DEST" || return 1
           tar -C "$SRC" -cf - . | gssh "tar -xf - -C '$DEST'" \
             || { echo "buildvm-provision: streaming $SRC into $DEST failed" >&2; return 1; }
-          # A Nix store tree is read-only (0444 files, 0555 directories) and tar keeps those modes, so a
-          # streamed checkout could never be rewritten by git.  Widen the owner's bits on the copy only.
+          # A store tree is 0444/0555 and tar keeps those modes, so git could never rewrite the copy.
           gssh "chmod -R u+w '$DEST'" \
             || { echo "buildvm-provision: could not make $DEST writable" >&2; return 1; }
         }
@@ -643,10 +620,9 @@ in
           exit 1
         fi
 
-        # The snapshot decides whether there is anything to do.  A commit sha would not: a deploy from
-        # a dirty tree keeps the sha while its contents change, and skipping on the sha alone would
-        # leave the guest behind.  With no snapshot there is no identity to compare, and nothing to
-        # stream, so this is a configuration error rather than an up-to-date guest.
+        # The snapshot decides whether there is work.  A sha would not: a dirty-tree deploy keeps its sha
+        # while contents change.  With no snapshot there is nothing to compare or stream, so that is a
+        # configuration error, not an up-to-date guest.
         if [ -z "$SOURCE" ]; then
           echo "buildvm-provision: provision.sourcePath is unset, so there is nothing to put in the guest" >&2
           exit 1
@@ -656,9 +632,8 @@ in
           exit 0
         fi
 
-        # Capture the agent's own uncommitted work before anything is streamed.  Streaming overwrites
-        # files in place, so stashing afterwards would capture the host's tree rather than the agent's
-        # edits, which is the opposite of what the stash is for.
+        # Capture the agent's uncommitted work before streaming: streaming overwrites in place, so
+        # stashing afterwards would save the host's tree instead of the agent's edits.
         STASHED=""
         if gssh "git -C '$WORK' rev-parse --git-dir >/dev/null 2>&1" \
            && [ -n "$(gssh "git -C '$WORK' status --porcelain")" ]; then

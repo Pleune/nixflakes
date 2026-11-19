@@ -82,8 +82,10 @@ Check it from inside the guest:
 ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'
 ```
 
-which should show `default via 10.0.2.2 dev ens3` and an address. Without the `default` line nothing
-outbound works, however good the keys are.
+which should show `default via 10.0.2.2 dev <interface>` and an address on `10.0.2.15/24`. The
+interface name is whatever predictable naming gives this boot (`ens3`, `enp0s3`, …) — the unit matches
+the pinned MAC, so the name is not the thing to check. Without the `default` line nothing outbound
+works, however good the keys are.
 
 ## 3. Partition the disk
 

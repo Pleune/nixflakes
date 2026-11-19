@@ -1,19 +1,15 @@
 # The deploy gate on ai: the only path from "a commit exists somewhere" to "ai is running it".
 #
-# There is no repo on ai.  deploy-ai is told, per call, which repo to read (--repo), checks that
-# the deployed commit is an ancestor of the requested one, and that the tree diff against the
-# source that produced the running system stays inside the allowlist.
-#
-# Two accounts, both keyed with the same public key the build VM holds:
-#   deployer  forced command that only runs deploy-ai (via sudo), for the agent's terminal.
-#   root      not exposed; deploys from outside the VM go through the normal ssh.
+# There is no repo on ai: deploy-ai is told per call which repo to read, checks that the deployed
+# commit is an ancestor of the requested one, and refuses a tree diff outside
+# nixflakes.deploy-ai.allowlist.  Two accounts share the build VM's public key: deployer, whose
+# forced command is the gate, and root, which is not exposed to the VM.
 { config, lib, pkgs, ... }:
 let
   cfg = config.nixflakes.deploy-ai;
 
-  # sshd runs "$SHELL -c <command>", so the whole client command arrives as $1.  Accept only a
-  # deploy-ai invocation and hand it to sudo; everything else is refused.  This is a guardrail
-  # against mistakes, not a sandbox: the agent could only ever reach what sudo allows.
+  # sshd runs "$SHELL -c <command>", so the client command arrives as $1.  Only a deploy-ai
+  # invocation reaches sudo: a guardrail against mistakes, not a sandbox.
   gate = pkgs.writeShellScriptBin "deploy-ai-gate" ''
     case ''${1:-} in
       deploy-ai | 'deploy-ai '*)
@@ -43,8 +39,7 @@ in
       description = "Root-owned state: last deployed toplevel, commit, logs, lock.";
     };
 
-    # The flake source that produced the running system, pinned by system.extraDependencies so it
-    # cannot be collected.  This is the baseline deploy-ai diffs candidates against.
+    # The flake source that produced the running system; deploy-ai diffs candidates against it.
     deployedSource = lib.mkOption {
       type = with lib.types; nullOr path;
       default = null;
@@ -64,8 +59,8 @@ in
       description = "Path prefixes the agent may change; deploy-ai reads them from /etc.";
     };
 
-    # Only the *location* of the key goes into /etc; the key itself stays root-owned under
-    # nixflakes.virtualisation.buildvm.stateDir.
+    # Only the key's location goes into /etc; the key itself stays root-owned under the buildvm
+    # state dir.
     buildKey = lib.mkOption {
       type = lib.types.str;
       default = "";
@@ -93,9 +88,8 @@ in
       home = "/var/lib/deployer";
       # Locked password: key-only, and ssh keys alone cannot run an interactive shell.
       hashedPassword = "*";
-      # NixOS turns a shellPackage into /run/current-system/sw<shellPath>, so the gate has to be an
-      # installed executable, not a bare store directory; writeShellScriptBin does not set
-      # shellPath, hence the explicit addition.
+      # shellPackage becomes /run/current-system/sw<shellPath>, and writeShellScriptBin sets no
+      # shellPath, so the gate is added explicitly.
       shell = gate // { shellPath = "/bin/deploy-ai-gate"; };
       openssh.authorizedKeys.keys = lib.optional (cfg.publicKey != "") cfg.publicKey;
     };
@@ -105,8 +99,8 @@ in
       deployer ALL=(root) NOPASSWD: /run/current-system/sw/bin/deploy-ai
     '';
 
-    # git and curl are what deploy-ai shells out to; the gate belongs in the system path because
-    # that is where /etc/passwd points deployer's shell.
+    # git and curl are what deploy-ai shells out to, and the gate belongs in the system path
+    # because /etc/passwd points deployer's shell there.
     environment.systemPackages = [ pkgs.deploy-ai pkgs.git pkgs.curl gate ];
 
     environment.etc."deploy-ai/allowlist".text =
@@ -116,18 +110,16 @@ in
       cfg.buildKey + "\n"
     );
 
-    # The baseline: what the running system was built from, and its revision.  deploy-ai diffs
-    # candidate trees against this, so a force-reinstall or a rewritten history cannot hide a
-    # change to a protected path.
+    # The baseline deploy-ai diffs candidate trees against, so a force-reinstall or a rewritten
+    # history cannot hide a change to a protected path.
     environment.etc."deploy-ai/deployed-commit".text = cfg.deployedCommit + "\n";
 
     # The store path, not its contents: deploy-ai reads the baseline out of here.
     environment.etc."deploy-ai/deployed-source".text =
       lib.optionalString (cfg.deployedSource != null) (cfg.deployedSource + "\n");
 
-    # Holding this in the system's dependencies keeps the store path alive across GC for as long
-    # as this generation is reachable (current or rollback), which is exactly as long as the diff
-    # baseline is meaningful.
+    # Keeps the baseline store path alive across GC for exactly as long as this generation is
+    # reachable, which is how long the diff baseline stays meaningful.
     system.extraDependencies =
       lib.optionals (cfg.deployedSource != null) [ cfg.deployedSource ];
 
@@ -136,8 +128,8 @@ in
       "d ${cfg.stateDir}/log 0700 root root -"
     ];
 
-    # On a boot where deploy-ai left the timed reboot guard armed, roll the recorded previous
-    # generation back before anything else can fail again.  Runs once, and only when told to.
+    # If a guarded reboot happens, roll the recorded generation back before anything else can
+    # fail again.  Runs once, and only when rollback-pending says so.
     systemd.services."deploy-ai-boot-rollback" = {
       description = "Roll back a failed deploy-ai switch on boot";
       wantedBy = [ "multi-user.target" ];

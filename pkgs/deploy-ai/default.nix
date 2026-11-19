@@ -1,9 +1,9 @@
 { lib, pkgs }:
-# repo-local logic, no upstream counterpart, so no update.sh.
+# repo-local logic, no upstream counterpart, so no update.sh.  The script is inlined verbatim.
 pkgs.writeShellScriptBin "deploy-ai" (builtins.readFile ./deploy-ai.sh)
 // {
-  # The scope guard is the part worth testing: it runs as root on a real host, so its allowlist
-  # logic gets checked here against synthetic trees instead of against a live switch.
+  # The scope guard needs root on a live host, so its allowlist logic is tested here against
+  # synthetic trees instead.
   passthru.tests.scope = pkgs.runCommand "deploy-ai-scope-test" { } ''
     mkdir -p "$out"
     cp ${./deploy-ai.sh} deploy-ai.sh
