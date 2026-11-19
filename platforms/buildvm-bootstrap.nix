@@ -11,8 +11,9 @@
 #   collector reclaims once the partition has been written (docs/buildvm-ai-setup.md section 5).
 #
 # The image is small (a bare ext4 root sized to its own closure plus headroom) while the partition
-# it lands on is 1.82 TiB, so boot.growPartition grows the root partition and filesystem on the
-# guest's first boot; the host never resizes anything.
+# it lands on is 1.82 TiB.  boot.growPartition enlarges the partition on boot and `autoResize` on the
+# root filesystem grows ext4 into it, so the host never resizes anything.  Both halves are needed:
+# growpart alone leaves the filesystem at the image's size.
 { config, lib, pkgs, ... }:
 let
   # No secrets input here by design, so no public key: buildvm-install grafts the keypair into the
@@ -56,6 +57,8 @@ in
   fileSystems."/" = {
     device = "/dev/disk/by-label/buildvm";
     fsType = "ext4";
+    # See platforms/buildvm.nix: the seed boots first, so it has to grow the filesystem too.
+    autoResize = true;
   };
 
   # make-disk-image formats the ESP with -n ESP, so label rather than index survives a re-partition.

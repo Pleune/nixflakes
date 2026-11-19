@@ -48,8 +48,12 @@ in
     boot.loader.efi.canTouchEfiVariables = true;
     boot.loader.systemd-boot.configurationLimit = 4;
 
-    # The image's root partition is a few GiB; the disk it lands on is 1.82 TiB.  The guest grows
-    # the partition and the filesystem itself, on boot, before anything else mounts root.
+    # The image's root partition is a few GiB; the disk it lands on is 1.82 TiB.  `boot.growPartition`
+    # only grows the *partition* (it installs `systemd.services.growpart`, which runs growpart on
+    # root's device).  The filesystem is grown by `systemd-growfs-root.service`, and that unit exists
+    # only when the fstab entry carries `x-systemd.growfs`, which `autoResize` below is what adds.
+    # Without it the partition reaches 1.82 TiB while ext4 stays at the image's few GiB and the guest
+    # dies mid-build with `error: write of N bytes: No space left on device`.
     boot.growPartition = true;
 
     # Serial console because qemu runs -nographic; rd.shell=1 so a boot failure reaches this console
@@ -65,7 +69,13 @@ in
     # /dev/vda: systemd-fstab-generator writes sysroot.mount from the kernel root= line *before* it
     # reads the initrd fstab, so a second definition of the same node makes the generator fail with
     # "Failed to create unit file ... as it already exists" and the guest drops into Emergency Mode.
-    fileSystems."/" = { device = "/dev/disk/by-label/buildvm"; fsType = "ext4"; };
+    fileSystems."/" = {
+      device = "/dev/disk/by-label/buildvm";
+      fsType = "ext4";
+      # Grows ext4 into the partition boot.growPartition enlarged.  ext4 is resizable, so the
+      # `autoResize = true is not supported for this fsType` assertion cannot fire here.
+      autoResize = true;
+    };
 
     # The ESP systemd-boot lives on, labelled ESP by make-disk-image.
     fileSystems."/boot" = { device = "/dev/disk/by-label/ESP"; fsType = "vfat"; noCheck = true; };

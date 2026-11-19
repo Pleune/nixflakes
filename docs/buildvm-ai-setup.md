@@ -284,7 +284,10 @@ earlier guest does not affect provisioning, but it will break your own `ssh -p 2
 `sudo ssh-keygen -R '[127.0.0.1]:2224'`.
 So on a fresh disk the first boot ends with
 the guest running `platforms/buildvm.nix`: Xfce and Xvnc, nix gc, deploy-rs, and a root filesystem
-grown to fill the partition.
+grown to fill the partition.  Growing it takes both halves: `boot.growPartition` enlarges the
+partition, and `autoResize = true` on the root filesystem is what puts `x-systemd.growfs` in the fstab
+so `systemd-growfs-root.service` runs `resize2fs` into it.  Either one alone leaves ext4 at the
+image's few GiB.
 
 ```bash
 sudo ssh -p 2224 builder@127.0.0.1 'df -h / && findmnt -T /'
@@ -356,8 +359,11 @@ sudo systemctl restart buildvm-install buildvm     # throws away everything the 
 
 `wipefs` clears the image's GPT signature, which is what makes the installer write the seed again.
 The installer also drops `/var/lib/buildvm/guest-known_hosts` on every pass where it grafts the
-guest, because a new image carries new sshd host keys.  The guest grows its own filesystem into the
-partition on boot, so nothing needs resizing.  Leave
+guest, because a new image carries new sshd host keys.  The guest grows its own partition and
+filesystem on boot (`boot.growPartition` plus `autoResize`), so nothing needs resizing.  If a guest
+reports a filesystem far smaller than its partition, the fstab entry is missing `x-systemd.growfs`:
+`sudo ssh -p 2224 root@127.0.0.1 'findmnt -n -o OPTIONS /; df -h /'` and grow it once with
+`resize2fs /dev/disk/by-label/buildvm`.  Leave
 `/home/builder/provisioned-commit` alone and the reseeded guest re-applies the same commit on its next
 boot, which is what you want after wiping the disk.  To hand
 space back: stop the guest, shrink the inner root partition instead of the disk —
@@ -430,7 +436,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision: the guest's stashed changes do not apply onto the applied tree; kept in the stash` | the agent's edits conflict with the new tree.  They stay in `git stash list` rather than being merged by hand, and tracked files are reset so the checkout matches the commit that was switched (§6) |
 | `buildvm-provision: could not stash the guest's uncommitted changes; streaming will overwrite them` | `git stash` refused (usually an unborn `HEAD` in a freshly initialized checkout).  Streaming continues, so those edits are lost — read them off the guest first if they matter |
 | `buildvm-provision: could not check out main in /home/builder/nixflakes` | the checkout exists but the forced checkout failed; `sudo ssh -p 2224 builder@127.0.0.1 'git -C /home/builder/nixflakes status --short'` |
-| `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had.  The agent's stashed work is still restored before provisioning exits, so nothing in the checkout is lost — and the marker is not written, so the next deploy retries |
+| `error: write of <N> bytes: No space left on device` partway through the guest switch | the guest's root filesystem is smaller than its partition, so the closure has nowhere to go: compare `df -h /` with `lsblk` and grow it once (`resize2fs /dev/disk/by-label/buildvm` as root in the guest).  A switch cannot fix this itself — the filesystem grows at boot, and the switch's own build needs the room | \n| `buildvm-provision: switch failed; guest left as it is` | read the `nixos-rebuild` output in `journalctl -u buildvm-provision -b`; the guest keeps the system it had.  The agent's stashed work is still restored before provisioning exits, so nothing in the checkout is lost — and the marker is not written, so the next deploy retries |
 | `buildvm-provision: guest did not come back after the switch` | the new system does not boot — the switch rewrote the ESP entries. Boot the previous loader entry from the guest's serial console (`journalctl -u buildvm -b`), or reseed (§9) |
 | `journalctl -b -u switch-to-configuration`: `[agenix] decrypting …` then `chmod: cannot access '/run/agenix.d/N/<name>.tmp': No such file or directory`, `mv: cannot stat …`, `Activation script snippet 'agenixInstall' failed (1)` | no identity in `config.age.identityPaths` could open the file, i.e. the secret is encrypted for a different key. Nothing else reports this, and the activation errors are not fatal, so the switch finishes with an empty `/run/agenix`. Re-encrypt for `ssh -p … 'cat /etc/ssh/ssh_host_ed25519_key.pub'` (§4) |
 | the guest stays the seed image (no Xfce, no activated config) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means `provision.loginKey` must exist, which `buildvm-install` generates — `ls -l /var/lib/buildvm/keys/provision` |
