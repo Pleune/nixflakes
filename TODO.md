@@ -82,7 +82,8 @@ Add to the same module as `pkgs.writeShellScript` + unit:
 - `after = [ "buildvm.service" ]`, `wantedBy = [ "multi-user.target" ]`, `Type = oneshot`,
   `RemainAfterExit = true`, `TimeoutStartSec = 45min`, `User = root`, runs as root because it
   reads the private key (never `ProtectHome`/`PrivateUsers`), ssh flags copied from
-  `pkgs/deploy-ai/deploy-ai.sh:246-249` (`BatchMode=yes`,
+  `pkgs/deploy-ai/deploy-ai.sh:246-249` at the time (the tool is `deploy-ai.py` now;
+  `BatchMode=yes`,
   `StrictHostKeyChecking=accept-new`, `-p <sshPort>`, `-i <privateKeyPath>`).
 - Steps: wait for ssh on `127.0.0.1:<sshPort>`; read `git -C <workdir> rev-parse HEAD`; compare
   with the marker `/home/builder/.nixflakes-provisioned`; if it matches, exit 0.

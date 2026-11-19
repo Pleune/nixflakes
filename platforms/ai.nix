@@ -485,13 +485,15 @@ in
   };
 
   # ── The deploy gate ───────────────────────────────────────────────────────────────
-  # The agent's only route onto this host's system.  There is no repository on ai: the gate is told
-  # which one to read (`deploy-ai --repo <url> --ref <rev>`), mirrors it root-side, requires the
-  # deployed commit to be an ancestor of that ref, and compares the candidate tree's *content*
-  # against the source the running system came from, refusing anything outside `allowlist`.  It
-  # then builds in the guest, copies the closure back, health-probes, switches, and rolls back
-  # automatically if the probes go red; the reboot guard is armed immediately before the switch so
-  # a long failing build cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.sh.
+  # The agent's only route onto this host's system.  There is no repository on ai, so either the
+  # gate is told which one to read (`deploy-ai --repo <url> --ref <rev>`, for the operator) or the
+  # agent sends a patch of the deployed tree (`deploy-ai --submit`, read from stdin).  Both
+  # reconstruct a candidate root-side, require every changed path inside `allowlist` and outside
+  # `denylist`, and leave everything else byte-identical to the source the running system came
+  # from.  Host-path changes build on the VM, copy the closure back, health-probe, switch, and roll
+  # back automatically if the probes go red; guest-only changes switch the VM over ssh and never
+  # touch ai.  The reboot guard is armed immediately before the switch so a long failing build
+  # cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.py.
   # What Hermes loads from `/etc/hermes-skills` (`skills.external_dirs` above).  One directory per
   # skill, and the file is the repo's own, so the deployment notes the agent reads cannot drift away
   # from the tool they describe; a switch moves both at once.  It is a symlink into the store, so it

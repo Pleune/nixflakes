@@ -198,12 +198,11 @@ in
       deployer ALL=(root) NOPASSWD: /run/current-system/sw/bin/deploy-ai
     '';
 
-    # git and curl are what deploy-ai shells out to, and the gate belongs in the system path
-    # because /etc/passwd points deployer's shell there.
+    # The gate belongs in the system path because /etc/passwd points deployer's shell there.
+    # Nothing else goes in it: `deploy-ai` names its own interpreter and the tools it shells out to
+    # (git, nix, ssh, tar, curl, systemctl), so the gate's bare PATH needs nothing more.
     environment.systemPackages = [
       pkgs.deploy-ai
-      pkgs.git
-      pkgs.curl
       gate
     ];
 
