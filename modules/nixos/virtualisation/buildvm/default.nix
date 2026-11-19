@@ -115,7 +115,7 @@ in
     };
 
     # Pinning the NAT subnet is what makes the guest reachable: this qemu build's defaults give it an
-    # address in 240.0.0.0/24 with no route and no resolver.  platforms/buildvm-network.nix mirrors
+    # address in 240.0.0.0/24 with no route and no resolver.  Both guest configs mirror
     # these values as the guest's own configuration.
     netSubnet = mkOption {
       type = types.str;

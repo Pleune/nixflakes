@@ -18,9 +18,39 @@ let
   userName = "builder";
 in
 {
-  # Same static addressing as the guest it is replaced by: provisioning sshes in on the forwarded port,
-  # and the first switch fetches nixpkgs, which needs a route.
-  imports = [ ./buildvm-network.nix ];
+  # ── Networking: static addressing on qemu's NAT ────────────────────────────────────
+  # `buildvm.service` gives the guest a virtio NIC on qemu's user-mode network and pins the subnet it
+  # NATs (`net=10.0.2.0/24`, `host=10.0.2.2`, `dns=10.0.2.3`, `dhcpstart=10.0.2.15`).  The guest is
+  # configured to match rather than left to DHCP: this qemu's defaults hand out 240.0.0.1/24 with no
+  # default route and no resolver, and a guest with no route cannot fetch nixpkgs or the git host.
+  # Change the qemu arguments in modules/nixos/virtualisation/buildvm and these values together.
+  #
+  # Static addresses need a manager.  With `useNetworkd = false` this falls to nixpkgs' scripted path
+  # and `useDHCP = false` means nothing runs at all: the interface comes up with no address, and
+  # `ssh -p 2224` hangs after `Connection established` because libslirp forwards to a guest nobody can
+  # reach.
+  networking.useNetworkd = true;
+  networking.useDHCP = false;
+
+  # Matched by MAC on purpose: predictable interface names are not stable across generations of this VM
+  # (`ens3` one boot, `enp0s3` the next) and a name-based unit that stops matching fails silently --
+  # card `state DOWN`, no address, while `nc -z 127.0.0.1 2224` still reports the port open.
+  # Mirrors `nixflakes.virtualisation.buildvm.netGuestMac`, which qemu pins.
+  systemd.network.networks."40-buildvm-nat" = {
+    matchConfig.MACAddress = "52:54:00:12:34:56";
+
+    networkConfig = {
+      DHCP = "no";
+      # qemu's NAT gateway and its built-in resolver, which forwards to ai's resolver.  Both are set here
+      # rather than through `networking.defaultGateway`/`networking.nameservers` because those are
+      # keyed on interface *names*, which is exactly what cannot be relied on.
+      Gateway = "10.0.2.2";
+      DNS = "10.0.2.3";
+    };
+
+    # qemu hands this address out over DHCP; taking it statically does not depend on libslirp's pool.
+    address = [ "10.0.2.15/24" ];
+  };
 
   system.stateVersion = "25.05";
   networking.hostName = "buildvm";
