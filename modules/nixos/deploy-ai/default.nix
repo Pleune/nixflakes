@@ -55,20 +55,10 @@ let
     };
   };
 
-  # sshd runs "$SHELL -c <command>", so the client command arrives as $1.  Only a deploy-ai
-  # invocation reaches sudo: a guardrail against mistakes, not a sandbox.
-  gate = pkgs.writeShellScriptBin "deploy-ai-gate" ''
-    case ''${1:-} in
-      deploy-ai | 'deploy-ai '*)
-        exec ${pkgs.sudo}/bin/sudo -n /run/current-system/sw/bin/deploy-ai ''${1#deploy-ai}
-        ;;
-      *)
-        echo "deploy-ai gate: only 'deploy-ai ...' is accepted here." >&2
-        echo "deploy-ai gate: try 'deploy-ai --list' or 'deploy-ai --repo <url> --ref <rev>'." >&2
-        exit 1
-        ;;
-    esac
-  '';
+  # The login shell of `deployer`.  sshd runs it as `-c "<command>"`, and the gate reads the command
+  # from there or from SSH_ORIGINAL_COMMAND; only a deploy-ai invocation reaches sudo.  Guardrail
+  # against mistakes, not a sandbox -- see pkgs/deploy-ai/gate.nix.
+  gate = pkgs.deploy-ai.gate;
 in
 {
   options.nixflakes.deploy-ai = {

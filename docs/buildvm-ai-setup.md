@@ -416,8 +416,16 @@ first-connect failure is the missing git-server host key:
 sudo deploy-ai --status
 sudo ssh -p 2224 builder@127.0.0.1 'cat /home/builder/deployed-commit'
 sudo ssh -p 22 deployer@127.0.0.1 'deploy-ai --status'   # the path the agent uses
+sudo ssh -p 22 deployer@127.0.0.1 'ls /'                 # must print the gate refusal, exit 1
 sudo deploy-ai --repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes --ref main --dry-run
 ```
+
+`deployer`'s login shell *is* the gate, so sshd invokes it as `-c "<your command>"` and exports the
+same string as `SSH_ORIGINAL_COMMAND`.  The gate (`pkgs/deploy-ai/gate.nix`) reads the command from
+either, splits it on whitespace, and `exec`s `sudo -n /run/current-system/sw/bin/deploy-ai` with those
+arguments.  `pkgs/deploy-ai/gate.nix` never reads `$1`: a gate that does refuses every command,
+including valid ones, which looks like an ssh failure from the guest's side.  `nix build
+'.#packages.x86_64-linux.deploy-ai.passthru.tests.gate'` pins both wirings and the refusals.
 
 `--status` prints the recorded commit, deployed toplevel, whether the baseline snapshot exists, any
 pending rollback, and the allowlist. `/etc/deploy-ai/deployed-source` holds the store path of the source
@@ -590,6 +598,8 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | guest sits in Emergency Mode | root is named by the ext4 label `buildvm`; a stale filesystem or a label from another image leaves `/dev/disk/by-label/buildvm` unresolvable |
 | a guest build *you* run fails on the `secrets` input | it fetched the input over ssh: §2 (deploy key) plus `known_hosts` for port 2223. Provisioning avoids this with `--override-input private` (§6) |
 | gate refuses `outside the deploy-ai allowlist` | correct; the refusal names the nearest allowed prefix — widen `nixflakes.deploy-ai.allowlist` only deliberately |
+| `deploy-ai gate: only 'deploy-ai ...' is accepted here.` for a command that looks correct | sshd hands the gate your command as one string, so quote it once (`ssh deployer@127.0.0.1 'deploy-ai --status'`) and put nothing else in it.  If *every* command is refused, the running gate is a generation that read `$1` instead of `SSH_ORIGINAL_COMMAND`/`$2`; rebuild from `pkgs/deploy-ai/gate.nix` and check with `nix build '.#packages.x86_64-linux.deploy-ai.passthru.tests.gate'` |
+| `deploy-ai gate: refusing a command containing '<char>'.` | `;`, `&`, `|`, `<`, `>`, `$`, a backtick and `*` cannot reach `deploy-ai` intact; send one command per ssh and keep those characters out of arguments.  The gate never re-evaluates the string, so this is a guardrail against `deploy-ai`'s own parser, not a sandbox |
 | `deploy-ai: refusing: the patch changes the deployment policy (allowlist, keys, users, sudoers); the operator must apply that out-of-band` | the submitted tree evaluates to a different `nixflakes.deploy-ai.policyDigest` than `/etc/deploy-ai/policy-digest`, so the patch moves one of the settings the gate enforces against it — the allowlist, a key, a user, a sudo rule, nix's `trusted-users`, a buildvm path (§5).  Nothing was built or applied.  `deploy-ai --vet` reproduces the refusal without a submission, and the change is the operator's to deploy by hand (§5) |
 | gate refuses `does not have the deployed commit … in its history` | ref rebased or unrelated; rebase onto the deployed commit |
 | a reboot you did not ask for | the 60-minute guard armed before a switch; `systemctl cancel --when` |

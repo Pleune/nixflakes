@@ -33,8 +33,13 @@ git format-patch --stdout deployed..main \
 `10.0.2.2` is `ai` on the qemu user-mode network; port 22 is ai's own sshd, not the 2224 forward
 that runs the other way. The key already in `~builder/.ssh` is the one `deployer` accepts, so no `-i`.
 
-`deployer` cannot open a shell: its login shell only accepts `deploy-ai …`, so `--submit` has to be
-the whole command, with the patch on stdin.
+`deployer` cannot open a shell: its login shell is a gate that only accepts a `deploy-ai …` command,
+so `--submit` has to be the whole command, with the patch on stdin.
+
+sshd hands your command to that gate as one string, so quote it once:
+`ssh deployer@10.0.2.2 'deploy-ai --repo <url> --list'`. The gate splits that string into arguments
+and refuses anything containing `;`, `&`, `|`, `<`, `>`, `$`, a backtick, or `*` — not as a sandbox,
+but so nothing reaches `deploy-ai` that its own argument parser would reject.
 
 ## What the gate checks, in order
 
@@ -77,12 +82,12 @@ it must survive; the gate's record only tells you what is live.
 
 ## When a deploy is refused
 
-`deploy-ai` prints why and applies nothing. Report the reason; do not work around it:
-
 `deploy-ai` prints why and applies nothing. Report the reason; do not work around it.
 
 | Message | What it means |
 | --- | --- |
+| `deploy-ai gate: only 'deploy-ai ...' is accepted here.` | The string sshd passed did not start with `deploy-ai`. Quote the command once, with no shell punctuation in it. |
+| `deploy-ai gate: refusing a command containing '<char>'.` | That character is not reachable safely here; run one command at a time and keep `<char>` out of arguments. |
 | `the patch does not apply to the deployed commit <base>; rebase it onto <base> and submit again` | Your base moved; rebase onto `deployed`. |
 | `refusing: '<path>' is outside the deploy-ai allowlist.` | That file is not yours; ask the operator. |
 | `refusing: '<path>' is on the deploy-ai denylist.` | The gate's own code, `flake.lock`, or secrets. |

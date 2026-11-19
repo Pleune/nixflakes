@@ -23,6 +23,10 @@ pkgs.writeShellScriptBin "deploy-ai" ''
   exec ${lib.getExe pkgs.python3} ${./deploy-ai.py} "$@"
 ''
 // {
+  # The login shell of `deployer`, shipped in the same package so the gate and the tool it guards
+  # cannot drift apart.  The module wires it into /run/current-system/sw and /etc/passwd.
+  gate = pkgs.callPackage ./gate.nix { };
+
   # The scope guard needs root on a live host, so its logic is tested here against synthetic trees
   # instead: temp state dir, synthetic baseline, and every path passed through the environment.
   # It shells out to git and tar, so the test needs both in its PATH.
@@ -41,4 +45,8 @@ pkgs.writeShellScriptBin "deploy-ai" ''
         cp ${./test-deploy-ai.py} test-deploy-ai.py
         python3 ./test-deploy-ai.py > "$out/result.log" 2>&1
       '';
+
+  # The gate is a shell script whose whole job is how it reads sshd's argv, so it is tested against
+  # a stub standing in for sudo rather than against a live sshd.
+  passthru.tests.gate = pkgs.callPackage ./test-gate.nix { };
 }
