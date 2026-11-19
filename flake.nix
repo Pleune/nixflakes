@@ -230,12 +230,12 @@
               mitchpc = mk "mitchpc";
 
               # homelab
+              # ai reaches the seed image through `self` (platforms/buildvm.nix reads
+              # `self.nixosConfigurations.buildvmBootstrap`), so nothing about the guest is threaded in
+              # here beyond what only the flake can supply.
               ai = makeSystem "x86_64-linux" "ai" {
                 deployedSource = nixflakesSource;
                 deployedCommit = self.rev or self.dirtyRev or "";
-                buildvmBoot = {
-                  image = buildvmBootstrap.config.system.build.diskImage;
-                };
               };
               buildvm = buildvm;
               buildvmBootstrap = buildvmBootstrap;

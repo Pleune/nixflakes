@@ -11,8 +11,11 @@ The agent on `ai` used to run in a Docker sandbox on the same box, so it could r
 | `nixflakes.virtualisation.buildvm` | `modules/nixos/virtualisation/buildvm/` | On `ai`: one-shot `buildvm-install` seeding the raw partition, then a `buildvm` unit running qemu/KVM with `hostfwd=tcp:127.0.0.1:2224-:22`. |
 | `deploy-ai` | `pkgs/deploy-ai/`, `modules/nixos/deploy-ai/` | The only way anything changes `ai`'s system: scope check → build in the guest → copy the closure → health probe → switch → auto-rollback. |
 
-Shared constants (disk, ssh port, guest user, work directory, key paths, public key, clone URL) live
-in `lib/buildvm/default.nix`; changing one there changes every consumer.
+Shared constants (guest user, ssh port, disk, work directory, origin URL, the guest's public key) are
+written literally in the platform file that needs them: `platforms/ai.nix` for the host side,
+`platforms/buildvm.nix` for the guest, `platforms/buildvm-bootstrap.nix` for the seed image.  There is
+no shared constants module, so a value that has to agree on both sides is duplicated and edited by hand —
+which is the point: the files sit next to each other, and only the values that must agree are repeated.
 
 ## Nothing about the system lives in the guest
 

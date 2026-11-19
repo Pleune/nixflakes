@@ -10,14 +10,50 @@
   hermes-webui,
   # The secrets repo, so the ai <-> buildvm keypair can be read at eval time and decrypted at boot.
   private,
-  # From the flake's specialArgs: the guest's kernel, initrd, init and installer image, taken
-  # from nixosConfigurations.buildvm so the VM boots exactly the system the flake describes.
-  buildvmBoot,
+  # The flake itself, also from specialArgs: ai reads the seed image out of
+  # self.nixosConfigurations.buildvmBootstrap instead of having it handed in.
+  self,
   ...
 }:
 let
-  # Single source of truth for the guest's key, port, disk and limits.
-  buildvm = import ../lib/buildvm { inherit private; };
+  # What ai and the guest have to agree on, spelled out here.  The guest's side of each value lives
+  # in platforms/buildvm.nix, and modules/nixos/virtualisation/buildvm defaults the rest.
+  #
+  # There is one ai <-> buildvm keypair and it is the *guest's* identity: its private half is
+  # ai_buildvm_id_ed25519.age in the secrets repo, decryptable with ai's host key, exposed by agenix
+  # at nixflakes.virtualisation.buildvm.privateKeyPath root-owned 0600, used by deploy-ai to reach the
+  # gate, and grafted by buildvm-install into the guest as builder's own ~/.ssh/id_ed25519 so the guest
+  # authenticates outbound with the same identity.
+  #
+  # Host users who log *into* the guest cannot share that file (ssh ignores a private key the invoking
+  # user does not own), so buildvm-install generates one keypair per consumer under `loginKeys` and
+  # authorizes all of them plus this public half.
+  #
+  # The public half is read from the same repo at eval time.  That is a read of a fetched flake input,
+  # not of a derivation, so it introduces no IFD; it does mean the lock file must point at a revision
+  # containing the file.
+  firstLine = text: builtins.elemAt (builtins.match "([^\r\n]+)[\r\n]*" text) 0;
+  guestPublicKey = firstLine (builtins.readFile "${private.secrets}/ai_buildvm_id_ed25519.pub");
+
+  # Matches the user defined in platforms/buildvm.nix.
+  guestUser = "builder";
+
+  # qemu user-mode networking: the guest's sshd is reachable from ai on this loopback port.
+  guestPort = 2224;
+
+  # Raw partition handed straight to qemu, created by hand (docs/buildvm-ai-setup.md section 3).
+  guestDisk = "/dev/disk/by-partlabel/buildvm";
+
+  # Where the agent's checkout lives inside the guest.
+  guestWorkdir = "/home/${guestUser}/nixflakes";
+
+  # Matches the retired Docker sandbox limits (container_cpu = 12, container_memory = 8192).
+  guestCpus = 12;
+  guestMemoryMiB = 8192;
+
+  # `origin` in the guest's checkout.  buildvm-provision fetches it root-side inside the guest with
+  # the key buildvm-install grafts there, so the guest's history comes from the real repository.
+  guestOrigin = "ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git";
 
   # The keypair the guest authenticates *outbound* with, decrypted by agenix with ai's host key.  Root
   # owns it on the host: ssh refuses a private key that anyone besides its owner can read, so the host
@@ -305,8 +341,8 @@ in
       terminal = {
         backend = "ssh";
         ssh_host = "127.0.0.1";
-        ssh_port = buildvm.sshPort;
-        ssh_user = buildvm.userName;
+        ssh_port = guestPort;
+        ssh_user = guestUser;
         # The keypair buildvm-install generates for Hermes, authorized in the guest on every install
         # pass.  It is Hermes-owned because ssh ignores a key owned by anyone else; the guest's own
         # outbound key is a separate keypair from the secrets repo.
@@ -314,7 +350,7 @@ in
         ssh_persistent = true;
         # A guest-side path: the agent's shell starts in the flake checkout it clones itself.
         # `coerce_ssh_remote_cwd` maps host paths here, so keep it a path the guest really has.
-        cwd = buildvm.workdir;
+        cwd = guestWorkdir;
       };
 
       # The bot's screen follows the shell backend: `computer_use/placement.py` treats ssh as one of
@@ -381,13 +417,14 @@ in
   # image and nothing else: it boots from its own bootloader, so no kernel, initrd or guest closure
   # is rooted in ai's store (platforms/buildvm-bootstrap.nix).  The guest is defined in
   # platforms/buildvm.nix and reaches ai over qemu user-mode networking: host loopback port
-  # `buildvm.sshPort` forwards to the guest's sshd, and the guest sees the host at
-  # `buildvm.sshPort`.
+  # `guestPort` forwards to the guest's sshd, and the guest sees the host at `guestPort`.
   nixflakes.virtualisation.buildvm = {
     enable = true;
-    disk = buildvm.disk;
-    image = buildvmBoot.image;
-    publicKey = buildvm.publicKey;
+    disk = guestDisk;
+    # The seed image, read from the flake's own bootstrap configuration.  Nothing of it survives in
+    # ai's store once the partition has been written (docs/buildvm-ai-setup.md section 5).
+    image = self.nixosConfigurations.buildvmBootstrap.config.system.build.diskImage;
+    publicKey = guestPublicKey;
     # agenix-decrypted (see the secrets section above); buildvm-install grafts it into the guest as
     # builder's outbound key.  Nothing on the host sshes with it -- each consumer has its own loginKey.
     privateKeyPath = buildvmKey;
@@ -397,10 +434,10 @@ in
       owner = "hermes";
       group = "hermes";
     };
-    sshPort = buildvm.sshPort;
-    cpus = buildvm.cpus;
-    memoryMiB = buildvm.memoryMiB;
-    userName = buildvm.userName;
+    sshPort = guestPort;
+    cpus = guestCpus;
+    memoryMiB = guestMemoryMiB;
+    userName = guestUser;
     provision = {
       enable = true;
       flakeAttr = "buildvm";
@@ -408,11 +445,11 @@ in
       # the whole point of doing it there: provisioning knows the commit ai runs, so the guest is put on
       # exactly it instead of on whatever a clone's branch tip happens to be.
       sourcePath = deployedSource;
-      origin = buildvm.gitHost;
+      origin = guestOrigin;
       targetCommit = deployedCommit;
       # The secrets tree ai itself evaluated, streamed into the guest and passed as --override-input so
       # the switch never has to fetch the `private` input over ssh.
-      secretsDir = "/home/${buildvm.userName}/secrets";
+      secretsDir = "/home/${guestUser}/secrets";
       secretsSource = private;
     };
   };
@@ -427,7 +464,7 @@ in
   # a long failing build cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.sh.
   nixflakes.deploy-ai = {
     enable = true;
-    publicKey = buildvm.publicKey;
+    publicKey = guestPublicKey;
     deployedSource = deployedSource;
     deployedCommit = deployedCommit;
     buildKey = buildvmKey;

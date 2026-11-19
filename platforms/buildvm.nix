@@ -4,7 +4,18 @@
 { config, inputs, lib, pkgs, ... }:
 with lib;
 let
-  buildvm = import ../lib/buildvm { private = inputs.private; };
+  # The guest's outbound identity is the single ai <-> buildvm keypair, grafted into ~builder/.ssh by
+  # buildvm-install (modules/nixos/virtualisation/buildvm/default.nix), so the guest authenticates to the
+  # git host with the identity ai holds the private half of.  Only the public half belongs in this
+  # closure: `private` is a plain flake input, so reading the `.pub` reads a fetched path rather than a
+  # derivation and adds no IFD.  platforms/ai.nix spells the same value, and the lock file must point at
+  # a revision that contains the file.
+  firstLine = text: builtins.elemAt (builtins.match "([^\r\n]+)[\r\n]*" text) 0;
+  publicKey = firstLine (builtins.readFile "${inputs.private.secrets}/ai_buildvm_id_ed25519.pub");
+
+  # Must match the name the seed image creates in platforms/buildvm-bootstrap.nix: buildvm-install only
+  # grafts the guest's ssh files once that user exists.
+  userName = "builder";
 in
 {
   # Static address on qemu's NAT instead of DHCP; see that file for why.
@@ -83,15 +94,15 @@ in
     # Skip the repo's default user: no password login, no home-manager in a build VM.
     nixflakes.makeUser = false;
 
-    users.users.${buildvm.userName} = {
+    users.users.${userName} = {
       isNormalUser = true;
       shell = pkgs.bash;
-      home = "/home/${buildvm.userName}";
+      home = "/home/${userName}";
       # In wheel for nix trust only: `config/nixos/core/nix` makes @wheel a nix trusted user, which the
       # in-guest flake switch needs.  There is deliberately no sudo here (see below), so this group
       # grants no privileges beyond nix.
       extraGroups = [ "wheel" ];
-      openssh.authorizedKeys.keys = lib.optionals (buildvm.publicKey != "") [ buildvm.publicKey ];
+      openssh.authorizedKeys.keys = lib.optionals (publicKey != "") [ publicKey ];
     };
 
     services.openssh = {

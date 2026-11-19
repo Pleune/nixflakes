@@ -16,9 +16,12 @@
 # growpart alone leaves the filesystem at the image's size.
 { config, lib, pkgs, ... }:
 let
-  # No secrets input here by design, so no public key: buildvm-install grafts the keypair into the
-  # guest before its first boot.
-  buildvm = import ../lib/buildvm { };
+  # No secrets input here by design, so no public key at all: buildvm-install grafts the keypair into
+  # the guest before its first boot, and this closure is streamed into the installer, so keeping the
+  # secrets input out of it keeps the seed image free of key material.
+  #
+  # Must match the name platforms/buildvm.nix and buildvm-install use.
+  userName = "builder";
 in
 {
   # The seed needs the same static addressing as the guest it is replaced by: provisioning sshes in
@@ -75,7 +78,7 @@ in
   # The agent/human runs `nix nixos-rebuild switch --flake .#buildvm --accept-flake-config` as the
   # builder user, and trusting a flake's own config requires a trusted user.
   nix.settings.allowed-users = [ "*" ];
-  nix.settings.trusted-users = [ "root" buildvm.userName ];
+  nix.settings.trusted-users = [ "root" userName ];
 
   services.openssh = {
     enable = true;
@@ -87,14 +90,13 @@ in
 
   # Same identity the full guest uses, so the host's ssh forward and the deploy key keep working
   # across the switch.
-  users.users.${buildvm.userName} = {
+  users.users.${userName} = {
     isNormalUser = true;
     shell = pkgs.bash;
     extraGroups = [ ];
-    # The seed is reachable only with the key buildvm-install grafts into the guest before the
-    # first boot, so it authorizes nothing itself.  (This system is evaluated without the secrets
-    # input, so `buildvm.publicKey` is empty here by design.)
-    openssh.authorizedKeys.keys = lib.optionals (buildvm.publicKey != "") [ buildvm.publicKey ];
+    # The seed is reachable only with the key buildvm-install grafts into the guest before the first
+    # boot, so it authorizes nothing itself.
+    openssh.authorizedKeys.keys = [ ];
   };
 
   # Root has no password and no key here; without this NixOS refuses to evaluate, and the point of

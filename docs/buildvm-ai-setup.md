@@ -122,7 +122,7 @@ There are two kinds of key between `ai` and the guest, and only one of them is a
 | File | Role |
 | --- | --- |
 | `ai_buildvm_id_ed25519.age` | private half of the **guest's outbound identity**, encrypted for `ai`'s host ssh key |
-| `ai_buildvm_id_ed25519.pub` | its public half, read at eval time by `lib/buildvm/default.nix` |
+| `ai_buildvm_id_ed25519.pub` | its public half, read at eval time by `platforms/ai.nix` and `platforms/buildvm.nix` |
 | `/var/lib/buildvm/keys/<consumer>/id_ed25519` | keypairs `buildvm-install` **generates** for whoever logs into the guest |
 
 `platforms/ai.nix` decrypts the private half with agenix (`nixflakes.agenix.enable`,
