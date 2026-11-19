@@ -53,12 +53,16 @@ with `connect to address 209.222.120.168 port 2223: Network is unreachable`:
 -netdev user,id=n0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3,dhcpstart=10.0.2.15,hostfwd=tcp:127.0.0.1:2224-:22
 ```
 
-`platforms/buildvm-network.nix` is the guest's half of that and says `networking.useDHCP = false`, a
-static `10.0.2.15/24` on `ens3`, gateway `10.0.2.2`, nameserver `10.0.2.3`. It is configured statically
-because DHCP is exactly what failed here; the four values are duplicated in the module's `netSubnet`,
-`netGateway`, `netDns` and `netGuestAddress` options, so change the two together. NAT means the guest
-is a client of `ai`'s connectivity: no inbound except the forwarded ssh port, and qemu's resolver
-(`10.0.2.3`) only forwards to `ai`'s own resolver.
+`platforms/buildvm-network.nix` is the guest's half of that and says `networking.useNetworkd = true`,
+`networking.useDHCP = false`, a static `10.0.2.15/24` on `ens3`, gateway `10.0.2.2`, nameserver
+`10.0.2.3`. It is configured statically because DHCP is exactly what failed here, and `useNetworkd` is
+load-bearing: a static address is only applied by whoever manages the interface, and with
+`useNetworkd = false` plus `useDHCP = false` nobody does — `systemd.network.networks` evaluates to
+`{ }`, `ens3` comes up with no address at all, and the forwarded ssh port hangs in exactly the way
+§11 describes. The four addresses are duplicated in the module's `netSubnet`, `netGateway`, `netDns`
+and `netGuestAddress` options, so change the two together. NAT means the guest is a client of `ai`'s
+connectivity: no inbound except the forwarded ssh port, and qemu's resolver (`10.0.2.3`) only forwards
+to `ai`'s own resolver.
 
 Check it from inside the guest:
 
@@ -423,6 +427,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `buildvm-provision`: `REMOTE HOST IDENTIFICATION HAS CHANGED`, `Offending … key in /root/.ssh/known_hosts:N`, `Host key for [127.0.0.1]:2224 has changed` | an old fingerprint is pinned while the guest's sshd keys are new.  Provisioning pins into `/var/lib/buildvm/guest-known_hosts`, which `buildvm-install` clears on every pass where it grafts the guest, so this row applies to generations before that fix, to a graft pass that found no user to graft, and to your own `ssh`: `sudo rm -f /var/lib/buildvm/guest-known_hosts` or `sudo ssh-keygen -R '[127.0.0.1]:2224'` |
 | `buildvm-provision` waits forever, then `start operation timed out`, while `journalctl -u buildvm` shows `BdsDxe: No bootable option or device was found` | the guest is not running an OS, so nothing listens on 2224 and qemu's user-mode networking accepts your connection and resets it, which ssh reports as `kex_exchange_identification: read: Connection reset by peer` rather than "connection refused".  Usually `buildvm-install` never ran this boot, so the disk was never written: `sudo systemctl stop buildvm && sudo systemctl start buildvm-install && sudo systemctl start buildvm`.  If it is in a failed state from an earlier attempt, `sudo systemctl reset-failed buildvm-install` first, and check `journalctl -b -u buildvm-install` for why it stopped early. |
 | `buildvm-provision: guest ssh never came up on port 2224` | the guest is not booting (see the qemu rows) or `~builder/.ssh/authorized_keys` was never grafted |
+| `nc -z 127.0.0.1 2224` says OPEN and `ssh -vv` prints `Connection established` then `Local version string …` and waits forever, with no banner and no `Permission denied`, even for `root` with a key the log says was grafted | qemu's user-mode network accepts the forward on `ai` and then cannot reach the guest, so the guest has no address on the pinned subnet. `journalctl -u buildvm -b` showing `[ OK ] Started SSH Daemon.` rules out sshd. Check `nix eval '.#nixosConfigurations.buildvm.config.systemd.network.networks'`: `{ }` means nothing manages `ens3` (§2), which is what `networking.useNetworkd = false` with `networking.useDHCP = false` does |
 | `buildvm-provision: no commit recorded; the guest runs the streamed tree` | informational: `provision.targetCommit` is empty (a deploy from a dirty tree, or no `deploy-ai` run yet), so there is nothing to tag and the streamed contents are switched as they are (§6) |
 | `buildvm-provision: could not fetch from ssh://…; the guest keeps whatever commits it already had` | the guest could not reach `provision.origin` with the key `buildvm-install` grafts into `~builder/.ssh`: the deploy key for `nixflakes.git` is not registered (§2), or the guest has no route out.  Check from inside the guest: `ssh -p 2224 builder@127.0.0.1 'ip route; getent hosts git.pleunetowne.com'` must show `default via 10.0.2.2 dev ens3` and resolve, otherwise `buildvm.service` is not passing the pinned `-netdev user,…,net=…,host=…,dns=…` arguments or `platforms/buildvm-network.nix` is not in the guest's config (§2).  Not fatal: the switch runs on the streamed contents |
 | `buildvm-provision: could not point /home/builder/nixflakes at ssh://…` | `git remote add`/`set-url` failed, which needs the checkout to be writable (§the permission row above) |

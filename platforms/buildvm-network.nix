@@ -14,6 +14,11 @@
 # ever changes, networking here stops working loudly (no address, so no ssh), which is the point:
 # a silently misrouted guest fails later, somewhere much harder to read.
 {
+  # Static addresses need a manager.  With `useNetworkd = false` this config falls to nixpkgs' scripted
+  # path, and `useDHCP = false` means nothing runs at all: `systemd.network.networks` stays `{ }`, the
+  # interface comes up with no address, and `ssh -p 2224` hangs after `Connection established` because
+  # libslirp has forwarded the connection to a guest nobody can reach.
+  networking.useNetworkd = true;
   networking.useDHCP = false;
 
   networking.interfaces.ens3 = {
