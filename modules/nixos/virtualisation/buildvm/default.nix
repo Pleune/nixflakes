@@ -340,6 +340,7 @@ in
       # while /run/agenix is still empty and the guest gets no private key.
       after = [ "nixos-activation.service" ];
       serviceConfig.Type = "oneshot";
+      restartIfChanged = false;
       serviceConfig.RemainAfterExit = true;
       # Units get only this PATH, so every tool the script calls has to be listed: awk is gawk and
       # find is findutils, neither of which coreutils provides, and git needs openssh for its ssh
