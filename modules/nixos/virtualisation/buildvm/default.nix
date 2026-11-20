@@ -571,7 +571,8 @@ in
         # A full guest system build (Xfce, Xvnc, nixVersions.latest) is slow; give it room.
         TimeoutStartSec = "45min";
       };
-      path = [ pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils pkgs.gnutar pkgs.gnused ];
+      # `nix` because the copy of ai's tree into the guest runs here, on ai's side of the ssh connection.
+      path = [ pkgs.nix pkgs.git pkgs.openssh pkgs.coreutils pkgs.findutils pkgs.gnutar pkgs.gnused ];
       script = ''
         USER=${cfg.userName}
         ROOT_USER=${escapeShellArg cfg.provision.activationUser}
