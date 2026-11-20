@@ -39,8 +39,6 @@ BUILD_TIMEOUT = 3600
 EVAL_TIMEOUT = 600
 HEALTH_RETRIES = 24
 HEALTH_WAIT = 5
-API = "http://127.0.0.1:8642/api/v1/health"
-UNITS = ["hermes-agent", "hermes-backend", "hermes-webui"]
 GUARD_MINUTES = 60
 DEFAULT_SUBMIT_MAX_BYTES = 262144
 
@@ -188,6 +186,15 @@ class DeployAI:
         # Only a host with no file at all falls back here; an uncapped read from the guest is not an
         # option, so the value is checked where it is used rather than defaulted to "unbounded".
         self.submit_max_bytes_raw = max_bytes or str(DEFAULT_SUBMIT_MAX_BYTES)
+
+        # What counts as healthy here, published by the module instead of named in this package.
+        # Hardcoding it is what made every deploy refuse to switch: the gateway answers `GET
+        # /health` (hermes-agent/gateway/platforms/api_server.py:1555) and has no `/api/v1/health`
+        # route at all, so the old probe returned 404 and read as a dead api.  Both values go into
+        # the policy digest, so a submitted patch cannot aim the probe at something that always
+        # answers 200.
+        self.health_units_file = get("DEPLOY_AI_HEALTH_UNITS", "/etc/deploy-ai/health-units")
+        self.health_url_file = get("DEPLOY_AI_HEALTH_URL", "/etc/deploy-ai/health-url")
 
         self.guest_only_file = get("DEPLOY_AI_GUEST_ONLY_FILE", "/etc/deploy-ai/guest-only-paths")
         self.deny_file = get("DEPLOY_AI_DENY_FILE", "/etc/deploy-ai/denylist")
@@ -573,13 +580,39 @@ class DeployAI:
     def current_system(self) -> str:
         return os.path.realpath("/run/current-system")
 
+    def api_answer(self) -> str:
+        """The status code the configured health endpoint answers, or `''` when nothing is
+        configured and `none` when nothing answered.
+
+        `-w %{http_code}` instead of `-f` is the point: curl reports a 404 as a number rather than
+        as a failed command, which is the difference between a wrong path and a dead server."""
+        url = read_first_line(self.health_url_file)
+        if not url:
+            return ""
+        result = self.run(
+            ["curl", "-sS", "--max-time", "5", "-o", "/dev/null", "-w", "%{http_code}", url],
+            capture=True,
+        )
+        if result.returncode != 0:
+            return "none"
+        return result.stdout.strip() or "none"
+
+    def health_problems(self) -> list:
+        """Why this system is not healthy, in the words a reader can act on."""
+        problems = [f"{unit} inactive"
+                    for unit in path_list_file(self.health_units_file)
+                    if self.run(["systemctl", "is-active", "--quiet", unit]).returncode != 0]
+        answer = self.api_answer()
+        if not answer:
+            problems.append("no health endpoint configured")
+        elif answer == "none":
+            problems.append("health endpoint answered nothing")
+        elif answer[0] not in ("2", "3"):
+            problems.append(f"health endpoint answered {answer}")
+        return problems
+
     def check_health(self) -> bool:
-        for unit in UNITS:
-            if self.run(["systemctl", "is-active", "--quiet", unit]).returncode != 0:
-                return False
-        if self.run(["curl", "-fsS", "--max-time", "5", API]).returncode != 0:
-            return False
-        return self.vm_ssh("echo ok").returncode == 0
+        return not self.health_problems() and self.vm_ssh("echo ok").returncode == 0
 
     def wait_health(self) -> bool:
         for _ in range(HEALTH_RETRIES):
@@ -670,11 +703,8 @@ class DeployAI:
 
     def health_row(self) -> str:
         """What ai finds right now, in the order a switch checks it."""
-        down = [unit for unit in UNITS
-                if self.run(["systemctl", "is-active", "--quiet", unit]).returncode != 0]
-        if self.run(["curl", "-fsS", "--max-time", "5", API]).returncode != 0:
-            down.append("api")
-        return "ok" if not down else "down: " + ", ".join(down)
+        problems = self.health_problems()
+        return "ok" if not problems else "down: " + ", ".join(problems)
 
     def guest_row(self) -> str:
         """What the VM was last told is live.  ai's own record wins; the VM's copy only says what it was
@@ -720,7 +750,9 @@ class DeployAI:
         # The current system must be healthy before a switch, or the switch hides an existing break.
         if not self.check_health():
             self.clear_rollback()
-            die(f"the CURRENT system is already unhealthy; switching would hide that.  "
+            problems = self.health_problems()
+            detail = ", ".join(problems) or f"the build VM at {BUILD_HOST}:{BUILD_PORT} is unreachable"
+            die(f"the CURRENT system is already unhealthy ({detail}); switching would hide that.  "
                 f"Fix it out-of-band or reboot {AI}")
 
         # Armed only now: a build that fails after an hour must not leave a reboot pending.

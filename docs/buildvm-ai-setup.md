@@ -458,10 +458,20 @@ including valid ones, which looks like an ssh failure from the guest's side.  `n
 '.#packages.x86_64-linux.deploy-ai.passthru.tests.gate'` pins both wirings and the refusals.
 
 `--status` prints one labelled row per question and nothing else: the commit and toplevel ai runs,
-whether the hermes units and the API are healthy now, any pending rollback, what the VM was last told
+whether the units named in `/etc/deploy-ai/health-units` are active and the endpoint in
+`/etc/deploy-ai/health-url` answers 2xx or 3xx (a 404 is reported as a status code, a dead listener
+as `answered nothing`, and an unset endpoint as `no health endpoint configured` — the three used to
+collapse into one `api`), any pending rollback, what the VM was last told
 (and an explicit `ssh to the VM failed` rather than a misleading `none` when the key is wrong), whether
 the baseline snapshot exists, that the policy is locked, the allowlist, the last line of the deploy log,
-and whether the reboot guard is still armed.  `/etc/deploy-ai/deployed-source` holds the store path of the source
+and whether the reboot guard is still armed.  Both files come from `nixflakes.deploy-ai.healthUnits`
+and `nixflakes.deploy-ai.healthUrl`, which is where they belong: a health check describes the host,
+and `platforms/ai.nix` sets the endpoint from the gateway's own port setting.  The package once
+hardcoded `http://127.0.0.1:8642/api/v1/health`, a path the gateway has never served (it answers
+`GET /health` and `GET /health/detailed`, `hermes-agent/gateway/platforms/api_server.py:1555`), so
+`--status` called a healthy api `down` and no submit could switch.  Moving the endpoint into config
+means the next time a port or path changes, the fix is an edit to `platforms/ai.nix` — an allowlisted
+path an agent can submit — instead of a denylisted one only an operator can apply.  `/etc/deploy-ai/deployed-source` holds the store path of the source
 the running system was built from (`nixflakes.deploy-ai.deployedSource`, kept alive by
 `system.extraDependencies`), `/etc/deploy-ai/deployed-commit` holds the flake rev the running
 system came from (`-dirty` suffix if you switched from a dirty tree — the gate strips it, and the

@@ -30,6 +30,8 @@ let
     buildKey = cfg.buildKey;
     stateDir = cfg.stateDir;
     submitMaxBytes = cfg.submit.maxBytes;
+    healthUnits = cfg.healthUnits;
+    healthUrl = cfg.healthUrl;
     guestOnlyPaths = cfg.submit.guestOnlyPaths;
     denylist = cfg.submit.denylist;
     # nixpkgs retired security.sudo.wheelWheelGroup, so the wheel policy here is execWheelOnly plus
@@ -112,6 +114,27 @@ in
       description = "Path of the private key deploy-ai sshes into the build VM with, as its ordinary user for transfers and builds.";
     };
 
+    # What `deploy-ai` probes before it will switch, and what it calls healthy afterwards.  These
+    # live here rather than in the package because a health check has to describe *this* host: the
+    # package used to name `http://127.0.0.1:8642/api/v1/health`, a path the gateway has never
+    # served, so `--status` read a healthy api as `down` and every switch refused to run.
+    healthUnits = lib.mkOption {
+      type = with lib.types; listOf str;
+      default = [ ];
+      example = [ "hermes-agent" "hermes-backend" ];
+      description = "Systemd units deploy-ai requires active before and after a switch.";
+    };
+
+    healthUrl = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "http://127.0.0.1:8642/health";
+      description = ''
+        The health endpoint deploy-ai requires to answer 2xx or 3xx before and after a switch.
+        It must be unauthenticated: the probe sends no credentials.
+      '';
+    };
+
     # The other way in: the guest sends a patch over ssh stdin instead of naming a ref.
     submit.enable = lib.mkEnableOption "the submit path, where the build VM sends a patch to the gate on stdin";
 
@@ -174,6 +197,14 @@ in
         '';
       }
       {
+        assertion = cfg.healthUnits != [ ] && cfg.healthUrl != "";
+        message = ''
+          nixflakes.deploy-ai needs healthUnits and healthUrl: without them deploy-ai has nothing
+          to call healthy, so it refuses every switch rather than guessing an endpoint.  Name the
+          units a switch must keep running and the unauthenticated health endpoint they answer on.
+        '';
+      }
+      {
         assertion = config.security.sudo.enable;
         message = ''
           nixflakes.deploy-ai needs security.sudo.enable: the gate reaches deploy-ai through the setuid
@@ -218,6 +249,14 @@ in
     ];
 
     environment.etc."deploy-ai/allowlist".text = lib.concatStringsSep "\n" cfg.allowlist + "\n";
+
+    # What deploy-ai treats as healthy, read out of /etc like the allowlist.  Both are inside
+    # `policyDigest`, so a submitted patch cannot move the probe to something that always answers
+    # 200 and call that a green health check.
+    environment.etc."deploy-ai/health-units".text =
+      lib.concatStringsSep "\n" cfg.healthUnits + "\n";
+
+    environment.etc."deploy-ai/health-url".text = cfg.healthUrl + "\n";
 
     environment.etc."deploy-ai/build-key".text = lib.optionalString (cfg.buildKey != "") (
       cfg.buildKey + "\n"

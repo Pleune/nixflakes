@@ -91,7 +91,14 @@ class TempMixin(unittest.TestCase):
             "DEPLOY_AI_BASELINE": os.path.join(root, "baseline"),
             "DEPLOY_AI_BASELINE_COMMIT": os.path.join(root, "deployed-commit"),
             "DEPLOY_AI_INBOX": os.path.join(state, "inbox"),
+            "DEPLOY_AI_HEALTH_UNITS": os.path.join(root, "health-units"),
+            "DEPLOY_AI_HEALTH_URL": os.path.join(root, "health-url"),
         }
+        # A host publishes what it considers healthy, so the tests start from a configured probe
+        # (the gateway's real path) and override it when a case wants a broken one.
+        Path(env["DEPLOY_AI_HEALTH_UNITS"]).write_text(
+            "hermes-agent\nhermes-backend\nhermes-webui\n")
+        Path(env["DEPLOY_AI_HEALTH_URL"]).write_text("http://127.0.0.1:8642/health\n")
         for name, content in files.items():
             Path(env[name]).write_text(content)
         os.makedirs(env["DEPLOY_AI_BASELINE"])
@@ -496,7 +503,7 @@ class Output(TempMixin):
         Path(tool.state, "refs.log").write_text(
             "2026-11-19T20:00:00\t" + "a" * 40 + "\tsubmit\n")
         tool.run = lambda argv, **kwargs: Result(
-            stdout="NextElapseSince1970Usec=infinity\n")
+            stdout="200\n" if argv[0] == "curl" else "NextElapseSince1970Usec=infinity\n")
         tool.vm_ssh = lambda command: Result(stdout="b" * 40 + "\n")
         text = self.rows(tool, "do_status")
         self.assertIn(self.row("commit", "f" * 10), text)
@@ -511,14 +518,15 @@ class Output(TempMixin):
         tool = self.make_tool()
 
         def probe(argv, **kwargs):
-            # One service down, and the API answering nothing, which is what a switch would treat as
-            # an unhealthy system.
+            # One service down, and the health endpoint answering nothing at all, which is what a
+            # switch would treat as an unhealthy system.
             return Result(returncode=1 if argv[-1] == "hermes-webui" or "curl" in argv[0] else 0)
 
         tool.run = probe
         tool.vm_ssh = lambda command: Result(returncode=255, stderr="Permission denied (publickey)")
         text = self.rows(tool, "do_status")
-        self.assertIn(self.row("health", "down: hermes-webui, api"), text)
+        self.assertIn(self.row("health",
+                              "down: hermes-webui inactive, health endpoint answered nothing"), text)
         self.assertIn(self.row("guest",
                               "unknown, ssh to the VM failed: Permission denied (publickey)"), text)
 
@@ -536,6 +544,57 @@ class Output(TempMixin):
     def test_an_unreachable_state_leaves_no_mystery(self):
         tool = self.make_tool()
         self.assertEqual(tool.last_row(), "none recorded")
+
+
+class Health(TempMixin):
+    """The switch is gated on a probe that has to describe this host.  A wrong endpoint used to read
+    exactly like a dead service, so a healthy machine refused every deploy."""
+
+    def answer(self, tool, stdout="200\n", returncode=0):
+        """Stub the probes so only the health endpoint's answer varies."""
+        tool.run = lambda argv, **kwargs: (
+            Result(stdout=stdout, returncode=returncode) if argv[0] == "curl" else Result())
+
+    def test_the_url_probed_is_the_one_the_host_published(self):
+        tool = self.make_tool(DEPLOY_AI_HEALTH_URL="http://127.0.0.1:9999/health\n")
+        asked = []
+
+        def probe(argv, **kwargs):
+            asked.append(argv)
+            return Result(stdout="200\n") if argv[0] == "curl" else Result()
+
+        tool.run = probe
+        self.assertEqual(tool.health_problems(), [])
+        self.assertEqual(asked[-1][-1], "http://127.0.0.1:9999/health")
+
+    def test_a_wrong_path_names_the_status_code_not_a_dead_service(self):
+        tool = self.make_tool()
+        self.answer(tool, stdout="404\n")
+        self.assertEqual(tool.health_problems(), ["health endpoint answered 404"])
+
+    def test_nothing_listening_is_not_reported_as_a_status_code(self):
+        tool = self.make_tool()
+        self.answer(tool, returncode=7)
+        self.assertEqual(tool.health_problems(), ["health endpoint answered nothing"])
+
+    def test_a_missing_probe_is_said_out_loud_instead_of_guessed(self):
+        tool = self.make_tool(DEPLOY_AI_HEALTH_URL="\n")
+        self.answer(tool)
+        self.assertEqual(tool.health_problems(), ["no health endpoint configured"])
+
+    def test_a_inactive_unit_names_that_unit(self):
+        tool = self.make_tool()
+        self.answer(tool)
+        tool.run = lambda argv, **kwargs: (
+            Result(returncode=1) if argv[-1] == "hermes-backend"
+            else Result(stdout="200\n") if argv[0] == "curl" else Result())
+        self.assertEqual(tool.health_problems(), ["hermes-backend inactive"])
+
+    def test_a_healthy_system_opens_the_switch(self):
+        tool = self.make_tool()
+        self.answer(tool)
+        tool.vm_ssh = lambda command: Result(stdout="ok\n")
+        self.assertTrue(tool.check_health())
 
 
 class DryRun(TempMixin):

@@ -512,6 +512,18 @@ in
     deployedSource = deployedSource;
     deployedCommit = deployedCommit;
     buildKey = config.nixflakes.virtualisation.buildvm.loginKeys.deploy-ai.path;
+    # What deploy-ai calls healthy on this box.  The gateway's API server is the only health surface
+    # worth gating a switch on here: `/health` answers 200 unauthenticated
+    # (hermes-agent/gateway/platforms/api_server.py:1555, handler :2266), the dashboard answers on
+    # `/api/health` at 9119 and the WebUI at 8787, and none of them has an `/api/v1/health`.  The
+    # port is read from the platform setting above so the probe cannot drift from what is bound.
+    healthUnits = [
+      "hermes-agent"
+      "hermes-backend"
+      "hermes-webui"
+    ];
+    healthUrl =
+      "http://127.0.0.1:${toString config.services.hermes-agent.settings.platforms.api_server.extra.port}/health";
     # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
     # and refuses anything outside these prefixes before building.  platforms/ stays off the list
     # except the files involved here -- ai's own, and the two the build VM is built from, since a

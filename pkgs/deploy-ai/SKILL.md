@@ -114,9 +114,13 @@ deploy-ai: ai now
   guard     none armed
 ```
 
-`health` names what is down, `guest` says what the VM was last told (and says the ssh failed rather
+`health` names what is down — a unit by name, or the health endpoint and the status it answered
+(`health endpoint answered 404` is a wrong path, `health endpoint answered nothing` is nothing
+listening) — `guest` says what the VM was last told (and says the ssh failed rather
 than pretending the VM has nothing deployed), and `guard` shows the timed reboot that catches a hung
-switch.
+switch.  What counts as healthy is published by the host, not guessed by this package:
+`/etc/deploy-ai/health-units` lists the units and `/etc/deploy-ai/health-url` names the endpoint
+that must answer 2xx or 3xx, both set by `nixflakes.deploy-ai.healthUnits`/`healthUrl`.
 
 ## Addressing the gate
 
@@ -228,7 +232,7 @@ around it.
 | `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed, or you piped from the wrong range. |
 | `the guest switch failed; ai is unchanged` | Now `deploy-ai: failed: the guest switch failed; ai is unchanged`. The guest's rebuild or switch broke partway; ai is untouched, and the log is in `/home/builder/deploy.log` on the VM. |
 | `… is missing; the running system was built without nixflakes.deploy-ai.deployedSource` | ai has no baseline to patch onto; the operator must switch. |
-| `deploy-ai: refusing: the CURRENT system is already unhealthy; switching would hide that.  Fix it out-of-band or reboot ai` | The probes on the running system failed before anything was switched. |
+| `deploy-ai: refusing: the CURRENT system is already unhealthy (<what failed>); switching would hide that.  Fix it out-of-band or reboot ai` | The probes on the running system failed before anything was switched.  The parenthesized reason names it: an inactive unit, a status code, no listener, or no configured endpoint. |
 | `deploy-ai: the new system never became healthy; switching back`, then `deploy-ai: failed: deploy of <sha> failed and was rolled back; log: /var/lib/deploy-ai/log/build.log` | ai switched and came back broken; deploy-ai switched the recorded generation back and cancelled the reboot guard. |
 
 ## Checking state
