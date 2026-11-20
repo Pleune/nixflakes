@@ -85,7 +85,8 @@ class TempMixin(unittest.TestCase):
             "DEPLOY_AI_STATE": state,
             "DEPLOY_AI_ALLOWLIST": os.path.join(root, "allowlist"),
             "DEPLOY_AI_DENY_FILE": os.path.join(root, "denylist"),
-            "DEPLOY_AI_GUEST_ONLY_FILE": os.path.join(root, "guest-only-paths"),
+            "DEPLOY_AI_MAX_JOBS": os.path.join(root, "build-max-jobs"),
+            "DEPLOY_AI_PRIVATE_INPUT": os.path.join(root, "private-input"),
             "DEPLOY_AI_POLICY_FILE": os.path.join(root, "policy-digest"),
             "DEPLOY_AI_SUBMIT_MAX_BYTES_FILE": os.path.join(root, "submit-max-bytes"),
             "DEPLOY_AI_BASELINE": os.path.join(root, "baseline"),
@@ -215,18 +216,10 @@ class Denylist(TempMixin):
 class Policy(TempMixin):
     def setUp(self):
         self.tool = self.make_tool(DEPLOY_AI_POLICY_FILE="abc123\n",
-                                   DEPLOY_AI_GUEST_ONLY_FILE="platforms/buildvm.nix\n",
                                    DEPLOY_AI_ALLOWLIST="platforms/\n")
         self.candidate = self.sibling("candidate")
         Path(self.candidate, "platforms").mkdir(parents=True)
         Path(self.candidate, "platforms/buildvm.nix").write_text("one\n")
-
-    def test_all_guest_only_paths_classify_as_guest(self):
-        self.assertEqual(self.tool.classify_changes(self.candidate), "guest")
-
-    def test_one_host_path_classifies_as_ai(self):
-        Path(self.candidate, "platforms/ai.nix").write_text("one\n")
-        self.assertEqual(self.tool.classify_changes(self.candidate), "ai")
 
     def test_changed_policy_digest_is_refused(self):
         with refusal() as message:
@@ -334,47 +327,43 @@ class GuestLogin(TempMixin):
         key = os.path.join(self.root, "id_ed25519")
         Path(key).write_text("key\n")
         tool.build_key = key
-        tool.guest_root_key = key
         return tool
 
-    def test_the_two_users_are_two_logins_on_one_forward(self):
+    def test_the_guest_login_is_one_user_on_one_forward(self):
         tool = self.tool_with_key()
-        builder = tool.guest_ssh_argv("builder", "true")
-        root = tool.guest_ssh_argv("root", "true")
-        self.assertEqual(builder[builder.index("-i") + 1], tool.build_key)
-        self.assertEqual(root[root.index("-i") + 1], tool.guest_root_key)
-        self.assertIn("builder@127.0.0.1", builder)
-        self.assertIn("root@127.0.0.1", root)
-        self.assertEqual(builder[builder.index("-p") + 1], "2224")
-        self.assertEqual(builder[-1], "true")
+        argv = tool.guest_ssh_argv("true")
+        self.assertEqual(argv[argv.index("-i") + 1], tool.build_key)
+        self.assertIn("builder@127.0.0.1", argv)
+        self.assertEqual(argv[argv.index("-p") + 1], "2224")
+        self.assertEqual(argv[-1], "true")
 
     def test_a_reseeded_guest_is_not_a_host_key_refusal(self):
         # buildvm-install replaces the guest's sshd host keys whenever the disk is re-seeded.
         tool = self.tool_with_key()
-        for argv in (tool.guest_ssh_argv("builder", "true"), tool.guest_ssh_argv("root", "true")):
-            self.assertIn("UserKnownHostsFile=/dev/null", argv)
-            self.assertIn("StrictHostKeyChecking=accept-new", argv)
-            self.assertIn("BatchMode=yes", argv)
+        argv = tool.guest_ssh_argv("true")
+        self.assertIn("UserKnownHostsFile=/dev/null", argv)
+        self.assertIn("StrictHostKeyChecking=accept-new", argv)
+        self.assertIn("BatchMode=yes", argv)
 
     def test_an_unreadable_key_names_the_file_and_the_user(self):
         tool = self.tool_with_key()
         tool.build_key = os.path.join(self.root, "missing")
         with refusal() as message:
-            tool.guest_ssh_argv("builder", "true")
+            tool.guest_ssh_argv("true")
         self.assertIn("missing", message.getvalue())
         self.assertIn("builder", message.getvalue())
 
-    def test_one_keypair_serves_both_users_when_root_publishes_none(self):
-        # What ai does: /etc/deploy-ai/guest-root-key and /etc/deploy-ai/build-key name one file.
-        tool = self.make_tool()
-        key = os.path.join(self.root, "id_ed25519")
-        Path(key).write_text("key\n")
-        probe = deploy_ai.DeployAI({
-            "DEPLOY_AI_STATE": tool.state,
-            "DEPLOY_AI_BUILD_KEY": key,
-            "DEPLOY_AI_GUEST_ROOT_KEY_FILE": os.path.join(self.root, "absent"),
-        })
-        self.assertEqual(probe.guest_root_key, key)
+    def test_the_gate_writes_nothing_inside_the_guest(self):
+        # Provisioning records what the VM runs; the gate only looks.  A root login into the guest
+        # would be the old in-guest switch coming back.
+        tool = self.tool_with_key()
+        self.assertFalse(hasattr(tool, "guest_root_ssh"))
+        self.assertFalse(hasattr(tool, "record_in_guest"))
+        self.assertFalse(hasattr(tool, "guest_root_key"))
+        seen = []
+        tool.run = lambda argv, **kwargs: seen.append(argv) or Result(stdout="a\n")
+        self.assertEqual(tool.guest_row(), "a")
+        self.assertTrue(all("builder@" in " ".join(argv) for argv in seen))
 
     def test_a_repo_on_the_vm_refuses_before_a_fetch_it_cannot_make(self):
         # The VM mirror is reachable only as `builder`, so a missing key is a configuration refusal.
@@ -416,34 +405,6 @@ class GuestLogin(TempMixin):
         tool.repo = "ssh://git@host.example/mitch/repo.git"
         self.assertTrue(tool.ssh_command().startswith("ssh -o"))
 
-    def test_the_guest_marker_survives_a_guest_that_drops_builder(self):
-        tool = self.tool_with_key()
-        written = []
-        tool.guest_root_ssh = lambda command: written.append(command) or Result()
-        tool.vm_ssh = lambda command: self.fail("the marker must not depend on builder")
-        tool.record_in_guest("a" * 40)
-        self.assertEqual(len(written), 1)
-        self.assertIn(tool.recorded_commit, written[0])
-        self.assertIn("a" * 40, written[0])
-
-
-class SeriesTip(TempMixin):
-    def test_the_newest_from_header_is_the_tip(self):
-        tool = self.make_tool()
-        patch = os.path.join(self.root, "series.patch")
-        Path(patch).write_text(
-            "From " + "1" * 40 + " Mon Jan 1 00:00:00 2026\nFrom \n"
-            + "From " + "2" * 40 + " Mon Jan 1 00:00:00 2026\n")
-        self.assertEqual(tool.series_tip(patch), "2" * 40)
-
-    def test_a_series_without_headers_has_no_tip(self):
-        tool = self.make_tool()
-        patch = os.path.join(self.root, "bare.patch")
-        Path(patch).write_text("diff --git a/x b/x\n")
-        self.assertEqual(tool.series_tip(patch), "")
-        self.assertEqual(tool.series_tip(os.path.join(self.root, "absent")), "")
-
-
 class RetainedBase(TempMixin):
     def test_the_reconstructed_commit_stays_resolvable(self):
         # A gate deploy's commit exists nowhere else, so `--status` and the next diff baseline need
@@ -459,8 +420,9 @@ class RetainedBase(TempMixin):
 
 
 class BuildSource(TempMixin):
-    """Two things the patched road got wrong: the path ai compares has to come from the source the VM
-    was given, and the candidate directory has to be reusable by the next deploy.
+    """The build runs on ai now, so three things have to hold: what is built is the source without
+    host git metadata, the build cannot take the whole machine, and it cannot wait on a fetch root has
+    no key for.
     """
 
     def tree(self, name: str, *, with_git: bool) -> str:
@@ -472,82 +434,101 @@ class BuildSource(TempMixin):
             Path(work, ".git", "HEAD").write_text("ref: refs/heads/main\n")
         return work
 
-    def test_a_reconstructed_tree_is_evaluated_as_the_vm_received_it(self):
-        """A submission's tree carries a `.git`; the VM's copy does not.  A repository flake carries
-        `self.rev`, which lands in `deployedCommit` and changes the toplevel path, so comparing the
-        VM's output against ai's repository copy refused every patched submit."""
+    def test_a_reconstructed_tree_is_built_without_its_git(self):
+        """A submission's tree carries a `.git` that exists only until the deploy ends.
+        `deployedCommit` is `self.rev or self.dirtyRev`, so building that repository would put a commit
+        nobody can resolve into the running system, and provisioning would hand it to the guest as what
+        is live."""
         tool = self.make_tool()
         work = self.tree("work", with_git=True)
-        unpack = tool.run
-        asked = []
+        built = []
+        # The view only exists while the build runs, so what it held has to be read there.
+        tool.build_on_ai = lambda tree: built.append((tree, sorted(os.listdir(tree))))
+        tool.verify_output = lambda attr, printed, tree: None
+        tool.switch_with_guards = lambda sha, after_success: None
+        tool.apply_on_ai(work, "a" * 40)
+        self.assertEqual(len(built), 1)
+        view, entries = built[0]
+        self.assertNotEqual(view, work, "ai built the tree it kept, not the tree it built from")
+        self.assertNotIn(".git", entries)
+        self.assertIn("platforms", entries)
 
-        def evaluate(argv, **kwargs):
-            if argv[0] != "nix":
-                return unpack(argv, **kwargs)   # the real copy that makes the sent view
-            ref = argv[-1].split("#")[0]
-            asked.append(ref)
-            self.assertNotEqual(ref, work, "ai evaluated the tree it kept, not the tree it sent")
-            self.assertFalse(os.path.isdir(os.path.join(ref, ".git")))
-            self.assertTrue(os.path.isfile(os.path.join(ref, "platforms", "buildvm.nix")))
-            return Result(stdout="/nix/store/x-nixos-system-ai\n")
-
-        tool.run = evaluate
-        tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
-        self.assertEqual(len(asked), 1)
-        self.assertFalse(os.path.isdir(asked[0]), "the throwaway copy was left behind")
-
-    def test_a_tree_without_git_is_evaluated_where_it_stands(self):
-        """`--repo/--ref` sends a `git archive` tree, so both sides already share one source and no
-        copy is needed."""
+    def test_a_tree_without_git_is_built_where_it_stands(self):
+        """`--repo/--ref` unpacks a `git archive`, so there is nothing to strip and no copy to pay for."""
         tool = self.make_tool()
         work = self.tree("work", with_git=False)
         asked = []
-        tool.run = lambda argv, **kwargs: asked.append(argv[-1]) or Result(
+        tool.run = lambda argv, **kwargs: asked.append(argv) or Result()
+        self.assertEqual(tool.build_view(work), work)
+        self.assertEqual(asked, [])
+
+    def test_the_throwaway_build_view_is_gone_whatever_the_build_does(self):
+        tool = self.make_tool()
+        work = self.tree("work", with_git=True)
+        views = []
+        tool.build_on_ai = lambda tree: views.append(tree)
+        tool.verify_output = lambda attr, printed, tree: None
+        tool.switch_with_guards = lambda sha, after_success: None
+        tool.apply_on_ai(work, "a" * 40)
+        self.assertEqual(len(views), 1)
+        self.assertFalse(os.path.isdir(views[0]))
+
+    def test_the_build_is_capped_and_overrides_the_input_it_cannot_fetch(self):
+        """`private` is a git+ssh input whose deploy key lives in the guest, and an uncapped build here
+        competes with the api server for the machine."""
+        tool = self.make_tool(DEPLOY_AI_MAX_JOBS="3\n", DEPLOY_AI_PRIVATE_INPUT="/nix/store/p-secrets\n")
+        asked = []
+        seen = {}
+
+        def run(argv, **kwargs):
+            asked.append(argv)
+            seen.update(kwargs)
+            return Result(stdout="/nix/store/x-nixos-system-ai\n")
+
+        tool.run = run
+        tool.build_on_ai("/nix/store/t-source")
+        self.assertEqual(tool.toplevel, "/nix/store/x-nixos-system-ai")
+        self.assertEqual(asked[0][asked[0].index("--max-jobs") + 1], "3")
+        self.assertEqual(asked[0][asked[0].index("--override-input") + 1], "private")
+        self.assertEqual(asked[0][asked[0].index("--override-input") + 2], "/nix/store/p-secrets")
+        self.assertEqual(asked[0][-1],
+                         "/nix/store/t-source#nixosConfigurations.ai.config.system.build.toplevel")
+        self.assertEqual(seen["timeout"], deploy_ai.BUILD_TIMEOUT)
+
+    def test_a_host_publishing_nothing_still_builds_capped(self):
+        tool = self.make_tool()
+        self.assertEqual(tool.max_jobs, str(deploy_ai.DEFAULT_MAX_JOBS))
+        self.assertEqual(tool.input_override(), [])
+
+    def test_the_path_check_evaluates_the_same_source_with_the_same_overrides(self):
+        tool = self.make_tool(DEPLOY_AI_PRIVATE_INPUT="/nix/store/p-secrets\n")
+        asked = []
+        tool.run = lambda argv, **kwargs: asked.append(argv) or Result(
             stdout="/nix/store/x-nixos-system-ai\n")
-        tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
-        self.assertEqual(asked[0],
-                         f"{work}#nixosConfigurations.ai.config.system.build.toplevel.outPath")
+        tool.verify_output("ai", "/nix/store/x-nixos-system-ai", "/nix/store/t-source")
+        self.assertEqual(asked[0][asked[0].index("--override-input") + 1], "private")
+        self.assertEqual(asked[0][-1],
+                         "/nix/store/t-source#nixosConfigurations.ai.config.system.build.toplevel.outPath")
 
     def test_an_output_ai_cannot_derive_still_refuses_to_switch(self):
         tool = self.make_tool()
-        work = self.tree("work", with_git=True)
+        work = self.tree("work", with_git=False)
         tool.run = lambda argv, **kwargs: Result(stdout="/nix/store/y-something-else\n")
         captured = io.StringIO()
         with self.assertRaises(SystemExit), redirect_stderr(captured):
             tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
-        self.assertIn("does not match what ai computed", captured.getvalue())
+        self.assertIn("does not match what ai evaluated", captured.getvalue())
         self.assertIn("result: failed", captured.getvalue())
 
-    def test_the_candidate_arrives_writable_so_the_next_deploy_can_remove_it(self):
+    def test_a_build_that_fails_names_the_log_and_changes_nothing(self):
         tool = self.make_tool()
-        self.assertIn("chmod -R u+rwX", tool.remote_unpack())
-
-    def test_entries_root_left_behind_are_cleared_by_root_and_the_send_retried(self):
-        """A guest-only switch runs as root against the candidate directory, so its leftovers are
-        root-owned and builder's `rm -rf` fails on the following deploy."""
-        tool = self.make_tool()
-        sends = []
-        cleaned = []
-
-        def unpack(argv, **kwargs):
-            sends.append(argv)
-            return "rm: cannot remove: Permission denied" if len(sends) == 1 else ""
-
-        tool.unpack_remote = unpack
-        tool.guest_root_ssh = lambda command: cleaned.append(command) or Result()
-        tool.send_tree(self.sibling("work"))
-        self.assertEqual(len(sends), 2)
-        self.assertIn("chmod -R u+rwX", cleaned[0])
-        self.assertIn(tool.guest_candidate, cleaned[0])
-
-    def test_a_candidate_even_root_cannot_clear_is_reported(self):
-        tool = self.make_tool()
-        tool.unpack_remote = lambda argv, **kwargs: "Permission denied"
-        tool.guest_root_ssh = lambda command: Result(returncode=1, stderr="rm: Permission denied")
+        tool.run = lambda argv, **kwargs: Result(returncode=1, stderr="error: cannot build\n")
         captured = io.StringIO()
         with self.assertRaises(SystemExit), redirect_stderr(captured):
-            tool.send_tree(self.sibling("work"))
-        self.assertIn("cannot unpack the tree into", captured.getvalue())
+            tool.build_on_ai(self.tree("work", with_git=False))
+        self.assertIn("build failed on ai", captured.getvalue())
+        self.assertIn("result: failed", captured.getvalue())
+        self.assertEqual(tool.toplevel, "")
 
 
 class Output(TempMixin):

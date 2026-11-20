@@ -464,12 +464,13 @@ in
       owner = "hermes";
       group = "hermes";
     };
-    # deploy-ai's own pair, root-owned because root runs it.  buildvm-install authorizes a root-owned
-    # login key in the guest as its ordinary user *and* as root, so this one keypair covers the tree
-    # transfer and the guest build (as `builder`, the only guest identity holding the git-host deploy
-    # key that the `private` input needs) and the in-guest `nixos-rebuild switch` of a guest-only
-    # deploy (as `root`).  Not `privateKeyPath`: that key authenticates the guest *outbound*.
-    loginKeys.deploy-ai = { };
+    # deploy-ai's own pair, root-owned because root runs it.  Not `privateKeyPath`: that key
+    # authenticates the guest *outbound*.  deploy-ai reaches the VM with a key of its own, and only ever
+    # as its ordinary user: the gate reads what the VM runs and switches nothing there, so this key gets
+    # no root login -- a switch of the guest is `buildvm-provision`'s job, running as root inside it.
+    loginKeys.deploy-ai = {
+      guestRoot = false;
+    };
     sshPort = guestPort;
     cpus = guestCpus;
     memoryMiB = guestMemoryMiB;
@@ -496,9 +497,9 @@ in
   # agent sends a patch of the deployed tree (`deploy-ai --submit`, read from stdin).  Both
   # reconstruct a candidate root-side, require every changed path inside `allowlist` and outside
   # `denylist`, and leave everything else byte-identical to the source the running system came
-  # from.  Host-path changes build on the VM, copy the closure back, health-probe, switch, and roll
-  # back automatically if the probes go red; guest-only changes switch the VM over ssh and never
-  # touch ai.  The reboot guard is armed immediately before the switch so a long failing build
+  # from.  Both build ai's system here, capped by `buildMaxJobs`, health-probe, switch, and roll back
+  # automatically if the probes go red; the build VM takes the same tree when provisioning rebuilds it
+  # inside itself.  The reboot guard is armed immediately before the switch so a long failing build
   # cannot leave a reboot pending.  See pkgs/deploy-ai/deploy-ai.py.
   # What Hermes loads from `/etc/hermes-skills` (`skills.external_dirs` above).  One directory per
   # skill, and the file is the repo's own, so the deployment notes the agent reads cannot drift away
@@ -524,10 +525,16 @@ in
     ];
     healthUrl =
       "http://127.0.0.1:${toString config.services.hermes-agent.settings.platforms.api_server.extra.port}/health";
+    # Builds run on this host, so they are bounded: a handful of derivations at a time leaves the
+    # gateway's api server its cores, and the `private` input is overridden with the store path ai
+    # already evaluated rather than fetched -- its deploy key belongs to the guest, and a fetch that
+    # cannot authenticate would otherwise look like a hung deploy.
+    buildMaxJobs = 4;
+    privateInput = "${private}";
     # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
     # and refuses anything outside these prefixes before building.  platforms/ stays off the list
-    # except the files involved here -- ai's own, and the two the build VM is built from, since a
-    # guest-only submit is allowed to change the guest's platform -- which is what stops the agent
+    # except the files involved here -- ai's own, and the two the build VM is built from, since the
+    # guest's platform is what the agent is normally editing -- which is what stops the agent
     # rewriting another machine.
     allowlist = [
       "platforms/ai.nix"
@@ -543,15 +550,11 @@ in
       "README.md"
     ];
 
-    # Submit: the guest sends a patch instead of naming a ref.  A patch confined to the guest's own
-    # platform files is built as `#buildvm` and applied to the guest over ssh, so ai keeps running;
-    # anything else follows the normal path above -- build in the VM, copy the closure back,
-    # health-probe, switch under the timed reboot guard, roll back if the probes go red.
+    # Submit: the guest sends a patch instead of naming a ref.  Whatever it changes, the patch is
+    # applied to ai's own source, built here, and switched under the same guard -- a change to the VM's
+    # files lands on ai and reaches the VM when provisioning rebuilds it from this tree, so there is one
+    # path and one place a deploy can fail.
     submit.enable = true;
-    submit.guestOnlyPaths = [
-      "platforms/buildvm.nix"
-      "platforms/buildvm-bootstrap.nix"
-    ];
     submit.maxBytes = 262144;
   };
 

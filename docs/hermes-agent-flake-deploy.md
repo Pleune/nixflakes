@@ -9,7 +9,7 @@ The agent on `ai` used to run in a Docker sandbox on the same box, so it could r
 | --- | --- | --- |
 | `buildvm` | `platforms/buildvm.nix`, `nixosConfigurations.buildvm` | NixOS guest the agent's shell runs in. No bootloader: `make-disk-image.nix` emits a raw ext4 filesystem image, and qemu boots it with `-kernel`/`-initrd`/`init=` from the guest's own toplevel. |
 | `nixflakes.virtualisation.buildvm` | `modules/nixos/virtualisation/buildvm/` | On `ai`: one-shot `buildvm-install` seeding the raw partition, then a `buildvm` unit running qemu/KVM with `hostfwd=tcp:127.0.0.1:2224-:22`. |
-| `deploy-ai` | `pkgs/deploy-ai/`, `modules/nixos/deploy-ai/` | The only way anything changes `ai`'s system: scope check → build in the guest → copy the closure → health probe → switch → auto-rollback. |
+| `deploy-ai` | `pkgs/deploy-ai/`, `modules/nixos/deploy-ai/` | The only way anything changes `ai`'s system: scope check → build on `ai` → health probe → switch → auto-rollback. |
 
 Shared constants (guest user, ssh port, disk, work directory, origin URL, the guest's public key) are
 written literally in the platform file that needs them: `platforms/ai.nix` for the host side,
@@ -22,8 +22,9 @@ which is the point: the files sit next to each other, and only the values that m
 There is **no repository on `ai`** and no host state in the VM. What is deployed is recorded on the
 host only: `environment.etc."deploy-ai/deployed-source"` is the flake source the running system was
 built from (pinned by `system.extraDependencies` so GC cannot collect it) and
-`environment.etc."deploy-ai/deployed-commit"` is its revision. The VM's one channel to that fact is
-`/home/builder/deployed-commit`, written by the gate after a successful switch.
+`environment.etc."deploy-ai/deployed-commit"` is its revision. The VM learns the same fact from
+`/home/builder/deployed-commit`, written by `buildvm-provision` when it converges the guest onto `ai`'s
+tree; the gate only reads that file.
 
 Because the baseline is a store path and not a git ref, scope checking compares **file contents**:
 history can be rewritten without hiding a protected file.
@@ -40,21 +41,26 @@ agent in the guest
              ├─ deployed commit must be an ancestor of <rev>
              ├─ diff candidate tree against /etc/deploy-ai/deployed-source,
              │  every differing path must match /etc/deploy-ai/allowlist
-             ├─ git archive <rev> | tar → /home/builder/deploy-candidate
-             ├─ nix build …#nixosConfigurations.ai… in the guest
-             ├─ nix-copy-closure --from builder@127.0.0.1 -p 2224
-             ├─ health: hermes-agent/backend/webui active, 8642 answering, VM reachable
+             ├─ git archive <rev> | tar → a git-free throwaway tree on ai
+             ├─ nix build …#nixosConfigurations.ai… on ai, --max-jobs capped,
+             │  `private` overridden from /etc/deploy-ai/private-input
+             ├─ nix eval the same target; the built path must match what it prints
+             ├─ health: hermes-agent/backend/webui active, the published health URL answering, VM reachable
              ├─ systemctl reboot --when=+60m  (guard, armed just before the switch)
              ├─ switch-to-configuration switch
              ├─ unhealthy → switch back to the previous toplevel
-             ├─ cancel the guard
-             └─ write <sha> to /home/builder/deployed-commit
+             └─ cancel the guard
+        └─ buildvm-provision, restarted by that switch
+             ├─ build #buildvm inside the guest, from the source ai was built from
+             ├─ move the `deployed` tag and write /home/builder/deployed-commit
+             └─ switch the guest and reboot it
 ```
 
 `--repo` is any git URL root can read: the git host, or the guest's own checkout
 (`ssh://builder@127.0.0.1:2224/home/builder/nixflakes`). Fetches use the build VM key
 (`nixflakes.deploy-ai.buildKey`), whose path is published in `/etc/deploy-ai/build-key` while the key
-itself stays root-owned. `--local` builds on `ai` instead of the guest.
+itself stays root-owned. That key is the gate's only route to the VM, and it is a read-only one: the gate
+builds and switches nothing there.
 
 ## Bring-up and daily use
 

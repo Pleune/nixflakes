@@ -81,7 +81,7 @@ Every run ends with one line that says what happened, so you never have to infer
 | `result: ok` | Nothing was applied: a `--status` read, a `--list`, or a `--vet`/`--dry-run`. |
 | `result: applied` | A system switched. |
 | `result: refused` | A guard said no to your patch. It is on stderr, after the rows that already held. |
-| `result: failed` | The patch passed the guards and something afterwards broke: a transfer, a build on the VM, the closure copy, a switch, a health probe. |
+| `result: failed` | The patch passed the guards and something afterwards broke: a build on `ai`, a switch, or a health probe. |
 
 Above it, `--vet` and `--submit` report one row per check as that check passes:
 
@@ -92,9 +92,8 @@ deploy-ai: --vet: 1a2b3c4d5e onto 8e4d0a1299
   scope     inside the allowlist
   denylist  clear
   policy    unchanged
-  class     ai
   changed   platforms/ai.nix
-  would     build on the VM, switch ai, and reboot back if it never becomes healthy
+  would     build on ai, switch ai, and reboot back if it never becomes healthy
 ```
 
 A refusal lands after the rows that held, so the last row you saw is the check that passed and the
@@ -116,7 +115,8 @@ deploy-ai: ai now
 
 `health` names what is down — a unit by name, or the health endpoint and the status it answered
 (`health endpoint answered 404` is a wrong path, `health endpoint answered nothing` is nothing
-listening) — `guest` says what the VM was last told (and says the ssh failed rather
+listening) — `guest` says what the VM reports it runs, read over ssh from the guest (and says the ssh
+failed rather
 than pretending the VM has nothing deployed), and `guard` shows the timed reboot that catches a hung
 switch.  What counts as healthy is published by the host, not guessed by this package:
 `/etc/deploy-ai/health-units` lists the units and `/etc/deploy-ai/health-url` names the endpoint
@@ -152,7 +152,7 @@ here: send them one at a time.
 | `deploy-ai gate: only 'deploy-ai ...' is accepted here.` | The string did not start with `deploy-ai`. Nothing was attempted. Fix the string, not your keys. |
 | `deploy-ai gate: refusing a command containing '<char>'.` | Same: the command never reached `deploy-ai`. |
 | `deploy-ai: refusing: <reason>` | `deploy-ai` ran and applied nothing; the reason is in the message, and the run ends `result: refused`. |
-| `deploy-ai: failed: <reason>` | Your patch passed every guard, then something broke: `cannot unpack … on the VM`, `build failed on the VM; log: …`, `nix-copy-closure failed`, `the VM's build output does not match what ai computed`, `the guest switch failed`. Ends `result: failed`. Report the reason; ai is unchanged unless the message says a switch happened. |
+| `deploy-ai: failed: <reason>` | Your patch passed every guard, then something broke: `build failed on ai; log: …`, `the build output does not match what ai evaluated`, `the switch failed`, `system is unhealthy after the switch; rolled back to …`. Ends `result: failed`. Report the reason; ai is unchanged unless the message says a switch happened. |
 | `deploy-ai gate: /run/wrappers/bin/sudo is not executable, so nothing can be deployed.` then `deploy-ai gate: ai needs security.sudo.enable for the setuid copy of sudo to exist.` | `ai` has no setuid sudo, so no command can reach `deploy-ai`. Nothing of yours is wrong: the operator's `security.sudo.enable` is the fix. |
 | `sudo: /nix/store/…-sudo-…/bin/sudo must be owned by uid 0 and have the setuid bit set` | an `ai` generation whose gate ran sudo from the store instead of `/run/wrappers/bin/sudo`. Report it; your command was fine and nothing ran. |
 | `deploy-ai` usage text, exit 1 | No flags it recognized, or an unknown flag. |
@@ -178,36 +178,38 @@ after yourself.
 4. No changed path is in `/etc/deploy-ai/denylist`: `modules/nixos/deploy-ai/`, `pkgs/deploy-ai/`,
    `flake.lock`, `secrets/`. The thing doing the vetting cannot vet a change to itself.
 5. Nothing the patch moves changes the policy the gate runs under. That policy covers the allowlist,
-   the gate's and build VM's keys, the users and their authorized keys, sudo, sshd, nix trust, and the
-   submit rules — so you cannot widen what is allowed. It is fixed on `ai`, and no patch can move it:
-   `--vet` reports `policy unchanged` rather than a hash, because the hash is not something you act on.
+   the gate's and build VM's keys, the users and their authorized keys, sudo, sshd, nix trust, the build
+cap, and the submit rules — so you cannot widen what is allowed. It is fixed on `ai`, and no patch can
+move it: `--vet` reports `policy unchanged` rather than a hash, because the hash is not something you act
+on.
 
-Then it builds your tree on this VM, copies the result to ai, and switches ai only if the probes pass.
+Then it builds your tree on ai — on the host, capped by `/etc/deploy-ai/build-max-jobs`, with `private`
+overridden from `/etc/deploy-ai/private-input` because only the guest holds that input's deploy key — and
+switches ai only if the probes pass.
 Before the switch the probes cover the whole road — ai's units, its health endpoint, and the build VM
-being reachable, because the build has to run there.  After the switch only ai is judged: switching ai
+being reachable, because switching ai makes provisioning rebuild the VM from this tree.  After the
+switch only ai is judged: switching ai
 restarts `buildvm-provision`, which rebuilds the guest's system from ai's tree and reboots it, and a VM
 down mid-convergence is not a failed deploy. A switch you did not ask for is rolled back on a timeout; an
 explicit switch stays, and a later deploy can roll it back.
 
-## Guest-only changes never restart ai
+## A change to the VM still goes through ai
 
-If every changed file is listed in `/etc/deploy-ai/guest-only-paths` (`platforms/buildvm.nix` and
-`platforms/buildvm-bootstrap.nix`), the gate rebuilds this VM, reboots it, and leaves ai alone. Your
-session is cut when the VM reboots; reconnect and read `/home/builder/deployed-commit`.
+There is no separate guest route.  A patch touching only `platforms/buildvm.nix` or
+`platforms/buildvm-bootstrap.nix` is built and switched on `ai` like any other: those files describe a
+configuration *object* on `ai`, not a system `ai` runs, so applying them restarts the api server's units
+but changes nothing it actually runs.  Both files are on `ai`'s allowlist.
 
-Both guest-only files are on `ai`'s allowlist too, because the allowlist is checked before that
-classification and a refused guest-only patch would be a dead end. Anything outside them means ai
-restarts: `platforms/ai.nix` and everything else are ai's.
-
-The VM is a copy of ai's system, so this lasts only until ai next switches: that switch re-runs
-`buildvm-provision`, which builds ai's tree inside the guest and re-tags `deployed` (docs/buildvm-ai-setup.md §6, §8).
-There is no timer deciding this — an ai switch restarts provisioning, and a switch that changes nothing
-provisioning is configured with leaves the guest as it is until the next boot.
+The VM takes the change when `buildvm-provision` runs next — the switch you just made restarts it, so it
+builds ai's new tree inside the guest, re-tags `deployed`, rewrites
+`/home/builder/deployed-commit`, and reboots the guest (docs/buildvm-ai-setup.md §6, §8).  That reboot
+cuts your session: reconnect and read the marker.  Nothing schedules provisioning besides that restart
+and boot, so a change can sit in the guest's system until ai switches again or the VM reboots.
 
 ## What is recorded, and what survives
 
-- `/home/builder/deployed-commit` — the commit ai (or the guest) was last switched to, written by
-  `deploy-ai` over ssh after each successful deploy.
+- `/home/builder/deployed-commit` — what the guest was last converged onto, written by
+  `buildvm-provision`; the gate only reads it.
 - `/home/builder/nixflakes/DEPLOYED.md` — what provisioning applied, and the tag it moved.
 - the `deployed` tag in `/home/builder/nixflakes` — what the guest's provisioning tagged, and what
   `deployed..main` is measured against.

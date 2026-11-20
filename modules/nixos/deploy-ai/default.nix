@@ -6,7 +6,9 @@
 # forced command is the gate, and root, which is not exposed to the VM.
 #
 # The other route in is submit: the guest sends a patch on stdin, and deploy-ai vets it against
-# nixflakes.deploy-ai.submit.guestOnlyPaths, submit.denylist and policyDigest before applying it.
+# nixflakes.deploy-ai.submit.denylist and policyDigest before applying it.  Every accepted patch
+# reaches ai through the same switch; the build VM takes it when provisioning rebuilds it from ai's
+# tree.
 {
   config,
   lib,
@@ -18,7 +20,7 @@ let
 
   # Everything a submitted patch must not be able to change: the gate's own scope, the keys and
   # accounts that reach root, the sudoers and sshd settings that gate them, nix's trusted users, and
-  # the buildvm paths a guest-only switch runs on.  deploy-ai recomputes the same shape from the
+  # the buildvm paths provisioning switches on.  deploy-ai recomputes the same shape from the
   # patched tree and refuses a submission whose digest moves, so the rules a patch is vetted against
   # cannot be edited by that patch.  Plain values only -- no derivations, no path checks -- because
   # this is evaluated on every host, and the buildvm options below exist everywhere
@@ -32,7 +34,10 @@ let
     submitMaxBytes = cfg.submit.maxBytes;
     healthUnits = cfg.healthUnits;
     healthUrl = cfg.healthUrl;
-    guestOnlyPaths = cfg.submit.guestOnlyPaths;
+    # What a build on this host may spend: derivations at a time, and which `private` it builds
+    # against.  Both move the digest, because both change what a build produces.
+    buildMaxJobs = cfg.buildMaxJobs;
+    privateInput = cfg.privateInput;
     denylist = cfg.submit.denylist;
     # nixpkgs retired security.sudo.wheelWheelGroup, so the wheel policy here is execWheelOnly plus
     # the extraRules the sudo module turns into sudoers lines.
@@ -111,7 +116,7 @@ in
     buildKey = lib.mkOption {
       type = lib.types.str;
       default = "";
-      description = "Path of the private key deploy-ai sshes into the build VM with, as its ordinary user for transfers and builds.";
+      description = "Path of the private key deploy-ai sshes into the build VM with, read-only, as its ordinary user.";
     };
 
     # What `deploy-ai` probes before it will switch, and what it calls healthy afterwards.  These
@@ -144,11 +149,26 @@ in
       description = "Largest patch, in bytes, deploy-ai will read from a submit's stdin.";
     };
 
-    submit.guestOnlyPaths = lib.mkOption {
-      type = with lib.types; listOf str;
-      default = [ ];
-      example = [ "platforms/buildvm.nix" ];
-      description = "Path prefixes that belong to the guest alone; a patch inside them switches the guest and leaves ai running.";
+    buildMaxJobs = lib.mkOption {
+      type = lib.types.int;
+      default = 2;
+      example = 4;
+      description = ''
+        How many derivations a deploy-ai build may run at once, passed as `--max-jobs`.  The build
+        runs on this host rather than inside the build VM, so the number has to leave the host's own
+        work -- here, the gateway's api server -- its share of the cores.
+      '';
+    };
+
+    privateInput = lib.mkOption {
+      type = with lib.types; nullOr str;
+      default = null;
+      example = "/nix/store/abc123-source";
+      description = ''
+        Store path of the `private` input this host evaluated, published so deploy-ai overrides that
+        input instead of fetching it.  `private` is a git+ssh input whose deploy key belongs to the
+        build VM, so nothing on this host can fetch it as root.
+      '';
     };
 
     submit.denylist = lib.mkOption {
@@ -190,11 +210,12 @@ in
         '';
       }
       {
-        assertion = !cfg.submit.enable || (cfg.publicKey != "" && cfg.submit.guestOnlyPaths != [ ]);
-        message = ''
-          nixflakes.deploy-ai.submit needs publicKey and submit.guestOnlyPaths: with no key no guest
-          can reach the gate, and with no guest-only paths every submitted patch restarts ai.
-        '';
+        assertion = !cfg.submit.enable || cfg.publicKey != "";
+        message = "nixflakes.deploy-ai.submit needs publicKey: with no key no guest can reach the gate.";
+      }
+      {
+        assertion = cfg.buildMaxJobs >= 1;
+        message = "nixflakes.deploy-ai.buildMaxJobs must be at least 1; a build with no jobs cannot finish.";
       }
       {
         assertion = cfg.healthUnits != [ ] && cfg.healthUrl != "";
@@ -215,9 +236,8 @@ in
       {
         assertion = !cfg.submit.enable || cfg.buildKey != "";
         message = ''
-          nixflakes.deploy-ai.buildKey is unset, so deploy-ai cannot ssh into the build VM: every
-          submitted patch needs it to transfer the tree, and a guest-only patch needs it to switch the
-          VM.
+          nixflakes.deploy-ai.buildKey is unset, so deploy-ai cannot ssh into the build VM: it reads
+          what the VM runs, and without a key it can only say it does not know.
         '';
       }
     ];
@@ -281,25 +301,22 @@ in
       text = toString cfg.submit.maxBytes + "\n";
     };
 
-    environment.etc."deploy-ai/guest-only-paths" = lib.mkIf cfg.submit.enable {
-      text = lib.concatStringsSep "\n" cfg.submit.guestOnlyPaths + "\n";
-    };
-
     environment.etc."deploy-ai/denylist" = lib.mkIf cfg.submit.enable {
       text = lib.concatStringsSep "\n" cfg.submit.denylist + "\n";
+    };
+
+    # Both belong to the build, which every route runs, so neither waits on submit being on.
+    environment.etc."deploy-ai/build-max-jobs" = {
+      text = toString cfg.buildMaxJobs + "\n";
+    };
+
+    environment.etc."deploy-ai/private-input" = lib.mkIf (cfg.privateInput != null) {
+      text = cfg.privateInput + "\n";
     };
 
     # Computed from the running config, so it moves exactly when a protected setting does.
     environment.etc."deploy-ai/policy-digest" = lib.mkIf cfg.submit.enable {
       text = cfg.policyDigest + "\n";
-    };
-
-    # Only the path, as with build-key above.  One keypair serves both users: buildvm-install
-    # authorizes a root-owned login key in the guest as its ordinary user *and* as root, so the same
-    # file does the transfer, the build and the in-guest switch.  The guest's own outbound key stays
-    # authorized for its ordinary user only, and nothing on the host sshes with it.
-    environment.etc."deploy-ai/guest-root-key" = lib.mkIf (cfg.submit.enable && cfg.buildKey != "") {
-      text = cfg.buildKey + "\n";
     };
 
     systemd.tmpfiles.rules = [

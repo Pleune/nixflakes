@@ -269,38 +269,37 @@ result:
 * `nixflakes.deploy-ai.submit.maxBytes` (262144 here) — the series lands in
   `/var/lib/deploy-ai/inbox`, `0700 root`, as the record of what arrived, readable only by root.
 
-**What a submission switches.**  If every changed path sits inside
-`nixflakes.deploy-ai.submit.guestOnlyPaths` — `platforms/buildvm.nix` and
-`platforms/buildvm-bootstrap.nix` on this host — the submission is `class guest`.  `deploy-ai` builds
-`nixosConfigurations.buildvm` inside the VM, compares the output path the VM printed against the one
-`ai` evaluates from the same tree, and switches the guest as root using the key named by
-`/etc/deploy-ai/guest-root-key`.  `ai` keeps running what it runs now, and nothing is copied back.
-Anything else is `class ai` and takes the full path from §7: build in the VM, `nix-copy-closure`,
-health probe of the current system, timed reboot guard, switch, rollback if the probes go red.  A
-guest-only switch is the common case, and it is the one the agent can do without putting the host at
-risk.
+**What a submission switches.**  Every submission takes the one path from §7: build `ai`'s system on
+`ai`, health probe the system running now, arm the timed reboot guard, switch, and roll back if the
+probes go red.  A patch to the guest's own files is no different and no safer: `platforms/buildvm.nix`
+describes a configuration *object* on `ai`, not a system `ai` runs, so building and switching `ai`
+takes it without touching the api server, and `buildvm-provision` builds that same tree inside the guest
+on its next pass (§6, §8).  Nothing crosses between the two stores, and nothing is switched in the guest
+from here.
 
-That one keypair does both jobs, and it is neither of the keys the guest already holds.
-`nixflakes.deploy-ai.buildKey` is `nixflakes.virtualisation.buildvm.loginKeys.deploy-ai.path` —
+That one keypair is the gate's only route into the VM, and it is neither of the keys the guest already
+holds.  `nixflakes.deploy-ai.buildKey` is `nixflakes.virtualisation.buildvm.loginKeys.deploy-ai.path` —
 `/var/lib/buildvm/keys/deploy-ai/id_ed25519`, a root-owned login keypair `buildvm-install` generates
-and whose public half it grafts into the guest's `~builder/.ssh/authorized_keys` *and*
-`/root/.ssh/authorized_keys`, because a root-owned login key is authorized for both identities (§6).
-`/etc/deploy-ai/build-key` and `/etc/deploy-ai/guest-root-key` both publish only that path, so the
-tool transfers and builds as `builder` and switches as `root` over `127.0.0.1:2224`, on the same
-forward Hermes' shell uses, without ever naming a buildvm path in its own source.
+and whose public half it grafts into the guest's `~builder/.ssh/authorized_keys`.  It is authorized as
+`builder` only: `loginKeys.deploy-ai.guestRoot = false` keeps it out of the guest's
+`/root/.ssh/authorized_keys`, because the gate reads from the VM and never switches it, so a root login
+there would be a second way in that nothing uses (§4).  `/etc/deploy-ai/build-key` publishes only that
+path, so the tool reads the VM over `127.0.0.1:2224`, on the same forward Hermes' shell uses, without
+ever naming a buildvm path in its own source.
 It is deliberately not the guest's outbound keypair (`nixflakes.virtualisation.buildvm.privateKeyPath`, the
 agenix file `/run/agenix/ai_buildvm_id_ed25519`): that one authenticates the guest *toward* the git
 host, and offering it inbound is the wrong direction — sshd in the guest has never been configured to
-accept it.  Nor is it `provision.loginKey`: provisioning owns that one, and a submit cannot become
-guest root through a key the agent never sees.
+accept it.  Nor is it `provision.loginKey`: provisioning owns that one, and it is the only key with a
+reason to hold root in the guest.
 Every guest ssh sets `UserKnownHostsFile=/dev/null` with `StrictHostKeyChecking=accept-new`, because
 re-seeding the disk replaces the guest's sshd host keys and a remembered key is a hard refusal.
 
 **The policy digest.**  `nixflakes.deploy-ai.policyDigest` is a sha256 of everything a patch must not
-be able to move: the allowlist, the gate's key, the build key, the state dir, the submit cap, the
-guest-only paths, the denylist, the sudo rules, the users and their authorized keys, sshd's settings,
-nix's `trusted-users`, and the buildvm paths provisioning switches on.  `ai` writes its own digest to
-`/etc/deploy-ai/policy-digest`, and `deploy-ai` evaluates the same option out of the patched tree.
+be able to move: the allowlist, the gate's key, the build key, the state dir, the submit cap, the build
+cap, the private input the gate overrides instead of fetching, the denylist, the sudo rules, the users
+and their authorized keys, sshd's settings, nix's `trusted-users`, and the buildvm paths provisioning
+switches on.  `ai` writes its own digest to `/etc/deploy-ai/policy-digest`, and `deploy-ai` evaluates
+the same option out of the patched tree.
 A submission whose digest differs is refused before anything is built or applied.  The denylist alone
 cannot do this: a digest move is legal inside an allowed prefix, so the digest is what stops a patch
 rewriting the rules it is vetted against.
@@ -484,8 +483,9 @@ the running system was built from (`nixflakes.deploy-ai.deployedSource`, kept al
 system came from (`-dirty` suffix if you switched from a dirty tree — the gate strips it, and the
 content diff still catches the uncommitted part). A real deploy is the dry run without `--dry-run`;
 do the first one yourself so you watch: mirror fetch → ancestor check → content diff against the
-deployed source (refuses anything outside `nixflakes.deploy-ai.allowlist`) → build
-in the guest → `nix-copy-closure --from builder@127.0.0.1` → health probe of the *current* system →
+deployed source (refuses anything outside `nixflakes.deploy-ai.allowlist`) → build on `ai`, capped by
+`nixflakes.deploy-ai.buildMaxJobs` and with `private` overridden to
+`nixflakes.deploy-ai.privateInput` → health probe of the *current* system →
 `systemctl reboot --when=+60m` → switch → wait for health → guard cancelled, or rollback.
 
 The mirror (`/var/lib/deploy-ai/repo`) is where a candidate commit is looked up, and it is fetched from
@@ -538,12 +538,12 @@ guest's own checkout is, because the guest *is* that repository — and the shor
 straight from the guest to the gate, which needs no push at all (§5).
 
 `deploy-ai` mirrors that repo, refuses anything outside `nixflakes.deploy-ai.allowlist` or outside the
-deployed commit's history, builds `nixosConfigurations.ai` on the VM from a plain copy of the tree,
-copies the closure back, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which builds the
+deployed commit's history, builds `nixosConfigurations.ai` on `ai` itself from a git-free copy of the
+tree, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which builds the
 same tree inside the guest and moves tag `deployed` to it without touching the agent's checkout (§6) — so
 the guest converges on what `ai` runs, while the agent's `main` stays where it left it.  The guest is a
-copy of `ai`'s system: a change the guest needs and `ai` does not is a guest-only submission (§7), and
-anything else reaches `ai` and the VM follows it.
+copy of `ai`'s system: a change only the guest needs still arrives through `ai`, and the VM takes it
+when provisioning rebuilds.
 
 Two consequences worth knowing:
 

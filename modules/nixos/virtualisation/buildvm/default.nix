@@ -5,12 +5,12 @@ let
   # Provisioning always gets its own key; loginKeys add the other consumers (Hermes, tooling).
   loginKeyList =
     lib.optionals cfg.provision.enable [
-      { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; }
+      { name = "provision"; path = cfg.provision.loginKey; owner = "root"; group = "root"; guestRoot = true; }
     ]
     ++ attrValues cfg.loginKeys;
   # The guest's ordinary user has no sudo, so activation can only run as root: keys the host runs as
   # root are the ones authorized in the guest's /root/.ssh/authorized_keys.
-  rootKeyList = filter (k: k.owner == "root") loginKeyList;
+  rootKeyList = filter (k: k.owner == "root" && k.guestRoot) loginKeyList;
 in
 {
   options.nixflakes.virtualisation.buildvm = {
@@ -91,6 +91,15 @@ in
             type = types.str;
             default = "root";
             description = "Group of the key file and of its directory.";
+          };
+          guestRoot = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Also authorize this key in the guest's `/root/.ssh/authorized_keys`.  A consumer that
+              only ever sshes into the guest as its ordinary user should turn this off: an extra root
+              login on the VM is a second way in that nothing uses.
+            '';
           };
         };
       }));
@@ -271,7 +280,7 @@ in
         default = "";
         description = ''
           Commit the guest should be on, normally `self.rev` of ai's deploy.  Empty falls back to the
-          file deploy-ai records in the guest.
+          file provisioning records in the guest.
         '';
       };
 
@@ -297,7 +306,8 @@ in
         type = types.str;
         default = "/home/${cfg.userName}/deployed-commit";
         description = ''
-          Guest file naming the commit to apply; deploy-ai writes it after each successful deploy.
+          Guest file naming the live commit.  `buildvm-provision` writes it after it converges the
+          guest onto ai's tree; `deploy-ai --status` only reads it.
         '';
       };
 
@@ -541,7 +551,7 @@ in
     # sshd, no desktop, no gc, no sudo.  This unit streams ai's nixflakes and secrets trees into the
     # guest over ssh and switches the guest onto that commit - one pass per changed snapshot.
     #
-    # The commit is `provision.targetCommit`, else what deploy-ai recorded: the tree ai came from.
+    # The commit is `provision.targetCommit`, else what the guest recorded: the tree ai came from.
     systemd.services.buildvm-provision = mkIf cfg.provision.enable {
       description = "Apply the buildvm guest's own NixOS config inside the guest";
       wantedBy = [ "multi-user.target" ];
@@ -664,7 +674,7 @@ in
         fi
 
         # The commit to apply.  A deploy records `<sha>-dirty`, which is no commit, so the suffix goes
-        # off; with nothing recorded, fall back to what deploy-ai wrote in the guest.
+        # off; with nothing recorded, read what the guest says it runs.
         TARGET="$COMMIT"
         if [ -z "$TARGET" ] && [ -n "$TARGET_FILE" ]; then
           TARGET=$(gssh "cat '$TARGET_FILE' 2>/dev/null" | tr -d ' \n')
@@ -771,11 +781,10 @@ in
         fi
         echo "buildvm-provision: deployed is $REV; $WORK, its main and its working tree were left alone"
 
-        # The record `deploy-ai --status` reads as the guest's own view of what it runs.  Without it the
-        # gate reports `guest commit: none` right after a successful switch, because only `deploy-ai`
-        # used to write this file.  Writing the same path keeps the two paths in agreement.
+        # The record `deploy-ai --status` reads as the guest's own view of what it runs.  Provisioning is
+        # the only writer, so the answer always comes from the VM rather than from what ai hoped it ran.
         gssh "printf '%s\\n' '$REV' > '$TARGET_FILE'" \
-          || echo "buildvm-provision: could not write $TARGET_FILE; deploy-ai falls back to ai's own record" >&2
+          || echo "buildvm-provision: could not write $TARGET_FILE; deploy-ai reports the guest as unknown" >&2
 
         # Tell the agent what happened inside its own checkout: this unit's journal belongs to root on
         # ai, and the guest's own journal dies with the reboot below.  The file stays untracked,
