@@ -333,7 +333,7 @@ What it does, in order: wait for ssh; skip if `/home/builder/provisioned-commit`
 snapshot `ai` runs (that file holds the store name of `provision.sourcePath`, which hashes the tree's
 contents, so a changed deploy is never mistaken for the one already applied); copy `provision.sourcePath`
 and the `private` source into the **guest's own store** with `nix copy --no-check-sigs
---to ssh-ng://root@localhost:2224`, because a store path on `ai` is invisible to the guest and everything
+--to ssh-ng://root@127.0.0.1:2224`, because a store path on `ai` is invisible to the guest and everything
 below reads it locally; copy the secrets tree out of the store into `~builder/secrets`, because secrets
 are a plain tree and the agent has to be able to read them; `git init -q -b main` the checkout if it has
 no repository, point its `origin` at
@@ -363,7 +363,7 @@ and no tree of the agent's working files to exclude.
 The commit it records is a label, and it is not always a commit the guest has.  A ref naming a commit the
 guest cannot resolve used to make `nixos-rebuild` fall back to whatever `main` already was, which looked
 exactly like the VM ignoring the deploy — so a recorded sha is used only when `git cat-file -e` confirms
-it, and otherwise the pass commits the copied tree in `~builder/nixflakes-stream`, pushes it as
+it, and otherwise the pass commits the copied tree in `~builder/nixflakes-scratch`, pushes it as
 `refs/tags/provisioned-snapshot`, and records that sha.  Records and `git rebase deployed` want a sha;
 what gets built is the path.
 
@@ -386,7 +386,7 @@ repository.  Either way the guest still switches to `ai`'s tree; what it tags, a
 `git push origin main` from the guest is what makes both sides name the same commit.
 
 That published commit exists only when the recorded sha is missing: it is the copied tree committed in
-`~builder/nixflakes-stream` and pushed into the checkout as `refs/tags/provisioned-snapshot`, with the
+`~builder/nixflakes-scratch` and pushed into the checkout as `refs/tags/provisioned-snapshot`, with the
 directory removed afterwards.  Objects arrive; no branch, no
 `HEAD`, no file in the checkout changes.  The sha is invented inside the guest whenever the deploy's own
 commit was not pushed, so `deployed` and the git host can disagree about it until the operator pushes the

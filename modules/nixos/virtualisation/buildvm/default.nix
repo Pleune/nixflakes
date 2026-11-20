@@ -226,11 +226,12 @@ in
 
       scratchDir = mkOption {
         type = types.str;
-        default = "${cfg.provision.workdir}-stream";
+        default = "${cfg.provision.workdir}-scratch";
         description = ''
           Throwaway directory used only when a deploy points at a commit the guest cannot reach: the
-          tree ai runs on is committed there and pushed into the checkout's object store, so provisioning
-          can switch to a commit without writing to the checkout itself.  Removed after the push.
+          tree ai runs on, copied into the guest's store, is committed there and pushed into the
+          checkout's object store, so provisioning can record a commit without writing to the checkout
+          itself.  Removed after the push.
         '';
       };
 
@@ -651,7 +652,7 @@ in
         #
         # Copy what ai built from into the guest's own store first.  `$SOURCE` is a store path on ai,
         # invisible to the guest, so a switch ref naming it failed with `getting status of
-        # "/nix/store/…-nixflakes-source": No such file or directory`; streaming a tarball instead meant
+        # "/nix/store/…-nixflakes-source": No such file or directory`; a tarball instead meant
         # committing the copy before anything could build it, which invented a commit that is nobody's
         # deploy.  Store paths are content-addressed, so `nix copy` lands the *same* path in the guest and
         # everything below reads it locally: the seeding, the secrets tree and the switch all refer to one
