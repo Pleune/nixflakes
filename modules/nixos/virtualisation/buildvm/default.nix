@@ -248,7 +248,7 @@ in
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path on ai streamed into secretsDir, normally the `private` input ai evaluated against.  A
+          Path on ai copied into secretsDir, normally the `private` input ai evaluated against.  A
           plain copy, so the guest reads the same secrets without a key for the secrets repo.
         '';
       };
@@ -258,9 +258,9 @@ in
         default = null;
         example = "/nix/store/...-source";
         description = ''
-          Directory on ai holding the nixflakes tree ai was built from, streamed into the guest's
-          workdir.  Placed by provisioning, not seeding: the tree to switch to only exists once ai has
-          been deployed.
+          Store path on ai holding the nixflakes tree ai was built from, copied into the guest's own
+          store and switched by ref.  Placed by provisioning, not seeding: the tree to switch to only
+          exists once ai has been deployed.
         '';
       };
 
@@ -271,7 +271,7 @@ in
           The guest's `origin`: what provisioning fetches commits from and what the agent pushes to,
           using the outbound key buildvm-install grafts into `~${cfg.userName}/.ssh`.  A commit that was
           never pushed has nothing to fetch here, which provisioning warns about and works around by
-          switching the streamed tree as it stands.
+          recording the tree it copied instead.
         '';
       };
 
@@ -548,8 +548,9 @@ in
 
     # Put the guest's own NixOS config onto the guest.  Until this runs, the machine behind
     # `ssh -p ${toString cfg.sshPort}` is the seed image (platforms/buildvm-bootstrap.nix): git and
-    # sshd, no desktop, no gc, no sudo.  This unit streams ai's nixflakes and secrets trees into the
-    # guest over ssh and switches the guest onto that commit - one pass per changed snapshot.
+    # sshd, no desktop, no gc, no sudo.  This unit copies ai's nixflakes and secrets trees into the
+    # guest - the nixflakes tree into the guest's own store, by path - and switches the guest onto it,
+    # one pass per changed snapshot.
     #
     # The commit is `provision.targetCommit`, else what the guest recorded: the tree ai came from.
     systemd.services.buildvm-provision = mkIf cfg.provision.enable {
@@ -620,24 +621,6 @@ in
             || { echo "buildvm-provision: cannot hand $DEST to $USER" >&2; return 1; }
         }
 
-        # Stream a directory into the guest, creating it first.  Tar over ssh, not scp: one stream, an
-        # existing directory refreshed in place, everything owned by the logged-in user.  A tree that
-        # fails to arrive stops the run, because switching what is on disk provisions the wrong thing.
-        stream_dir() {
-          SRC="$1"
-          DEST="$2"
-          if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
-            echo "buildvm-provision: nothing to stream from $SRC" >&2
-            return 1
-          fi
-          prepare_dir "$DEST" || return 1
-          tar -C "$SRC" -cf - . | gssh "tar -xf - -C '$DEST'" \
-            || { echo "buildvm-provision: streaming $SRC into $DEST failed" >&2; return 1; }
-          # A store tree is 0444/0555 and tar keeps those modes, so git could never rewrite the copy.
-          gssh "chmod -R u+w '$DEST'" \
-            || { echo "buildvm-provision: could not make $DEST writable" >&2; return 1; }
-        }
-
         # The guest boots asynchronously; sshd takes a few seconds, and a reseed takes longer.
         READY=0
         for i in $(seq 1 180); do
@@ -650,7 +633,7 @@ in
         fi
 
         # The snapshot decides whether there is work.  A sha would not: a dirty-tree deploy keeps its sha
-        # while contents change.  With no snapshot there is nothing to compare or stream, so that is a
+        # while contents change.  With no snapshot there is nothing to compare or copy, so that is a
         # configuration error, not an up-to-date guest.
         if [ -z "$SOURCE" ]; then
           echo "buildvm-provision: provision.sourcePath is unset, so there is nothing to put in the guest" >&2
@@ -664,13 +647,35 @@ in
         # Provisioning never writes the agent's checkout: no stash, no `checkout --force`, no moving
         # `main` or HEAD.  Resetting `main` to the deployed commit used to delete commits the agent had
         # not pushed, and work that never left the guest cannot be recovered.  What moves is the
-        # `deployed` tag, and the switch builds that commit out of the repository's objects through a
-        # flake ref, so a deploy changes what the guest runs without touching the agent's files.
+        # `deployed` tag, and a deploy changes what the guest runs without touching the agent's files.
         #
-        # The secrets directory is a plain tree rather than a repository, so it is still streamed on
-        # every deploy: the agent has to be able to read it.
+        # Copy what ai built from into the guest's own store first.  `$SOURCE` is a store path on ai,
+        # invisible to the guest, so a switch ref naming it failed with `getting status of
+        # "/nix/store/…-nixflakes-source": No such file or directory`; streaming a tarball instead meant
+        # committing the copy before anything could build it, which invented a commit that is nobody's
+        # deploy.  Store paths are content-addressed, so `nix copy` lands the *same* path in the guest and
+        # everything below reads it locally: the seeding, the secrets tree and the switch all refer to one
+        # transfer, and the tree is the exact bytes ai evaluated rather than a re-serialized copy of them.
+        # `--no-check-sigs` because ai signs no store paths; the guest trusts this host through the ssh key,
+        # and a signing key would only be another secret to deploy.  Activation runs as root and the guest's
+        # store is writable by root, so the copy goes over the root ssh identity that buildvm-install
+        # authorizes.
+        PATHS="$SOURCE"
+        [ -n "$SECRETS_SRC" ] && PATHS="$PATHS $SECRETS_SRC"
+        SSH_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$KNOWN"
+        if ! NIX_SSHOPTS="$SSH_OPTS" nix copy --no-check-sigs --to "ssh-ng://$ROOT_USER@127.0.0.1:$PORT" $PATHS; then
+          echo "buildvm-provision: could not copy the tree ai runs on into the guest's store" >&2
+          exit 1
+        fi
+
+        # The secrets tree is what the agent reads, so it is copied out of the store into its own
+        # directory rather than pointed at: a store path is read-only and collectable.
         if [ -n "$SECRETS" ]; then
-          stream_dir "$SECRETS_SRC" "$SECRETS" || exit 1
+          prepare_dir "$SECRETS" || exit 1
+          if ! gssh "rm -rf '$SECRETS' && mkdir -p '$SECRETS' && cp -a '$SECRETS_SRC/.' '$SECRETS/' && chmod -R u+w '$SECRETS'"; then
+            echo "buildvm-provision: could not copy the secrets tree into $SECRETS" >&2
+            exit 1
+          fi
         fi
 
         # The commit to apply.  A deploy records `<sha>-dirty`, which is no commit, so the suffix goes
@@ -700,12 +705,12 @@ in
         fi
 
         # An empty checkout is seeded from the tree ai runs on, so the agent starts with something to
-        # read and edit.  This is the only time provisioning writes into $WORK: once the agent has
-        # commits of its own, its files are its own.
+        # read and edit.  The copy is local now: the store path arrived above.  This is the only time
+        # provisioning writes into $WORK: once the agent has commits of its own, its files are its own.
         SEEDED=""
         if ! gssh "cd '$WORK' && git rev-parse --verify --quiet HEAD >/dev/null"; then
-          stream_dir "$SOURCE" "$WORK" || exit 1
-          if ! gssh "cd '$WORK' && git add -A && git -c user.name=buildvm-provision -c user.email=buildvm-provision@localhost commit -q -m 'buildvm-provision: seeded from ai'"; then
+          prepare_dir "$WORK" || exit 1
+          if ! gssh "cp -a '$SOURCE/.' '$WORK/' && chmod -R u+w '$WORK' && cd '$WORK' && git add -A && git -c user.name=buildvm-provision -c user.email=buildvm-provision@localhost commit -q -m 'buildvm-provision: seeded from ai'"; then
             echo "buildvm-provision: could not seed $WORK from the tree ai runs on" >&2
             exit 1
           fi
@@ -713,57 +718,38 @@ in
           echo "buildvm-provision: seeded $WORK from the tree ai runs on"
         fi
 
-        # Where the switch builds from.  `git+file://` reads the repository's objects rather than its
-        # files, so the commit has to exist inside $WORK: a deploy the operator pushed arrives with the
-        # fetch above, and a seeded or unpushed deploy gets a commit of its own below.
-        REV=""
-        if [ -n "$TARGET" ] && gssh "cd '$WORK' && git cat-file -e '$TARGET^{commit}'"; then
-          REV="$TARGET"
-        elif [ "$SEEDED" = 1 ]; then
-          # A first run has nothing but the tree that was just seeded, and that tree is what ai runs.
-          # Reusing its commit keeps `deployed` and `main` on one tree instead of inventing a second
-          # commit with the same contents.
-          REV=$(gssh "git -C '$WORK' rev-parse HEAD" | tr -d ' \n')
-        elif [ -n "$TARGET" ]; then
-          echo "buildvm-provision: $TARGET is not in the guest's repository; publishing the tree ai runs on"
+        # What gets recorded, as a sha.  A commit the guest really has is preferred, because the agent can
+        # rebase onto it and push it; a seeded first run reuses the commit that seeded the checkout, so
+        # `deployed` and `main` name one tree instead of two commits with the same contents.  Otherwise
+        # publish the copied tree as a commit of its own — one scratch tag, no branch moved, no HEAD
+        # moved, no file in the checkout changed — because the agent's `git log -1 deployed` has to
+        # answer with something.
+        REV="$TARGET"
+        if [ -n "$REV" ] && ! gssh "cd '$WORK' && git cat-file -e '$REV^{commit}'"; then
+          echo "buildvm-provision: $REV is not in the guest's repository; recording the copied tree"
+          REV=""
         fi
-
-        # An unpushed deploy has no commit the guest can build, so its tree is published as objects of
-        # its own: streamed into a scratch directory, committed there, and pushed into the agent's
-        # repository.  Objects arrive and one scratch tag is written; no branch moves, no HEAD moves,
-        # and no file in the checkout changes.  `deployed` is only written once the switch succeeded,
-        # so a failed switch leaves it naming what the guest still runs.
+        if [ -z "$REV" ] && [ "$SEEDED" = 1 ]; then
+          REV=$(gssh "git -C '$WORK' rev-parse HEAD" | tr -d ' \n')
+        fi
         if [ -z "$REV" ]; then
           # Start empty: a leftover scratch tree would blend an older deploy's files into this one.
           gssh "rm -rf '$SCRATCH'" || true
-          if ! stream_dir "$SOURCE" "$SCRATCH" \
-            || ! gssh "cd '$SCRATCH' && git init -q -b provisioned . && git add -A && git -c user.name=buildvm-provision -c user.email=buildvm-provision@localhost commit -q -m 'buildvm-provision: the tree ai runs'" \
+          prepare_dir "$SCRATCH" || exit 1
+          if ! gssh "cp -a '$SOURCE/.' '$SCRATCH/' && chmod -R u+w '$SCRATCH' && cd '$SCRATCH' && git init -q -b provisioned . && git add -A && git -c user.name=buildvm-provision -c user.email=buildvm-provision@localhost commit -q -m 'buildvm-provision: the tree ai runs'" \
             || ! gssh "git -C '$SCRATCH' push --quiet --force '$WORK' HEAD:refs/tags/provisioned-snapshot"; then
-            echo "buildvm-provision: could not publish the tree ai runs on into $WORK" >&2
+            echo "buildvm-provision: could not record the copied tree as a commit in $WORK" >&2
             exit 1
           fi
           REV=$(gssh "git -C '$SCRATCH' rev-parse HEAD" | tr -d ' \n')
-          # The commit lives in $WORK now; the tree was only the vehicle for it.
           gssh "rm -rf '$SCRATCH'" || true
         fi
 
         echo "buildvm-provision: switching the guest to $SNAPSHOT"
-        # The switch runs as root (the guest's user has no sudo) while $WORK belongs to $USER, and
-        # libgit2 refuses a repository owned by someone else: the first deploy after `git init` died
-        # with `repository path '/home/builder/nixflakes' is not owned by current user (libgit2 error
-        # code = 7)`.  Naming the one path in root's git config is enough; `safe.directory '*'` would
-        # make root accept any foreign repository on the box.
-        gssh_root "git config --global --replace-all safe.directory '$WORK'" \
-          || echo "buildvm-provision: could not mark $WORK as safe for $ROOT_USER; the switch will fail" >&2
         SWITCHED=1
-        # Switch the tree `ai` runs, not a commit resolved out of the guest's checkout.  `$REV` exists
-        # only when the host flake had a clean `self.rev`: an out-of-band `nixos-rebuild switch
-        # --flake '.#ai'` from a dirty tree, or a gate submission reconstructed on `ai`, names a commit
-        # the guest cannot resolve, and a ref to an unresolvable rev made `nixos-rebuild` fall back to
-        # whatever `main` already was — a silent no-op that read as the VM ignoring the deploy.
-        # `$SOURCE` is the store path the running system was built from, so the guest always builds that
-        # content; `$REV` is still what gets recorded below, because records want a sha.
-        if ! gssh_root "nixos-rebuild switch --flake \"$SOURCE#$ATTR\" $OVERRIDE --accept-flake-config"; then
+        # The path `ai` was built from, now present in the guest's store: the same content, the same ref
+        # ai used, and no lock file to write into a read-only store.
+        if ! gssh_root "nixos-rebuild switch --flake \"$SOURCE#$ATTR\" $OVERRIDE --accept-flake-config --no-write-lock-file"; then
           echo "buildvm-provision: switch failed; guest left as it is" >&2
           SWITCHED=0
         fi
