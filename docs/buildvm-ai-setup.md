@@ -334,8 +334,10 @@ snapshot `ai` runs (that file holds the store name of `provision.sourcePath`, wh
 contents, so a changed deploy is never mistaken for the one already applied); copy `provision.sourcePath`
 and the `private` source into the **guest's own store** with `nix copy --no-check-sigs
 --to ssh-ng://root@127.0.0.1:2224`, because a store path on `ai` is invisible to the guest and everything
-below reads it locally; copy the secrets tree out of the store into `~builder/secrets`, because secrets
-are a plain tree and the agent has to be able to read them; `git init -q -b main` the checkout if it has
+below reads it locally; pin both of those paths under `/nix/var/nix/gcroots/deploy-ai` in the guest, which
+`platforms/buildvm.nix` garbage-collects daily and which nothing else points at yet; copy the secrets tree
+out of the store into `~builder/secrets`, because secrets are a plain tree and the agent has to be able to
+read them; `git init -q -b main` the checkout if it has
 no repository, point its `origin` at
 `provision.origin` and fetch it with
 `GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'`, refspecs
@@ -359,6 +361,12 @@ copy existed, a switch naming it died with `error: getting status of
 a streamed copy instead meant committing that copy first, which invented a commit nobody deployed.  A
 store path is content-addressed, so the copy is the same bytes `ai` evaluated, with no re-serialization
 and no tree of the agent's working files to exclude.
+
+The pin is two symlinks named `source` and `secrets`, rewritten on every pass.  The guest collects paths
+nothing refers to, and for the minutes between the copy and a switch the only thing referring to that tree
+is this unit's own command line, so a collection landing there would delete the tree mid-switch.  Because
+the names are fixed, repointing them leaves the previous snapshot unrooted and collectable: the guest holds
+the tree it is being asked to run, not every tree it has ever been given.
 
 The commit it records is a label, and it is not always a commit the guest has.  A ref naming a commit the
 guest cannot resolve used to make `nixos-rebuild` fall back to whatever `main` already was, which looked

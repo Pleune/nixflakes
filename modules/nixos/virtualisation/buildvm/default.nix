@@ -669,6 +669,20 @@ in
           exit 1
         fi
 
+        # Nothing in the guest points at those paths yet, and `platforms/buildvm.nix` garbage-collects
+        # there daily, so a collection racing this unit would delete the tree the switch is about to
+        # read.  Pin both as roots of the guest's store, under the names this unit always writes: the
+        # repoint leaves the previous snapshot unrooted and collectable again, so this costs the guest
+        # one generation instead of a pile, and a tree stays alive as long as it is what the guest is
+        # being asked to run.
+        GC_ROOT=/nix/var/nix/gcroots/deploy-ai
+        PIN="mkdir -p '$GC_ROOT' && ln -sfn '$SOURCE' '$GC_ROOT/source'"
+        [ -n "$SECRETS_SRC" ] && PIN="$PIN && ln -sfn '$SECRETS_SRC' '$GC_ROOT/secrets'"
+        if ! gssh_root "$PIN"; then
+          echo "buildvm-provision: could not pin the copied trees as garbage-collection roots in the guest" >&2
+          exit 1
+        fi
+
         # The secrets tree is what the agent reads, so it is copied out of the store into its own
         # directory rather than pointed at: a store path is read-only and collectable.
         if [ -n "$SECRETS" ]; then
