@@ -519,15 +519,29 @@ class DeployAI:
 
     # Hand a tree over as plain files; the VM needs no repo access to build, only its own key for
     # git-hosted flake inputs.  `.git` stays on ai: nothing about the host-side commit travels.
+    # The tree ends writable because a baseline comes out of the store, where directories are 0555 and
+    # tar keeps that: a read-only candidate cannot be removed by the next deploy, which made every
+    # second run need a manual cleanup.
     def remote_unpack(self) -> str:
-        return (f"rm -rf {shlex.quote(self.guest_candidate)} && "
-                f"mkdir -p {shlex.quote(self.guest_candidate)} && "
-                f"tar -x -C {shlex.quote(self.guest_candidate)}")
+        candidate = shlex.quote(self.guest_candidate)
+        return (f"rm -rf {candidate} && mkdir -p {candidate} && tar -x -C {candidate} "
+                f"&& chmod -R u+rwX {candidate}")
 
     def send_tree(self, tree: str) -> None:
         failure = self.unpack_remote(["tar", "-C", tree], exclude_git=True)
+        # What a guest-only deploy left behind can be root-owned: the in-guest switch runs as root
+        # against this directory, and builder's `rm -rf` cannot remove entries it does not own.  Root
+        # can undo both, so a failed cleanup asks root and unpacks again instead of failing the deploy
+        # over leftover plumbing.
+        if failure and self.clear_candidate():
+            failure = self.unpack_remote(["tar", "-C", tree], exclude_git=True)
         if failure:
             fail(f"cannot unpack the tree into {self.guest_candidate} on the VM: {failure}")
+
+    def clear_candidate(self) -> bool:
+        """Remove the candidate as root, restoring modes first so a recursive delete can descend."""
+        candidate = shlex.quote(self.guest_candidate)
+        return self.guest_root_ssh(f"chmod -R u+rwX {candidate} 2>/dev/null; rm -rf {candidate}").returncode == 0
 
     def remote_build(self, attr: str, log: str) -> str:
         """Build `nixosConfigurations.<attr>` in the guest and return the output path it printed."""
@@ -564,13 +578,38 @@ class DeployAI:
 
     # ai evaluates the same tree the VM just built.  A path ai does not recognize is a VM that built
     # something else, and activating it would run a system nobody vetted.
+    #
+    # "Same tree" means what the VM was *given*: `send_tree` excludes `.git`, and to nix those are two
+    # different sources.  A directory is a plain path flake with no `self.rev`; the same files inside
+    # a repository carry `self.rev`, which lands in `nixflakes.deploy-ai.deployedCommit` and changes
+    # the toplevel's path.  A submission's reconstructed tree has a `.git` (one host-authored commit)
+    # and the VM's copy does not, so every patched submit failed this check while `--repo/--ref`,
+    # whose tree comes from `git archive` and has no `.git` on either side, agreed.
+    def sent_view(self, tree: str) -> str:
+        """The tree as the VM receives it, without `.git`.  A tree that already has none is returned
+        as it stands, so the road that needs no copy pays nothing for it."""
+        if not os.path.isdir(os.path.join(tree, ".git")):
+            return tree
+        dest = tempfile.mkdtemp(prefix="deploy-ai-sent.")
+        try:
+            self.unpack_local_tar(tree, dest, exclude_git=True)
+        except BaseException:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        return dest
+
     def verify_output(self, attr: str, printed: str, tree: str) -> None:
-        result = self.run(["nix", "eval", "--raw", "--accept-flake-config",
-                           f"{tree}#nixosConfigurations.{attr}.config.system.build.toplevel.outPath"],
-                          capture=True, timeout=EVAL_TIMEOUT)
-        if result.returncode != 0:
-            fail(f"cannot evaluate the toplevel path of nixosConfigurations.{attr}; nothing was switched")
-        expected = result.stdout.strip()
+        view = self.sent_view(tree)
+        try:
+            result = self.run(["nix", "eval", "--raw", "--accept-flake-config",
+                               f"{view}#nixosConfigurations.{attr}.config.system.build.toplevel.outPath"],
+                              capture=True, timeout=EVAL_TIMEOUT)
+            if result.returncode != 0:
+                fail(f"cannot evaluate the toplevel path of nixosConfigurations.{attr}; nothing was switched")
+            expected = result.stdout.strip()
+        finally:
+            if view != tree:
+                shutil.rmtree(view, ignore_errors=True)
         if printed != expected:
             fail(f"the VM's build output does not match what ai computed: {printed} != {expected}; "
                 f"nothing was switched")
@@ -794,8 +833,9 @@ class DeployAI:
             fail(f"cannot unpack {sha} from {self.mirror}")
         return dest
 
-    def unpack_local_tar(self, tree: str, dest: str) -> None:
-        pack = subprocess.Popen(["tar", "-C", tree, "-cf", "-", "."], stdout=subprocess.PIPE)
+    def unpack_local_tar(self, tree: str, dest: str, *, exclude_git: bool = False) -> None:
+        pack = subprocess.Popen(["tar", "-C", tree] + (["--exclude=.git"] if exclude_git else [])
+                                + ["-cf", "-", "."], stdout=subprocess.PIPE)
         unpack = self.run(["tar", "x", "-C", dest], stdin=pack.stdout)
         pack.stdout.close()
         pack.wait()

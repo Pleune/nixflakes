@@ -458,6 +458,98 @@ class RetainedBase(TempMixin):
         self.assertEqual(sh(["git", "--git-dir", base, "rev-parse", "HEAD"]).strip(), sha)
 
 
+class BuildSource(TempMixin):
+    """Two things the patched road got wrong: the path ai compares has to come from the source the VM
+    was given, and the candidate directory has to be reusable by the next deploy.
+    """
+
+    def tree(self, name: str, *, with_git: bool) -> str:
+        work = self.sibling(name)
+        Path(work, "platforms").mkdir(parents=True)
+        Path(work, "platforms/buildvm.nix").write_text("one\n")
+        if with_git:
+            os.makedirs(os.path.join(work, ".git"))
+            Path(work, ".git", "HEAD").write_text("ref: refs/heads/main\n")
+        return work
+
+    def test_a_reconstructed_tree_is_evaluated_as_the_vm_received_it(self):
+        """A submission's tree carries a `.git`; the VM's copy does not.  A repository flake carries
+        `self.rev`, which lands in `deployedCommit` and changes the toplevel path, so comparing the
+        VM's output against ai's repository copy refused every patched submit."""
+        tool = self.make_tool()
+        work = self.tree("work", with_git=True)
+        unpack = tool.run
+        asked = []
+
+        def evaluate(argv, **kwargs):
+            if argv[0] != "nix":
+                return unpack(argv, **kwargs)   # the real copy that makes the sent view
+            ref = argv[-1].split("#")[0]
+            asked.append(ref)
+            self.assertNotEqual(ref, work, "ai evaluated the tree it kept, not the tree it sent")
+            self.assertFalse(os.path.isdir(os.path.join(ref, ".git")))
+            self.assertTrue(os.path.isfile(os.path.join(ref, "platforms", "buildvm.nix")))
+            return Result(stdout="/nix/store/x-nixos-system-ai\n")
+
+        tool.run = evaluate
+        tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
+        self.assertEqual(len(asked), 1)
+        self.assertFalse(os.path.isdir(asked[0]), "the throwaway copy was left behind")
+
+    def test_a_tree_without_git_is_evaluated_where_it_stands(self):
+        """`--repo/--ref` sends a `git archive` tree, so both sides already share one source and no
+        copy is needed."""
+        tool = self.make_tool()
+        work = self.tree("work", with_git=False)
+        asked = []
+        tool.run = lambda argv, **kwargs: asked.append(argv[-1]) or Result(
+            stdout="/nix/store/x-nixos-system-ai\n")
+        tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
+        self.assertEqual(asked[0],
+                         f"{work}#nixosConfigurations.ai.config.system.build.toplevel.outPath")
+
+    def test_an_output_ai_cannot_derive_still_refuses_to_switch(self):
+        tool = self.make_tool()
+        work = self.tree("work", with_git=True)
+        tool.run = lambda argv, **kwargs: Result(stdout="/nix/store/y-something-else\n")
+        captured = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(captured):
+            tool.verify_output("ai", "/nix/store/x-nixos-system-ai", work)
+        self.assertIn("does not match what ai computed", captured.getvalue())
+        self.assertIn("result: failed", captured.getvalue())
+
+    def test_the_candidate_arrives_writable_so_the_next_deploy_can_remove_it(self):
+        tool = self.make_tool()
+        self.assertIn("chmod -R u+rwX", tool.remote_unpack())
+
+    def test_entries_root_left_behind_are_cleared_by_root_and_the_send_retried(self):
+        """A guest-only switch runs as root against the candidate directory, so its leftovers are
+        root-owned and builder's `rm -rf` fails on the following deploy."""
+        tool = self.make_tool()
+        sends = []
+        cleaned = []
+
+        def unpack(argv, **kwargs):
+            sends.append(argv)
+            return "rm: cannot remove: Permission denied" if len(sends) == 1 else ""
+
+        tool.unpack_remote = unpack
+        tool.guest_root_ssh = lambda command: cleaned.append(command) or Result()
+        tool.send_tree(self.sibling("work"))
+        self.assertEqual(len(sends), 2)
+        self.assertIn("chmod -R u+rwX", cleaned[0])
+        self.assertIn(tool.guest_candidate, cleaned[0])
+
+    def test_a_candidate_even_root_cannot_clear_is_reported(self):
+        tool = self.make_tool()
+        tool.unpack_remote = lambda argv, **kwargs: "Permission denied"
+        tool.guest_root_ssh = lambda command: Result(returncode=1, stderr="rm: Permission denied")
+        captured = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(captured):
+            tool.send_tree(self.sibling("work"))
+        self.assertIn("cannot unpack the tree into", captured.getvalue())
+
+
 class Output(TempMixin):
     """What the agent reads back.  A verdict that needs parsing is a verdict that gets misread.
 
