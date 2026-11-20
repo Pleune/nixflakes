@@ -252,7 +252,9 @@ The grafted key in `~builder/.ssh` (§4) is the half `nixflakes.deploy-ai.public
 `/run/wrappers/bin/sudo`, the setuid copy `security.wrapperDir` provides, under a `NOPASSWD` sudo rule
 scoped to `/run/current-system/sw/bin/deploy-ai`.  The module asserts `config.security.sudo.enable`,
 because that option is what puts the setuid copy there (§7).  A submitted series arrives
-as `deploy-ai --submit` with the patch on stdin.
+as `deploy-ai --submit` with the patch on stdin.  Both halves are in `pkgs/deploy-ai/`: the tool is
+`deploy-ai.py`, stdlib-only Python with its tests in `test-deploy-ai.py`, and the login shell is the
+shell script `gate.nix`.
 
 Nothing the guest sent is trusted as a tree.  `deploy-ai` unpacks `/etc/deploy-ai/deployed-source`
 — the snapshot `ai` was built from (§7) — applies the series onto it with `git apply`, and vets the
