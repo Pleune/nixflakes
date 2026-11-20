@@ -104,11 +104,12 @@ in
     };
 
     # Only the key's location goes into /etc; the key itself stays root-owned under the buildvm
-    # state dir.
+    # state dir.  This is a host-side login keypair that the guest authorizes -- never the guest's own
+    # outbound key, which authenticates the guest toward the git host and is the wrong direction here.
     buildKey = lib.mkOption {
       type = lib.types.str;
       default = "";
-      description = "Path of the private key deploy-ai uses to reach the build VM and fetch repos.";
+      description = "Path of the private key deploy-ai sshes into the build VM with, as its ordinary user for transfers and builds.";
     };
 
     # The other way in: the guest sends a patch over ssh stdin instead of naming a ref.
@@ -180,6 +181,14 @@ in
           exist, so every command from the build VM fails.
         '';
       }
+      {
+        assertion = !cfg.submit.enable || cfg.buildKey != "";
+        message = ''
+          nixflakes.deploy-ai.buildKey is unset, so deploy-ai cannot ssh into the build VM: every
+          submitted patch needs it to transfer the tree, and a guest-only patch needs it to switch the
+          VM.
+        '';
+      }
     ];
 
     users.users.deployer = {
@@ -246,10 +255,12 @@ in
       text = cfg.policyDigest + "\n";
     };
 
-    # Only the path, as with build-key above.  This is the pair the guest's root accepts; the guest's
-    # own outbound key is authorized for its ordinary user only.
-    environment.etc."deploy-ai/guest-root-key" = lib.mkIf cfg.submit.enable {
-      text = config.nixflakes.virtualisation.buildvm.provision.loginKey + "\n";
+    # Only the path, as with build-key above.  One keypair serves both users: buildvm-install
+    # authorizes a root-owned login key in the guest as its ordinary user *and* as root, so the same
+    # file does the transfer, the build and the in-guest switch.  The guest's own outbound key stays
+    # authorized for its ordinary user only, and nothing on the host sshes with it.
+    environment.etc."deploy-ai/guest-root-key" = lib.mkIf (cfg.submit.enable && cfg.buildKey != "") {
+      text = cfg.buildKey + "\n";
     };
 
     systemd.tmpfiles.rules = [

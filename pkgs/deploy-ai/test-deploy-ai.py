@@ -11,10 +11,12 @@ import io
 import os
 import shutil
 import subprocess
+import types
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager, redirect_stderr
+from datetime import datetime, timezone
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -60,6 +62,15 @@ def patch_input(data: bytes):
         yield
     finally:
         sys.stdin = previous
+
+
+class Result:
+    """Stand-in for a subprocess result, so a test can stub a probe without a system."""
+
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 class TempMixin(unittest.TestCase):
@@ -302,6 +313,262 @@ class Usage(unittest.TestCase):
     def test_known_flags_parse(self):
         self.assertTrue(deploy_ai.parse_args(["--vet"]).vet)
         self.assertTrue(deploy_ai.parse_args(["--submit"]).submit)
+
+
+class GuestLogin(TempMixin):
+    """Who deploy-ai logs into the VM as, with which key, and what a bad key says.
+
+    Every check here stands for a deploy that used to fail with no message: ssh wrote its reason to
+    stderr, and nothing read stderr.
+    """
+
+    def tool_with_key(self) -> deploy_ai.DeployAI:
+        tool = self.make_tool()
+        key = os.path.join(self.root, "id_ed25519")
+        Path(key).write_text("key\n")
+        tool.build_key = key
+        tool.guest_root_key = key
+        return tool
+
+    def test_the_two_users_are_two_logins_on_one_forward(self):
+        tool = self.tool_with_key()
+        builder = tool.guest_ssh_argv("builder", "true")
+        root = tool.guest_ssh_argv("root", "true")
+        self.assertEqual(builder[builder.index("-i") + 1], tool.build_key)
+        self.assertEqual(root[root.index("-i") + 1], tool.guest_root_key)
+        self.assertIn("builder@127.0.0.1", builder)
+        self.assertIn("root@127.0.0.1", root)
+        self.assertEqual(builder[builder.index("-p") + 1], "2224")
+        self.assertEqual(builder[-1], "true")
+
+    def test_a_reseeded_guest_is_not_a_host_key_refusal(self):
+        # buildvm-install replaces the guest's sshd host keys whenever the disk is re-seeded.
+        tool = self.tool_with_key()
+        for argv in (tool.guest_ssh_argv("builder", "true"), tool.guest_ssh_argv("root", "true")):
+            self.assertIn("UserKnownHostsFile=/dev/null", argv)
+            self.assertIn("StrictHostKeyChecking=accept-new", argv)
+            self.assertIn("BatchMode=yes", argv)
+
+    def test_an_unreadable_key_names_the_file_and_the_user(self):
+        tool = self.tool_with_key()
+        tool.build_key = os.path.join(self.root, "missing")
+        with refusal() as message:
+            tool.guest_ssh_argv("builder", "true")
+        self.assertIn("missing", message.getvalue())
+        self.assertIn("builder", message.getvalue())
+
+    def test_one_keypair_serves_both_users_when_root_publishes_none(self):
+        # What ai does: /etc/deploy-ai/guest-root-key and /etc/deploy-ai/build-key name one file.
+        tool = self.make_tool()
+        key = os.path.join(self.root, "id_ed25519")
+        Path(key).write_text("key\n")
+        probe = deploy_ai.DeployAI({
+            "DEPLOY_AI_STATE": tool.state,
+            "DEPLOY_AI_BUILD_KEY": key,
+            "DEPLOY_AI_GUEST_ROOT_KEY_FILE": os.path.join(self.root, "absent"),
+        })
+        self.assertEqual(probe.guest_root_key, key)
+
+    def test_a_repo_on_the_vm_refuses_before_a_fetch_it_cannot_make(self):
+        # The VM mirror is reachable only as `builder`, so a missing key is a configuration refusal.
+        tool = self.make_tool()
+        tool.build_key = os.path.join(self.root, "missing")
+        tool.repo = "ssh://builder@127.0.0.1:2224/home/builder/nixflakes"
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return Result(stdout="", stderr="")
+
+        tool.run = run
+        with refusal() as message:
+            tool.ensure_mirror()
+        self.assertIn("missing", message.getvalue())
+        self.assertFalse([argv for argv in calls if "fetch" in argv])
+
+    def test_the_mirror_path_is_not_the_method_that_fills_it(self):
+        # `self.mirror` names the bare repo; the method that creates and fetches it must not share
+        # that name, or every `--repo/--ref` deploy calls a string.
+        tool = self.make_tool()
+        self.assertFalse(callable(tool.mirror))
+        self.assertTrue(callable(tool.ensure_mirror))
+        fetched = []
+
+        def run(argv, **kwargs):
+            fetched.append(argv)
+            return Result(stdout="", stderr="")
+
+        tool.run = run
+        tool.repo = "ssh://git@host.example/mitch/repo.git"
+        tool.ensure_mirror()
+        self.assertTrue([argv for argv in fetched if "fetch" in argv])
+
+    def test_a_git_host_fetch_still_uses_whatever_root_holds(self):
+        tool = self.make_tool()
+        tool.build_key = os.path.join(self.root, "missing")
+        tool.repo = "ssh://git@host.example/mitch/repo.git"
+        self.assertTrue(tool.ssh_command().startswith("ssh -o"))
+
+    def test_the_guest_marker_survives_a_guest_that_drops_builder(self):
+        tool = self.tool_with_key()
+        written = []
+        tool.guest_root_ssh = lambda command: written.append(command) or Result()
+        tool.vm_ssh = lambda command: self.fail("the marker must not depend on builder")
+        tool.record_in_guest("a" * 40)
+        self.assertEqual(len(written), 1)
+        self.assertIn(tool.recorded_commit, written[0])
+        self.assertIn("a" * 40, written[0])
+
+
+class SeriesTip(TempMixin):
+    def test_the_newest_from_header_is_the_tip(self):
+        tool = self.make_tool()
+        patch = os.path.join(self.root, "series.patch")
+        Path(patch).write_text(
+            "From " + "1" * 40 + " Mon Jan 1 00:00:00 2026\nFrom \n"
+            + "From " + "2" * 40 + " Mon Jan 1 00:00:00 2026\n")
+        self.assertEqual(tool.series_tip(patch), "2" * 40)
+
+    def test_a_series_without_headers_has_no_tip(self):
+        tool = self.make_tool()
+        patch = os.path.join(self.root, "bare.patch")
+        Path(patch).write_text("diff --git a/x b/x\n")
+        self.assertEqual(tool.series_tip(patch), "")
+        self.assertEqual(tool.series_tip(os.path.join(self.root, "absent")), "")
+
+
+class RetainedBase(TempMixin):
+    def test_the_reconstructed_commit_stays_resolvable(self):
+        # A gate deploy's commit exists nowhere else, so `--status` and the next diff baseline need
+        # the bare copy retain_base keeps.
+        tool = self.make_tool()
+        tree = self.sibling("tree")
+        Path(tree, "flake.nix").write_text("{}\n")
+        sh(["git", "-C", tree, "init", "-q"])
+        sha = commit(tree)
+        tool.retain_base(tree)
+        base = os.path.join(tool.state, "base.git")
+        self.assertEqual(sh(["git", "--git-dir", base, "rev-parse", "HEAD"]).strip(), sha)
+
+
+class Output(TempMixin):
+    """What the agent reads back.  A verdict that needs parsing is a verdict that gets misread.
+
+    The probes are stubbed: these tests have no systemd, no curl, and no VM, and must still show the
+    rows a switcher depends on.
+    """
+
+    def rows(self, tool, command: str) -> str:
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            getattr(tool, command)()
+        return captured.getvalue()
+
+    @staticmethod
+    def row(label: str, value: str) -> str:
+        """The same shape `say` prints, so a test asserts on content rather than on spacing."""
+        return f"  {label:<9} {value}"
+
+    def test_a_commit_prints_short_but_records_full(self):
+        self.assertEqual(deploy_ai.short("d" * 40), "d" * 10)
+        self.assertEqual(deploy_ai.short("abc"), "abc")
+        self.assertEqual(deploy_ai.short(""), "none")
+
+    def test_a_size_reads_at_a_glance(self):
+        self.assertEqual(deploy_ai.hum(512), "512B")
+        self.assertEqual(deploy_ai.hum(2048), "2.0K")
+
+    def test_a_refusal_and_a_failure_close_with_their_own_word(self):
+        with refusal() as message:
+            deploy_ai.die("no")
+        self.assertIn("refusing: no", message.getvalue())
+        self.assertIn("result: refused", message.getvalue())
+        captured = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(captured):
+            deploy_ai.fail("the build broke")
+        self.assertIn("failed: the build broke", captured.getvalue())
+        self.assertIn("result: failed", captured.getvalue())
+
+    def test_status_answers_what_is_live_and_whether_it_is_healthy(self):
+        tool = self.make_tool(DEPLOY_AI_POLICY_FILE="3" * 64 + "\n")
+        Path(tool.state, "commit").write_text("f" * 40 + "\n")
+        Path(tool.state, "toplevel").write_text("/nix/store/x-nixos-system-ai\n")
+        Path(tool.state, "refs.log").write_text(
+            "2026-11-19T20:00:00\t" + "a" * 40 + "\tsubmit\n")
+        tool.run = lambda argv, **kwargs: Result(
+            stdout="NextElapseSince1970Usec=infinity\n")
+        tool.vm_ssh = lambda command: Result(stdout="b" * 40 + "\n")
+        text = self.rows(tool, "do_status")
+        self.assertIn(self.row("commit", "f" * 10), text)
+        self.assertIn(self.row("health", "ok"), text)
+        self.assertIn(self.row("guest", "b" * 10), text)
+        self.assertIn(self.row("last", f"2026-11-19T20:00:00  {'a' * 10}  submit"), text)
+        self.assertIn(self.row("policy", "locked; a patch cannot change it"), text)
+        self.assertNotIn("3" * 10, text)
+        self.assertIn(self.row("guard", "none armed"), text)
+
+    def test_status_says_which_service_is_down(self):
+        tool = self.make_tool()
+
+        def probe(argv, **kwargs):
+            # One service down, and the API answering nothing, which is what a switch would treat as
+            # an unhealthy system.
+            return Result(returncode=1 if argv[-1] == "hermes-webui" or "curl" in argv[0] else 0)
+
+        tool.run = probe
+        tool.vm_ssh = lambda command: Result(returncode=255, stderr="Permission denied (publickey)")
+        text = self.rows(tool, "do_status")
+        self.assertIn(self.row("health", "down: hermes-webui, api"), text)
+        self.assertIn(self.row("guest",
+                              "unknown, ssh to the VM failed: Permission denied (publickey)"), text)
+
+    def test_status_reports_the_reboot_the_guard_armed(self):
+        tool = self.make_tool()
+        stamp = datetime(2026, 11, 19, 21, 30, tzinfo=timezone.utc)
+        usec = int(stamp.timestamp() * 1_000_000)
+        tool.run = lambda argv, **kwargs: Result(
+            stdout=f"NextElapseSince1970Usec={usec}\n")
+        armed = datetime.fromtimestamp(usec / 1_000_000).astimezone().isoformat(timespec="minutes")
+        self.assertEqual(tool.guard_row(), f"reboot armed at {armed}")
+        tool.run = lambda argv, **kwargs: Result(stdout="NextElapseSince1970Usec=infinity\n")
+        self.assertEqual(tool.guard_row(), "none armed")
+
+    def test_an_unreachable_state_leaves_no_mystery(self):
+        tool = self.make_tool()
+        self.assertEqual(tool.last_row(), "none recorded")
+
+
+class DryRun(TempMixin):
+    """A dry run reports what it would do.  A record says something is live, so writing one here would
+    make `--status` describe a deploy that never happened."""
+
+    def test_a_dry_run_leaves_no_claim_about_what_is_live(self):
+        tool = self.make_tool()
+        tool.dry_run = True
+        tool.toplevel = "/nix/store/fake-toplevel"
+        seen = []
+        tool.record_rollback = lambda previous: seen.append("rollback recorded")
+        tool.check_health = lambda: True
+        tool.arm_guard = lambda: seen.append("armed")
+        tool.do_switch = lambda: seen.append("switched")
+        tool.wait_health = lambda: self.fail("a dry run must not probe health")
+        tool.record_in_guest = lambda sha: self.fail("a dry run must not tell the VM anything")
+        with redirect_stdout(io.StringIO()):
+            tool.switch_with_guards("a" * 40, lambda sha: self.fail("a dry run must not record a deploy"))
+        self.assertEqual(seen, ["rollback recorded", "armed", "switched"])
+        for name in ("commit", "toplevel", "refs.log"):
+            self.assertFalse(os.path.exists(os.path.join(tool.state, name)), name)
+
+
+class Structure(unittest.TestCase):
+    """Names inside DeployAI must not collide: an attribute that shares a method's name turns a
+    call into a TypeError, which is how `--repo/--ref` used to fail."""
+
+    def test_no_instance_attribute_shadows_a_method(self):
+        tool = deploy_ai.DeployAI()
+        methods = {name for name, value in vars(deploy_ai.DeployAI).items()
+                   if isinstance(value, (types.FunctionType, types.MethodType))}
+        self.assertEqual(sorted(methods & set(vars(tool))), [])
 
 
 class Root(unittest.TestCase):

@@ -464,6 +464,12 @@ in
       owner = "hermes";
       group = "hermes";
     };
+    # deploy-ai's own pair, root-owned because root runs it.  buildvm-install authorizes a root-owned
+    # login key in the guest as its ordinary user *and* as root, so this one keypair covers the tree
+    # transfer and the guest build (as `builder`, the only guest identity holding the git-host deploy
+    # key that the `private` input needs) and the in-guest `nixos-rebuild switch` of a guest-only
+    # deploy (as `root`).  Not `privateKeyPath`: that key authenticates the guest *outbound*.
+    loginKeys.deploy-ai = { };
     sshPort = guestPort;
     cpus = guestCpus;
     memoryMiB = guestMemoryMiB;
@@ -505,13 +511,16 @@ in
     publicKey = guestPublicKey;
     deployedSource = deployedSource;
     deployedCommit = deployedCommit;
-    buildKey = buildvmKey;
+    buildKey = config.nixflakes.virtualisation.buildvm.loginKeys.deploy-ai.path;
     # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
     # and refuses anything outside these prefixes before building.  platforms/ stays off the list
-    # except the two files involved here, which is what stops the agent rewriting another machine.
+    # except the files involved here -- ai's own, and the two the build VM is built from, since a
+    # guest-only submit is allowed to change the guest's platform -- which is what stops the agent
+    # rewriting another machine.
     allowlist = [
       "platforms/ai.nix"
       "platforms/buildvm.nix"
+      "platforms/buildvm-bootstrap.nix"
       "lib/"
       "modules/nixos/"
       "config/"

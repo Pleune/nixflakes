@@ -15,6 +15,13 @@ the shell script `pkgs/deploy-ai/gate.nix`. Grepping this tree for `rust` finds 
 `trusts` and the `incus-backup-rustic` package, never this tool: nothing in the deploy path is
 written in Rust.
 
+It is not installed in this VM, and `builder` has no sudo — both are deliberate. The CLI lives on
+`ai`, and ssh to `deployer` is the only way to run it, so `which deploy-ai` finding nothing here is
+the expected result, not a broken deploy. A local copy would still be vetted by the same gate over
+the same ssh, so installing one buys nothing. The `deploy` binary you may see in your PATH is
+`deploy-rs`, packaged for the guest's own flake deployments: it has no target for `ai`, it does not
+vet anything, and it is not this path.
+
 ## Before you send anything
 
 ```bash
@@ -65,6 +72,52 @@ forward that reaches *this VM* from ai; `deployer` does not exist there. The key
 
 The `|` above is on your side of the ssh. The remote command is the one quoted string.
 
+## Reading the answer
+
+Every run ends with one line that says what happened, so you never have to infer it from prose:
+
+| Last line | Meaning |
+| --- | --- |
+| `result: ok` | Nothing was applied: a `--status` read, a `--list`, or a `--vet`/`--dry-run`. |
+| `result: applied` | A system switched. |
+| `result: refused` | A guard said no to your patch. It is on stderr, after the rows that already held. |
+| `result: failed` | The patch passed the guards and something afterwards broke: a transfer, a build on the VM, the closure copy, a switch, a health probe. |
+
+Above it, `--vet` and `--submit` report one row per check as that check passes:
+
+```text
+deploy-ai: --vet: 1a2b3c4d5e onto 8e4d0a1299
+  size      3.4K of 256.0K allowed
+  applies   cleanly
+  scope     inside the allowlist
+  denylist  clear
+  policy    unchanged
+  class     ai
+  changed   platforms/ai.nix
+  would     build on the VM, switch ai, and reboot back if it never becomes healthy
+```
+
+A refusal lands after the rows that held, so the last row you saw is the check that passed and the
+refusal is the next one. `--status` answers what is live:
+
+```text
+deploy-ai: ai now
+  commit    fccc472c1a
+  system    /nix/store/y0hi…-nixos-system-ai-26.11.20261107.f4a03c0
+  health    ok
+  rollback  none
+  guest     1a2b3c4d5e
+  baseline  /nix/store/pbw0…-nixflakes-source (present)
+  policy    locked; a patch cannot change it
+  allowed   platforms/ai.nix platforms/buildvm.nix platforms/buildvm-bootstrap.nix lib/ modules/nixos/ config/ pkgs/ flake.nix skills/ docs/ README.md
+  last      2026-11-19T20:04:11  fccc472c1a  submit
+  guard     none armed
+```
+
+`health` names what is down, `guest` says what the VM was last told (and says the ssh failed rather
+than pretending the VM has nothing deployed), and `guard` shows the timed reboot that catches a hung
+switch.
+
 ## Addressing the gate
 
 `deployer` has no shell: its login shell is the gate, which takes the single string sshd hands it,
@@ -94,10 +147,12 @@ here: send them one at a time.
 | --- | --- |
 | `deploy-ai gate: only 'deploy-ai ...' is accepted here.` | The string did not start with `deploy-ai`. Nothing was attempted. Fix the string, not your keys. |
 | `deploy-ai gate: refusing a command containing '<char>'.` | Same: the command never reached `deploy-ai`. |
-| `deploy-ai: refusing: <reason>` | `deploy-ai` ran and applied nothing; the reason is in the message. |
+| `deploy-ai: refusing: <reason>` | `deploy-ai` ran and applied nothing; the reason is in the message, and the run ends `result: refused`. |
+| `deploy-ai: failed: <reason>` | Your patch passed every guard, then something broke: `cannot unpack … on the VM`, `build failed on the VM; log: …`, `nix-copy-closure failed`, `the VM's build output does not match what ai computed`, `the guest switch failed`. Ends `result: failed`. Report the reason; ai is unchanged unless the message says a switch happened. |
 | `deploy-ai gate: /run/wrappers/bin/sudo is not executable, so nothing can be deployed.` then `deploy-ai gate: ai needs security.sudo.enable for the setuid copy of sudo to exist.` | `ai` has no setuid sudo, so no command can reach `deploy-ai`. Nothing of yours is wrong: the operator's `security.sudo.enable` is the fix. |
 | `sudo: /nix/store/…-sudo-…/bin/sudo must be owned by uid 0 and have the setuid bit set` | an `ai` generation whose gate ran sudo from the store instead of `/run/wrappers/bin/sudo`. Report it; your command was fine and nothing ran. |
 | `deploy-ai` usage text, exit 1 | No flags it recognized, or an unknown flag. |
+| `bash: deploy-ai: command not found` inside this VM | Expected: the CLI is on `ai`, not here. Run it through ssh to `deployer` above. Nothing to install, and `deploy` (deploy-rs) is a different tool that cannot reach `ai`. |
 | `Permission denied (publickey)` | A real key problem: the key in `~builder/.ssh` is not the one `deployer` accepts (`nixflakes.deploy-ai.publicKey`). `ls -l ~/.ssh` first — ssh ignores a key that is group-readable. |
 
 Do not "work around" a refusal by patching the checkout yourself. `git apply`/`patch` onto
@@ -113,15 +168,15 @@ after yourself.
 2. The series applies cleanly onto ai's deployed source, which the gate unpacks from
    `/etc/deploy-ai/deployed-source`. It never trusts your tree.
 3. Every changed path is inside the allowlist `/etc/deploy-ai/allowlist`. On `ai` that is `flake.nix`,
-   `docs/`, `README.md`, `lib/`, `modules/nixos/`, `config/`, `pkgs/`, `skills/`, `platforms/ai.nix` and
-   `platforms/buildvm.nix`. Read `cat /etc/deploy-ai/allowlist` instead of trusting this list; it is why
-   most of `platforms/` is not yours to change.
+   `docs/`, `README.md`, `lib/`, `modules/nixos/`, `config/`, `pkgs/`, `skills/`, `platforms/ai.nix`,
+   `platforms/buildvm.nix` and `platforms/buildvm-bootstrap.nix`. Read `cat /etc/deploy-ai/allowlist`
+   instead of trusting this list; it is why most of `platforms/` is not yours to change.
 4. No changed path is in `/etc/deploy-ai/denylist`: `modules/nixos/deploy-ai/`, `pkgs/deploy-ai/`,
    `flake.lock`, `secrets/`. The thing doing the vetting cannot vet a change to itself.
-5. Nothing the patch moves changes the policy the gate runs under. `--vet` prints the digest it
-   computed; it must equal `/etc/deploy-ai/policy-digest`. That policy covers the allowlist, the
-   gate's and build VM's keys, the users and their authorized keys, sudo, sshd, nix trust, and the
-   submit rules — so you cannot widen what is allowed.
+5. Nothing the patch moves changes the policy the gate runs under. That policy covers the allowlist,
+   the gate's and build VM's keys, the users and their authorized keys, sudo, sshd, nix trust, and the
+   submit rules — so you cannot widen what is allowed. It is fixed on `ai`, and no patch can move it:
+   `--vet` reports `policy unchanged` rather than a hash, because the hash is not something you act on.
 
 Then it builds your tree on this VM, copies the result to ai, runs the health probes against the
 build VM, and switches ai only if the probes pass. A switch you did not ask for is rolled back on a
@@ -133,11 +188,9 @@ If every changed file is listed in `/etc/deploy-ai/guest-only-paths` (`platforms
 `platforms/buildvm-bootstrap.nix`), the gate rebuilds this VM, reboots it, and leaves ai alone. Your
 session is cut when the VM reboots; reconnect and read `/home/builder/deployed-commit`.
 
-The allowlist is checked before that classification, and `platforms/buildvm-bootstrap.nix` is not on
-`ai`'s allowlist, so a patch to that file is refused as outside the allowlist until the operator widens
-it. `platforms/buildvm.nix` is on both lists, and is the guest-only change you can send today.
-
-Any other file means ai restarts. `platforms/ai.nix` and everything else are ai's.
+Both guest-only files are on `ai`'s allowlist too, because the allowlist is checked before that
+classification and a refused guest-only patch would be a dead end. Anything outside them means ai
+restarts: `platforms/ai.nix` and everything else are ai's.
 
 ## What is recorded, and what survives
 
@@ -158,7 +211,9 @@ is where ai's own deploys come from. To put your commits on top of a deploy, `gi
 
 ## When a deploy is refused
 
-`deploy-ai` prints why and applies nothing. Report the reason; do not work around it.
+`deploy-ai` prints why and applies nothing, ending `result: refused`. A run that got past the guards
+and then broke ends `result: failed` instead; both are on stderr. Report the reason; do not work
+around it.
 
 | Message | What it means |
 | --- | --- |
@@ -171,23 +226,26 @@ is where ai's own deploys come from. To put your commits on top of a deploy, `gi
 | `the patch changes the deployment policy (allowlist, keys, users, sudoers); …` | It moves ssh keys, sudo, or the rules above. |
 | `patch too large: N bytes, over the M limit in /etc/deploy-ai/submit-max-bytes` | Split the series. |
 | `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed, or you piped from the wrong range. |
-| `the guest switch failed; ai is unchanged` | The guest's rebuild or switch failed; ai is untouched. |
+| `the guest switch failed; ai is unchanged` | Now `deploy-ai: failed: the guest switch failed; ai is unchanged`. The guest's rebuild or switch broke partway; ai is untouched, and the log is in `/home/builder/deploy.log` on the VM. |
 | `… is missing; the running system was built without nixflakes.deploy-ai.deployedSource` | ai has no baseline to patch onto; the operator must switch. |
 | `deploy-ai: refusing: the CURRENT system is already unhealthy; switching would hide that.  Fix it out-of-band or reboot ai` | The probes on the running system failed before anything was switched. |
-| `deploy-ai: the new system never became healthy; switching back`, then `deploy of <sha> failed and was rolled back; log: /var/lib/deploy-ai/log/build.log` | ai switched and came back broken; deploy-ai switched the recorded generation back and cancelled the reboot guard. |
+| `deploy-ai: the new system never became healthy; switching back`, then `deploy-ai: failed: deploy of <sha> failed and was rolled back; log: /var/lib/deploy-ai/log/build.log` | ai switched and came back broken; deploy-ai switched the recorded generation back and cancelled the reboot guard. |
 
 ## Checking state
 
 ```bash
-ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'                        # what ai runs, pending rollback
+ssh -p 22 deployer@10.0.2.2 'deploy-ai --status'                        # what ai runs, its health, any pending rollback
 ssh -p 22 deployer@10.0.2.2 'deploy-ai --repo <url> --list'             # a repository's refs
 ssh -p 22 deployer@10.0.2.2 'deploy-ai --repo <url> --ref <rev> --dry-run'
 ```
+
+`--status` prints one row per question (see Reading the answer) and nothing else, so read the rows
+rather than grepping them.
 
 The URL for your own work is the checkout on this VM:
 `--repo ssh://builder@127.0.0.1:2224/home/builder/nixflakes`.
 
 `--repo`/`--ref` is the operator's route, which fetches from a repository. You normally use
 `--submit`; the repository route asks the git host as `builder`, so it only works once your key is
-registered there. `--rollback`, `--switch`, `--nix-cache-optimize` and `--local` belong to the
-operator, not to you.
+registered there.  There is no `--rollback` or `--switch` to reach for: a deploy that never becomes
+healthy rolls itself back, and every build runs on the VM — ai has no mode that builds here.

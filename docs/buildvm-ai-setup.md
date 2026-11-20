@@ -152,9 +152,10 @@ nixflakes.virtualisation.buildvm.loginKeys.hermes = {
 
 `buildvm-install` chowns each pair to its `owner`, appends every public half to
 `~builder/.ssh/authorized_keys` on every pass, and puts the public halves of the **root-owned** pairs
-into the guest's `/root/.ssh/authorized_keys`.  The guest's own outbound key is authorized for
-`builder` only: it is a git deploy key sitting in the agent's home, so accepting it for guest root
-would let anything holding it become root in the guest.  `buildvm-provision` uses the pair it owns
+into the guest's `/root/.ssh/authorized_keys`.  The guest's own outbound keypair is *not* one of these:
+`buildvm-install` installs its public half as `~builder/.ssh/id_ed25519.pub` and leaves it out of
+`authorized_keys`, because a key the guest already holds would authorize logins into the guest — the
+wrong direction for a deploy key pointed at the git host.  `buildvm-provision` uses the pair it owns
 (`provision.loginKey`, root's own), and Hermes `terminal.ssh_key` points at the `hermes` pair.
 
 agenix decrypts with `config.age.identityPaths`, whose default is `/etc/ssh/ssh_host_ed25519_key`, so
@@ -279,12 +280,21 @@ health probe of the current system, timed reboot guard, switch, rollback if the 
 guest-only switch is the common case, and it is the one the agent can do without putting the host at
 risk.
 
-That guest-root key is a separate authorization from `builder`'s.  `/etc/deploy-ai/guest-root-key`
-holds the *path* of `nixflakes.virtualisation.buildvm.provision.loginKey` — the root-owned keypair
-`buildvm-install` generates and whose public half it grafts into the guest's
-`/root/.ssh/authorized_keys` (§6).  The guest switch runs over `127.0.0.1:2224` as `root`, on the
-same forward Hermes' shell uses; `builder`'s key is not in that file, so a submit cannot become guest
-root by itself.
+That one keypair does both jobs, and it is neither of the keys the guest already holds.
+`nixflakes.deploy-ai.buildKey` is `nixflakes.virtualisation.buildvm.loginKeys.deploy-ai.path` —
+`/var/lib/buildvm/keys/deploy-ai/id_ed25519`, a root-owned login keypair `buildvm-install` generates
+and whose public half it grafts into the guest's `~builder/.ssh/authorized_keys` *and*
+`/root/.ssh/authorized_keys`, because a root-owned login key is authorized for both identities (§6).
+`/etc/deploy-ai/build-key` and `/etc/deploy-ai/guest-root-key` both publish only that path, so the
+tool transfers and builds as `builder` and switches as `root` over `127.0.0.1:2224`, on the same
+forward Hermes' shell uses, without ever naming a buildvm path in its own source.
+It is deliberately not the guest's outbound keypair (`nixflakes.virtualisation.buildvm.privateKeyPath`, the
+agenix file `/run/agenix/ai_buildvm_id_ed25519`): that one authenticates the guest *toward* the git
+host, and offering it inbound is the wrong direction — sshd in the guest has never been configured to
+accept it.  Nor is it `provision.loginKey`: provisioning owns that one, and a submit cannot become
+guest root through a key the agent never sees.
+Every guest ssh sets `UserKnownHostsFile=/dev/null` with `StrictHostKeyChecking=accept-new`, because
+re-seeding the disk replaces the guest's sshd host keys and a remembered key is a hard refusal.
 
 **The policy digest.**  `nixflakes.deploy-ai.policyDigest` is a sha256 of everything a patch must not
 be able to move: the allowlist, the gate's key, the build key, the state dir, the submit cap, the
@@ -301,9 +311,13 @@ rewriting the rules it is vetted against.
 git format-patch --stdout deployed..main | ssh -p 22 deployer@10.0.2.2 'deploy-ai --vet'
 ```
 
-It prints the reconstructed commit, the base it was applied to, the class, one line per changed path,
-and the digest it computed.  `deploy-ai --submit --dry-run` is the same verdict.  Run `--vet` first
-and send `--submit` only when the printed class is the one you expected.
+It reports one row per check as that check passes — size against the cap, whether the series applies,
+scope, denylist, `policy unchanged`, the class, one row per changed path, and what a real submit would
+then do.  Every run closes with `result: ok`, `result: applied`, `result: refused`, or `result: failed`,
+so a script never has to parse prose, and a refusal lands after the rows that held.  `deploy-ai
+--submit --dry-run` is the same report.  Run `--vet` first and send `--submit` only when the printed
+class is the one you expected.  The policy digest itself is not printed: it is fixed on `ai`, no patch
+can move it, and a hash an agent cannot act on is only noise.
 
 ## 6. The guest's own system, and checking it
 
@@ -443,8 +457,11 @@ wrapper directory.  `pkgs/deploy-ai/gate.nix` never reads `$1`: a gate that does
 including valid ones, which looks like an ssh failure from the guest's side.  `nix build
 '.#packages.x86_64-linux.deploy-ai.passthru.tests.gate'` pins both wirings and the refusals.
 
-`--status` prints the recorded commit, deployed toplevel, whether the baseline snapshot exists, any
-pending rollback, and the allowlist. `/etc/deploy-ai/deployed-source` holds the store path of the source
+`--status` prints one labelled row per question and nothing else: the commit and toplevel ai runs,
+whether the hermes units and the API are healthy now, any pending rollback, what the VM was last told
+(and an explicit `ssh to the VM failed` rather than a misleading `none` when the key is wrong), whether
+the baseline snapshot exists, that the policy is locked, the allowlist, the last line of the deploy log,
+and whether the reboot guard is still armed.  `/etc/deploy-ai/deployed-source` holds the store path of the source
 the running system was built from (`nixflakes.deploy-ai.deployedSource`, kept alive by
 `system.extraDependencies`), `/etc/deploy-ai/deployed-commit` holds the flake rev the running
 system came from (`-dirty` suffix if you switched from a dirty tree — the gate strips it, and the
@@ -573,7 +590,8 @@ sudo btrfs qgroup show -reF /mnt/hermes-container
 Then in `platforms/ai.nix` re-enable `virtualisation.docker.enable`, the `/var/lib/docker` mount unit
 and the qgroup service, set `services.hermes-agent.settings.terminal.backend = "docker"`, and drop the
 `nixflakes.virtualisation.buildvm` and `nixflakes.deploy-ai` blocks (the gate needs a repo to read, so
-it keeps working only if you keep `deployedSource`; `deploy-ai --local` is the mode that needs no VM).
+it keeps working only if you keep `deployedSource`).  Every `deploy-ai` build runs on a VM, so without
+`buildvm` there is nothing left to deploy with — rebuild ai with `nixos-rebuild switch` on the host.
 Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverStatus}}'`.
 
 ## 11. Failure modes
@@ -616,6 +634,7 @@ Verify: `findmnt /var/lib/docker && docker info --format '{{.Driver}} {{.DriverS
 | `journalctl -b -u switch-to-configuration`: `[agenix] decrypting …` then `chmod: cannot access '/run/agenix.d/N/<name>.tmp': No such file or directory`, `mv: cannot stat …`, `Activation script snippet 'agenixInstall' failed (1)` | no identity in `config.age.identityPaths` could open the file, i.e. the secret is encrypted for a different key. Nothing else reports this, and the activation errors are not fatal, so the switch finishes with an empty `/run/agenix`. Re-encrypt for `ssh -p … 'cat /etc/ssh/ssh_host_ed25519_key.pub'` (§4) |
 | the guest stays the seed image (no Xfce, no activated config) | provisioning never ran or failed: `systemctl status buildvm-provision`; its `ConditionPathExists` means `provision.loginKey` must exist, which `buildvm-install` generates — `ls -l /var/lib/buildvm/keys/provision` |
 | `buildvm-provision`: `Permission denied (publickey)` from the switch, while the builder-side checks work | the guest's `/root/.ssh/authorized_keys` has no root-owned key, i.e. the running guest predates the root graft or `buildvm-install` never ran after it: `sudo ssh -p 2224 root@127.0.0.1 true`, then `sudo systemctl restart buildvm-install`.  `builder` cannot do this work — it has no sudo, by design |
+| `deploy-ai: command not found` inside the guest, or a `deploy` binary that looks like a rewrite of it | Nothing regressed. `deploy-ai` runs on `ai` and reaches it through the `deployer` gate over ssh; the guest has no copy on purpose, and the store copy there exists only because the guest builds ai's closure. The `deploy` in the guest's PATH is `deploy-rs` (`platforms/buildvm.nix`), unrelated and with no target for `ai`. `builder` also has no sudo, by design (§4 of `platforms/buildvm.nix`) |
 | Hermes terminal: `Load key "…": Permission denied`, then `Permission denied (publickey)` | the unit's own key is missing or unreadable — Hermes uses `/var/lib/buildvm/keys/hermes/id_ed25519`, which `buildvm-install` creates, so `ls -l /var/lib/buildvm/keys/hermes` and `systemctl status buildvm-install` first.  `Permission denied (publickey)` with a readable key means the guest does not authorize it: the pass that generated it did not graft (`journalctl -u buildvm-install -b`) |
 | ssh says `Permissions … for '<key>' are too open` / `This private key will be ignored` | ssh refuses a private key that someone other than its owner can read.  `buildvm-install` writes every key it generates `0600` to its own `owner` and the agenix secret `0600 root`, so this means something rewrote them, or a unit is pointed at a key it does not own: `ls -l <key>` and `sudo chmod 600 <key>`, or give that consumer its own `loginKeys` entry |
 | qemu: `pflash: file … does not exist` | `/var/lib/buildvm/efi-vars.fd` was deleted and `buildvm.service` started before `buildvm-install.service` seeded it — `systemctl start buildvm-install` |
