@@ -746,9 +746,14 @@ in
         gssh_root "git config --global --replace-all safe.directory '$WORK'" \
           || echo "buildvm-provision: could not mark $WORK as safe for $ROOT_USER; the switch will fail" >&2
         SWITCHED=1
-        # The ref names a commit, not the checked-out tree: `nix flake metadata` resolves it to a source
-        # path built from that commit alone, so the agent's uncommitted files cannot leak into the build.
-        if ! gssh_root "nixos-rebuild switch --flake 'git+file://$WORK?rev=$REV#$ATTR' $OVERRIDE --accept-flake-config"; then
+        # Switch the tree `ai` runs, not a commit resolved out of the guest's checkout.  `$REV` exists
+        # only when the host flake had a clean `self.rev`: an out-of-band `nixos-rebuild switch
+        # --flake '.#ai'` from a dirty tree, or a gate submission reconstructed on `ai`, names a commit
+        # the guest cannot resolve, and a ref to an unresolvable rev made `nixos-rebuild` fall back to
+        # whatever `main` already was — a silent no-op that read as the VM ignoring the deploy.
+        # `$SOURCE` is the store path the running system was built from, so the guest always builds that
+        # content; `$REV` is still what gets recorded below, because records want a sha.
+        if ! gssh_root "nixos-rebuild switch --flake \"$SOURCE#$ATTR\" $OVERRIDE --accept-flake-config"; then
           echo "buildvm-provision: switch failed; guest left as it is" >&2
           SWITCHED=0
         fi

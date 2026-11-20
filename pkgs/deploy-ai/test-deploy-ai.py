@@ -596,6 +596,16 @@ class Health(TempMixin):
         tool.vm_ssh = lambda command: Result(stdout="ok\n")
         self.assertTrue(tool.check_health())
 
+    def test_the_guest_converging_after_a_switch_is_not_a_failed_deploy(self):
+        """Switching ai restarts `buildvm-provision`, which rebuilds the guest and reboots it.  The wait
+        after the switch judges ai; a VM down mid-convergence must not roll a healthy switch back."""
+        tool = self.make_tool()
+        self.answer(tool)
+        tool.vm_ssh = lambda command: Result(returncode=255, stderr="ssh: connect refused\n")
+        self.assertFalse(tool.check_health(), "a down VM must still block a switch")
+        deploy_ai.time.sleep = lambda _seconds: None
+        self.assertTrue(tool.wait_health())
+
 
 class DryRun(TempMixin):
     """A dry run reports what it would do.  A record says something is live, so writing one here would

@@ -342,12 +342,12 @@ able to read them; `git init -q -b main` the checkout if it has no repository, p
 repository has **no commits at all**, seed it by streaming `provision.sourcePath` into the checkout and
 committing that as `buildvm-provision: seeded from ai`, which is the only time provisioning writes files
 into `~builder/nixflakes`;
-choose the commit to switch to — `provision.targetCommit`, else what deploy-ai recorded in
+choose a commit to record — `provision.targetCommit`, else what deploy-ai recorded in
 `/home/builder/deployed-commit`, with the `-dirty` suffix stripped, when that commit exists in the
 checkout, else the seeded commit, else a commit built from the streamed tree in
 `~builder/nixflakes-stream` and pushed into the checkout as the tag `provisioned-snapshot`; run
 `git config --global --replace-all safe.directory /home/builder/nixflakes`; `nixos-rebuild switch --flake
-'git+file:///home/builder/nixflakes?rev=<sha>#buildvm' --override-input private /home/builder/secrets
+'<the store path `ai` was built from>#buildvm' --override-input private /home/builder/secrets
 --accept-flake-config`; only after that succeeds move the tag `deployed` to that commit and push
 `refs/tags/deployed` to `origin` (a refusal there is a warning, not a failure); write
 `~builder/nixflakes/DEPLOYED.md`; record the snapshot; reboot the guest — qemu restarts it
@@ -356,13 +356,20 @@ checkout, else the seeded commit, else a commit built from the streamed tree in
 Provisioning never touches the agent's files, its `main`, or its `HEAD`: no `git stash`, no
 `checkout --force`, no `update-ref`.  An earlier generation reset `main` to the deployed commit on every
 pass, which deleted commits the agent had not pushed, and work that never left the guest cannot be
-recovered.  The switch reads the repository's *objects* through `git+file://…?rev=<sha>`, and a flake ref
-that names a commit resolves to a store path built from that commit alone, so the tree on disk is not
-part of the build and uncommitted work cannot leak into it.  What moves on a deploy is one tag.
+recovered.  The switch is given `provision.sourcePath`, the store path the running `ai` system was built
+from, so the guest builds exactly the content `ai` runs and the agent's working tree cannot be part of it;
+the commit above is only a label for the tag and the records.  What moves on a deploy is one tag.
 
 That also removes the old problem with deleted files.  Streaming wrote files and never removed them, so
-the leftover of a renamed file got committed into what the guest built; switching a commit instead builds
-exactly that commit's tree, and stale files in the checkout simply are not part of it.
+the leftover of a renamed file got committed into what the guest built; a store path holds exactly the
+files the deploy had, and stale files in the checkout simply are not part of it.
+
+The commit is a label, not the build input, and it often cannot be a real one.  `flake.nix` records
+`deployedCommit` as `self.rev or self.dirtyRev`, which is empty for a deploy made from a dirty tree, and
+a gate submission is reconstructed on `ai` into a commit that exists only in `ai`'s retained base
+repository.  Either way the guest still switches to `ai`'s tree; what it tags, and what
+`/home/builder/deployed-commit` holds, is then the snapshot commit provisioning published, not `ai`'s
+sha.  `git push origin main` from the guest is what makes both sides name the same commit.
 
 An unpushed deploy has no commit the guest can reach, so its tree is published as an object of its own:
 committed in `~builder/nixflakes-stream`, pushed to `refs/tags/provisioned-snapshot`, and the scratch
@@ -532,16 +539,19 @@ straight from the guest to the gate, which needs no push at all (§5).
 
 `deploy-ai` mirrors that repo, refuses anything outside `nixflakes.deploy-ai.allowlist` or outside the
 deployed commit's history, builds `nixosConfigurations.ai` on the VM from a plain copy of the tree,
-copies the closure back, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which publishes
-that tree inside the guest and moves tag `deployed` to it without touching the agent's checkout (§6) — so
-the guest runs what `ai` runs while the agent's `main` stays where it left it.
+copies the closure back, and switches `ai`.  Switching `ai` re-runs `buildvm-provision`, which builds the
+same tree inside the guest and moves tag `deployed` to it without touching the agent's checkout (§6) — so
+the guest converges on what `ai` runs, while the agent's `main` stays where it left it.  The guest is a
+copy of `ai`'s system: a change the guest needs and `ai` does not is a guest-only submission (§7), and
+anything else reaches `ai` and the VM follows it.
 
 Two consequences worth knowing:
 
-* A commit the agent never pushed is still deployable through the VM repo, but provisioning cannot fetch
-  it from `origin`, so it logs `<sha> is not in the guest's repository` and switches a commit it builds
-  from the tree `ai` handed it (§6).  The sha the guest tags is then not the sha `ai` recorded, until
-  `git push origin main` makes the history real on both sides.
+* Nothing schedules this.  There is no timer: `buildvm-provision` runs once at boot, and again when a
+  switch of `ai` restarts the unit, which happens whenever the switch changes what it is configured with
+  — the tree it provisions, the commit it records, or the image.  A switch that changes none of those
+  leaves the guest on its current system until the next boot, so a deploy can be minutes late to the VM
+  or wait for a reboot, and `journalctl -u buildvm-provision -b` is the only record of when it ran.
 * Nothing in the guest's checkout moves on a deploy: no reset of `main`, no stash, no lost commits.  If
   the agent wants its work to ride on the deploy, it rebases onto `deployed`, which `DEPLOYED.md` tells
   it to do (§6).

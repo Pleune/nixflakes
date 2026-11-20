@@ -611,12 +611,16 @@ class DeployAI:
             problems.append(f"health endpoint answered {answer}")
         return problems
 
+    # Before a switch the whole road has to be sound: ai's services and the VM the build runs on.
     def check_health(self) -> bool:
         return not self.health_problems() and self.vm_ssh("echo ok").returncode == 0
 
+    # After a switch only ai counts.  Switching ai restarts `buildvm-provision`, which rebuilds the
+    # guest's system from ai's tree and reboots it, so the VM can be down for minutes while it
+    # converges; counting that as a failed deploy would roll back a switch that is healthy on ai.
     def wait_health(self) -> bool:
         for _ in range(HEALTH_RETRIES):
-            if self.check_health():
+            if not self.health_problems():
                 return True
             time.sleep(HEALTH_WAIT)
         return False

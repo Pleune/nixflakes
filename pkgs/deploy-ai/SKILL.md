@@ -182,9 +182,12 @@ after yourself.
    submit rules — so you cannot widen what is allowed. It is fixed on `ai`, and no patch can move it:
    `--vet` reports `policy unchanged` rather than a hash, because the hash is not something you act on.
 
-Then it builds your tree on this VM, copies the result to ai, runs the health probes against the
-build VM, and switches ai only if the probes pass. A switch you did not ask for is rolled back on a
-timeout; an explicit switch stays, and a later deploy can roll it back.
+Then it builds your tree on this VM, copies the result to ai, and switches ai only if the probes pass.
+Before the switch the probes cover the whole road — ai's units, its health endpoint, and the build VM
+being reachable, because the build has to run there.  After the switch only ai is judged: switching ai
+restarts `buildvm-provision`, which rebuilds the guest's system from ai's tree and reboots it, and a VM
+down mid-convergence is not a failed deploy. A switch you did not ask for is rolled back on a timeout; an
+explicit switch stays, and a later deploy can roll it back.
 
 ## Guest-only changes never restart ai
 
@@ -195,6 +198,11 @@ session is cut when the VM reboots; reconnect and read `/home/builder/deployed-c
 Both guest-only files are on `ai`'s allowlist too, because the allowlist is checked before that
 classification and a refused guest-only patch would be a dead end. Anything outside them means ai
 restarts: `platforms/ai.nix` and everything else are ai's.
+
+The VM is a copy of ai's system, so this lasts only until ai next switches: that switch re-runs
+`buildvm-provision`, which builds ai's tree inside the guest and re-tags `deployed` (docs/buildvm-ai-setup.md §6, §8).
+There is no timer deciding this — an ai switch restarts provisioning, and a switch that changes nothing
+provisioning is configured with leaves the guest as it is until the next boot.
 
 ## What is recorded, and what survives
 
