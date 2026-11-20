@@ -678,10 +678,23 @@ class DeployAI:
         problems = self.health_problems()
         return "ok" if not problems else "down: " + ", ".join(problems)
 
+    # Whether the VM can be looked at at all.  `--status` answers questions about what is running, so a
+    # key that is missing is something to report, not a reason to stop answering; the roads that deploy
+    # still end over it in `need_guest_key`, because a deploy cannot converge the VM without it.
+    def guest_key_absent(self) -> str:
+        if not self.build_key:
+            return f"no key to ssh into the VM as {BUILDER}; set {self.build_key_file}"
+        if not os.access(self.build_key, os.R_OK):
+            return f"{self.build_key} is not readable by uid {os.geteuid()}"
+        return ""
+
     def guest_row(self) -> str:
         """What the guest runs, read from the guest.  `buildvm-provision` writes that file when it
         converges the VM onto ai's tree, so this is the VM's own answer rather than what ai hoped;
         a switch here does not mean the guest has converged yet."""
+        absent = self.guest_key_absent()
+        if absent:
+            return "unknown, " + absent
         result = self.vm_ssh(f"head -n 1 {shlex.quote(self.recorded_commit)}")
         if result.returncode != 0:
             return "unknown, ssh to the VM failed: " + (result.stderr.strip() or f"exit {result.returncode}")

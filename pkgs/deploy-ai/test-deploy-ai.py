@@ -92,6 +92,7 @@ class TempMixin(unittest.TestCase):
             "DEPLOY_AI_BASELINE": os.path.join(root, "baseline"),
             "DEPLOY_AI_BASELINE_COMMIT": os.path.join(root, "deployed-commit"),
             "DEPLOY_AI_INBOX": os.path.join(state, "inbox"),
+            "DEPLOY_AI_BUILD_KEY": os.path.join(root, "build-key"),
             "DEPLOY_AI_HEALTH_UNITS": os.path.join(root, "health-units"),
             "DEPLOY_AI_HEALTH_URL": os.path.join(root, "health-url"),
         }
@@ -100,6 +101,9 @@ class TempMixin(unittest.TestCase):
         Path(env["DEPLOY_AI_HEALTH_UNITS"]).write_text(
             "hermes-agent\nhermes-backend\nhermes-webui\n")
         Path(env["DEPLOY_AI_HEALTH_URL"]).write_text("http://127.0.0.1:8642/health\n")
+        # A key that exists, so the read-only probes are about what the VM answers rather than about a
+        # file no test created; the case that wants a missing key removes it.
+        Path(env["DEPLOY_AI_BUILD_KEY"]).write_text("not a real key\n")
         for name, content in files.items():
             Path(env[name]).write_text(content)
         os.makedirs(env["DEPLOY_AI_BASELINE"])
@@ -602,6 +606,19 @@ class Output(TempMixin):
                               "down: hermes-webui inactive, health endpoint answered nothing"), text)
         self.assertIn(self.row("guest",
                               "unknown, ssh to the VM failed: Permission denied (publickey)"), text)
+
+    def test_a_missing_vm_key_is_still_a_status_answer(self):
+        # `--status` is asked when something looks wrong.  Losing the guest's key must not cost the
+        # whole answer; the VM row says what is missing instead of the run ending.
+        tool = self.make_tool(DEPLOY_AI_POLICY_FILE="3" * 64 + "\n")
+        os.remove(tool.build_key)
+        Path(tool.state, "commit").write_text("f" * 40 + "\n")
+        tool.run = lambda argv, **kwargs: Result(
+            stdout="200\n" if argv[0] == "curl" else "NextElapseSince1970Usec=infinity\n")
+        text = self.rows(tool, "do_status")
+        self.assertIn(self.row("commit", "f" * 10), text)
+        self.assertIn(self.row("health", "ok"), text)
+        self.assertIn(self.row("guest", f"unknown, {tool.build_key} is not readable"), text)
 
     def test_status_reports_the_reboot_the_guard_armed(self):
         tool = self.make_tool()

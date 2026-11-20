@@ -201,7 +201,7 @@ configuration *object* on `ai`, not a system `ai` runs, so applying them restart
 but changes nothing it actually runs.  Both files are on `ai`'s allowlist.
 
 The VM takes the change when `buildvm-provision` runs next — the switch you just made restarts it, so it
-builds ai's new tree inside the guest, re-tags `deployed`, rewrites
+builds the guest's own configuration from the source ai was built from, re-tags `deployed`, rewrites
 `/home/builder/deployed-commit`, and reboots the guest (docs/buildvm-ai-setup.md §6, §8).  That reboot
 cuts your session: reconnect and read the marker.  Nothing schedules provisioning besides that restart
 and boot, so a change can sit in the guest's system until ai switches again or the VM reboots.
@@ -240,7 +240,8 @@ around it.
 | `the patch changes the deployment policy (allowlist, keys, users, sudoers); …` | It moves ssh keys, sudo, or the rules above. |
 | `patch too large: N bytes, over the M limit in /etc/deploy-ai/submit-max-bytes` | Split the series. |
 | `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed, or you piped from the wrong range. |
-| `the guest switch failed; ai is unchanged` | Now `deploy-ai: failed: the guest switch failed; ai is unchanged`. The guest's rebuild or switch broke partway; ai is untouched, and the log is in `/home/builder/deploy.log` on the VM. |
+| `build failed on ai; log: /var/lib/deploy-ai/log/build.log` | The build ran on ai and broke; nothing was switched. The log holds the tails of both streams. A `private` that cannot be fetched names the override it tried (`/etc/deploy-ai/private-input`). |
+| `the build output does not match what ai evaluated: <built>, expected <evaluated>; nothing was switched` | The tree built into something other than what the evaluation says it should. Nothing was switched; check what the patch changed about the system's identity. |
 | `… is missing; the running system was built without nixflakes.deploy-ai.deployedSource` | ai has no baseline to patch onto; the operator must switch. |
 | `deploy-ai: refusing: the CURRENT system is already unhealthy (<what failed>); switching would hide that.  Fix it out-of-band or reboot ai` | The probes on the running system failed before anything was switched.  The parenthesized reason names it: an inactive unit, a status code, no listener, or no configured endpoint. |
 | `deploy-ai: the new system never became healthy; switching back`, then `deploy-ai: failed: deploy of <sha> failed and was rolled back; log: /var/lib/deploy-ai/log/build.log` | ai switched and came back broken; deploy-ai switched the recorded generation back and cancelled the reboot guard. |

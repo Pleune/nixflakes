@@ -161,7 +161,9 @@ in
     };
 
     privateInput = lib.mkOption {
-      type = with lib.types; nullOr str;
+      # A path, not a string: the module lists it under `system.extraDependencies` so it survives GC,
+      # and that only roots values Nix knows are store paths.
+      type = with lib.types; nullOr path;
       default = null;
       example = "/nix/store/abc123-source";
       description = ''
@@ -291,9 +293,12 @@ in
       cfg.deployedSource + "\n"
     );
 
-    # Keeps the baseline store path alive across GC for exactly as long as this generation is
-    # reachable, which is how long the diff baseline stays meaningful.
-    system.extraDependencies = lib.optionals (cfg.deployedSource != null) [ cfg.deployedSource ];
+    # Keeps two store paths alive for exactly as long as this generation is reachable: the baseline
+    # the diff is measured against, and the `private` tree every build overrides that input with.
+    # Neither is otherwise referenced by the closure, so `nix-collect-garbage` would collect them and
+    # every later deploy would fail on a path that no longer exists.
+    system.extraDependencies = lib.optionals (cfg.deployedSource != null) [ cfg.deployedSource ]
+      ++ lib.optionals (cfg.privateInput != null) [ cfg.privateInput ];
 
     # The submit path's rules, read by deploy-ai out of /etc.  Each is a definition that exists only
     # when submit is on, so a host without that path leaves deploy-ai nothing to vet a patch against.
