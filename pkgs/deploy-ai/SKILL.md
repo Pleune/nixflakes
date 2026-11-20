@@ -10,6 +10,11 @@ You are `builder` inside the build VM on `ai`. You can edit, commit and build he
 switch `ai` yourself. Everything goes through `deploy-ai`, over ssh, as the `deployer` account on
 the host, and the gate vets the patch before anything is applied.
 
+`deploy-ai` is `pkgs/deploy-ai/deploy-ai.py`, a stdlib-only Python script, and the login shell is
+the shell script `pkgs/deploy-ai/gate.nix`. Grepping this tree for `rust` finds `trusted-users`,
+`trusts` and the `incus-backup-rustic` package, never this tool: nothing in the deploy path is
+written in Rust.
+
 ## Before you send anything
 
 ```bash
