@@ -473,8 +473,10 @@ in
           # authorized keys in /etc/ssh/authorized_keys.d instead, so this file survives a switch.
           SSH_DIR="$MNT/home/${cfg.userName}/.ssh"
           mkdir -p "$SSH_DIR"
-          # Who may log into the guest: the generated login keys, plus the outbound key's public half
-          # so root units on ai (deploy-ai) can still use the keypair they already hold.
+          # Who may log into the guest: the generated login keys, one per consumer.  The outbound
+          # keypair is the guest's own credential toward the git host; offering it back inbound would
+          # authorize the very key the guest holds, so it is installed as a key file and never added
+          # to authorized_keys.
           : > "$SSH_DIR/authorized_keys"
           ${lib.optionalString (loginKeyList != [ ]) ''
           for PUB in ${escapeShellArgs (map (k: "${k.path}.pub") loginKeyList)}; do
@@ -482,7 +484,6 @@ in
           done
           ''}
           if [ -n "$PUBLIC_KEY" ]; then
-            printf '%s\n' "$PUBLIC_KEY" >> "$SSH_DIR/authorized_keys"
             printf '%s\n' "$PUBLIC_KEY" > "$SSH_DIR/id_ed25519.pub"
           fi
           chmod 600 "$SSH_DIR/authorized_keys"
@@ -545,6 +546,11 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "buildvm.service" ];
       requires = [ "buildvm.service" ];
+      # Force switch-to-configuration to restart provisioning whenever the seed image changes,
+      # without adding a store reference from this unit.
+      restartTriggers = [
+        (builtins.unsafeDiscardStringContext "${cfg.image}")
+      ];
       unitConfig.ConditionPathExists = cfg.provision.loginKey;
       serviceConfig = {
         Type = "oneshot";
@@ -570,7 +576,8 @@ in
         COMMIT=${escapeShellArg cfg.provision.targetCommit}
         # The snapshot's store name hashes its contents, so it identifies what this machine runs even
         # when the deploy pointed at no commit.
-        SNAPSHOT=$(basename "$SOURCE")
+        IMAGE_TAG=${escapeShellArg (builtins.unsafeDiscardStringContext (baseNameOf "${cfg.image}"))}
+        SNAPSHOT="$(basename "$SOURCE")+$IMAGE_TAG"
         # Quote the whole flag: unquoted, `OVERRIDE=--override-input private /path` would bind only the
         # first word and then run `private` as a command.
         OVERRIDE=${optionalString (cfg.provision.secretsDir != null) (escapeShellArg "--override-input private ${cfg.provision.secretsDir}")}
@@ -757,6 +764,12 @@ in
             || echo "buildvm-provision: could not push the deployed tag to $ORIGIN; the tag in $WORK still names what the guest runs"
         fi
         echo "buildvm-provision: deployed is $REV; $WORK, its main and its working tree were left alone"
+
+        # The record `deploy-ai --status` reads as the guest's own view of what it runs.  Without it the
+        # gate reports `guest commit: none` right after a successful switch, because only `deploy-ai`
+        # used to write this file.  Writing the same path keeps the two paths in agreement.
+        gssh "printf '%s\\n' '$REV' > '$TARGET_FILE'" \
+          || echo "buildvm-provision: could not write $TARGET_FILE; deploy-ai falls back to ai's own record" >&2
 
         # Tell the agent what happened inside its own checkout: this unit's journal belongs to root on
         # ai, and the guest's own journal dies with the reboot below.  The file stays untracked,
