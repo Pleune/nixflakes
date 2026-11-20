@@ -729,6 +729,15 @@ class Structure(unittest.TestCase):
                    if isinstance(value, (types.FunctionType, types.MethodType))}
         self.assertEqual(sorted(methods & set(vars(tool))), [])
 
+    def test_the_switch_path_methods_are_defined(self):
+        # A comment folded onto a `def` line hides the method (the rewrite lost the newline
+        # before `def arm_guard`), and only a real submit hits the AttributeError because every
+        # test stubs these on instances.  Presence must therefore be asserted on the class.
+        for name in ("check_health", "wait_health", "record_rollback", "do_switch",
+                     "arm_guard", "cancel_guard", "finish_ai_records", "switch_with_guards",
+                     "apply_on_ai"):
+            self.assertTrue(callable(getattr(deploy_ai.DeployAI, name, None)), name)
+
 
 class Root(unittest.TestCase):
     def test_non_root_is_refused(self):

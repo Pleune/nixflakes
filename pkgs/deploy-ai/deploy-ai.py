@@ -629,7 +629,8 @@ class DeployAI:
             return
         self.run([os.path.join(self.toplevel, "bin", "switch-to-configuration"), "switch"])
 
-    # The guard is a timed reboot: if the new system hangs, boot finds the recorded rollback.    def arm_guard(self) -> None:
+    # The guard is a timed reboot: if the new system hangs, boot finds the recorded rollback.
+    def arm_guard(self) -> None:
         if self.dry_run:
             return
         result = self.run(["systemctl", "reboot", "--when", f"+{GUARD_MINUTES}m"], capture=True)
