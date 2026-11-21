@@ -449,7 +449,7 @@ class BuildSource(TempMixin):
         # The view only exists while the build runs, so what it held has to be read there.
         tool.build_on_ai = lambda tree: built.append((tree, sorted(os.listdir(tree))))
         tool.verify_output = lambda attr, printed, tree: None
-        tool.switch_with_guards = lambda sha, after_success: None
+        tool.switch_with_guards = lambda sha: None
         tool.apply_on_ai(work, "a" * 40)
         self.assertEqual(len(built), 1)
         view, entries = built[0]
@@ -472,7 +472,7 @@ class BuildSource(TempMixin):
         views = []
         tool.build_on_ai = lambda tree: views.append(tree)
         tool.verify_output = lambda attr, printed, tree: None
-        tool.switch_with_guards = lambda sha, after_success: None
+        tool.switch_with_guards = lambda sha: None
         tool.apply_on_ai(work, "a" * 40)
         self.assertEqual(len(views), 1)
         self.assertFalse(os.path.isdir(views[0]))
@@ -713,10 +713,77 @@ class DryRun(TempMixin):
         tool.wait_health = lambda: self.fail("a dry run must not probe health")
         tool.record_in_guest = lambda sha: self.fail("a dry run must not tell the VM anything")
         with redirect_stdout(io.StringIO()):
-            tool.switch_with_guards("a" * 40, lambda sha: self.fail("a dry run must not record a deploy"))
+            tool.switch_with_guards("a" * 40)
         self.assertEqual(seen, ["rollback recorded", "armed", "switched"])
         for name in ("commit", "toplevel", "refs.log"):
             self.assertFalse(os.path.exists(os.path.join(tool.state, name)), name)
+
+
+class SwitchUnit(TempMixin):
+    """The tail after `arm_guard` runs inside a transient systemd unit: a severed ssh session
+    must not strand `rollback-pending` on a switched, healthy system."""
+
+    def armed_tool(self) -> deploy_ai.DeployAI:
+        tool = self.make_tool()
+        tool.dry_run = False
+        tool.toplevel = "/nix/store/new"
+        tool.current_system = lambda: "/nix/store/old"
+        tool.check_health = lambda: True
+        tool.arm_guard = lambda: None
+        tool.cancel_guard = lambda: None
+        tool.clear_rollback = lambda: None
+        tool.finish_ai_records = lambda sha: None
+        return tool
+
+    def test_a_real_switch_is_delegated_to_the_transient_unit(self):
+        tool = self.armed_tool()
+        calls = []
+        tool.run = lambda argv, **kwargs: (calls.append(list(argv)), Result())[1]
+        with redirect_stdout(io.StringIO()):
+            tool.switch_with_guards("a" * 40)
+        self.assertEqual(calls[0][:4],
+                         ["systemd-run", "--unit=deploy-ai-switch", "--wait", "--collect"])
+        self.assertEqual(calls[0][calls[0].index("--switch-toplevel") + 1], "/nix/store/new")
+        self.assertEqual(calls[0][calls[0].index("--sha") + 1], "a" * 40)
+
+    def test_a_unit_failure_is_reported_as_a_failed_deploy(self):
+        tool = self.armed_tool()
+        tool.run = lambda argv, **kwargs: Result(returncode=2)
+        with redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                tool.switch_with_guards("a" * 40)
+        self.assertIn("switch unit exit 2", err.getvalue())
+
+    def test_the_unit_tail_clears_rollback_and_guard_on_a_healthy_switch(self):
+        tool = self.armed_tool()
+        seen = []
+        tool.do_switch = lambda: seen.append("switched")
+        tool.wait_health = lambda: True
+        tool.drop_record_snapshot = lambda: seen.append("snapshot dropped")
+        tool.clear_rollback = lambda: seen.append("pending cleared")
+        tool.cancel_guard = lambda: seen.append("guard cancelled")
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(tool.switch_tail("a" * 40), 0)
+        self.assertEqual(seen, ["switched", "snapshot dropped", "pending cleared", "guard cancelled"])
+        self.assertIn("ai is now running", out.getvalue())
+
+    def test_the_unit_tail_restores_records_when_it_switches_back(self):
+        tool = self.armed_tool()
+        for name, value in (("commit", "oldsha"), ("toplevel", "/nix/store/old"),
+                            ("commit-previous", "oldsha"), ("toplevel-previous", "/nix/store/old")):
+            Path(os.path.join(tool.state, name)).write_text(value + "\n")
+        tool.do_switch = lambda: None
+        tool.wait_health = lambda: False
+        tool.rollback = lambda: True
+        seen = []
+        tool.cancel_guard = lambda: seen.append("guard cancelled")
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                tool.switch_tail("a" * 40)
+        self.assertEqual(Path(os.path.join(tool.state, "commit")).read_text().strip(), "oldsha")
+        self.assertEqual(Path(os.path.join(tool.state, "toplevel")).read_text().strip(),
+                         "/nix/store/old")
+        self.assertIn("guard cancelled", seen)
 
 
 class Records(TempMixin):
@@ -740,14 +807,23 @@ class Records(TempMixin):
         path = os.path.join(tool.state, name)
         return Path(path).read_text().strip() if os.path.isfile(path) else ""
 
+    def run_as_unit(self, tool):
+        """Stand in for `systemd-run --wait`: the tail runs as if in the transient unit."""
+        def run(argv, **kwargs):
+            if argv[0] == "systemd-run":
+                tool.switch_tail(argv[argv.index("--sha") + 1])
+            return Result(returncode=0 if argv[0] == "systemd-run" else 1)
+        tool.run = run
+
     def test_the_record_lands_before_the_switch(self):
         tool = self.armed_tool()
         seen = {}
         tool.do_switch = lambda: seen.update(
             commit=self.record(tool, "commit"), toplevel=self.record(tool, "toplevel"))
         tool.wait_health = lambda: True
+        self.run_as_unit(tool)
         with redirect_stdout(io.StringIO()):
-            tool.switch_with_guards("b" * 40, lambda sha: None)
+            tool.switch_with_guards("b" * 40)
         self.assertEqual(seen["commit"], "b" * 40, "the record must be in place while the switch runs")
         self.assertEqual(seen["toplevel"], "/nix/store/new")
         self.assertEqual(self.record(tool, "commit"), "b" * 40)
@@ -757,9 +833,9 @@ class Records(TempMixin):
 
     def test_a_failed_switch_restores_the_record(self):
         tool = self.armed_tool()
-        tool.run = lambda argv, **kwargs: Result(returncode=1)
+        self.run_as_unit(tool)
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            tool.switch_with_guards("b" * 40, lambda sha: self.fail("a failed switch must not record"))
+            tool.switch_with_guards("b" * 40)
         self.assertEqual(self.record(tool, "commit"), "a" * 40)
         self.assertEqual(self.record(tool, "toplevel"), "/nix/store/old")
         self.assertFalse(os.path.exists(os.path.join(tool.state, "rollback-pending")))
@@ -770,8 +846,9 @@ class Records(TempMixin):
         tool.do_switch = lambda: None
         tool.wait_health = lambda: False
         tool.rollback = lambda: True
+        self.run_as_unit(tool)
         with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
-            tool.switch_with_guards("b" * 40, lambda sha: self.fail("a rolled-back deploy must not record"))
+            tool.switch_with_guards("b" * 40)
         self.assertEqual(self.record(tool, "commit"), "a" * 40)
         self.assertEqual(self.record(tool, "toplevel"), "/nix/store/old")
         self.assertIn("rolled back", Path(os.path.join(tool.state, "refs.log")).read_text())
@@ -793,7 +870,7 @@ class Structure(unittest.TestCase):
         # test stubs these on instances.  Presence must therefore be asserted on the class.
         for name in ("check_health", "wait_health", "record_rollback", "do_switch",
                      "arm_guard", "cancel_guard", "finish_ai_records", "restore_records",
-                     "drop_record_snapshot", "switch_with_guards", "apply_on_ai"):
+                     "drop_record_snapshot", "switch_with_guards", "switch_tail", "apply_on_ai"):
             self.assertTrue(callable(getattr(deploy_ai.DeployAI, name, None)), name)
 
 

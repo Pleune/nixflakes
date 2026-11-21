@@ -71,6 +71,8 @@ USAGE = """deploy-ai: build and switch ai from a commit in a git repository.
   deploy-ai --submit                     vet a patch series on stdin and provision it immediately
   deploy-ai --vet                        the same checks, nothing applied; prints the verdict
   deploy-ai --submit --dry-run           vet and report, apply nothing
+  deploy-ai --switch-toplevel <path> --sha <rev>
+      internal: the switch tail run by the transient unit `deploy-ai-switch` a real deploy arms
 
 Every run ends with one machine-readable line: `result: ok` (nothing applied, or a status
 read), `result: applied` (a system switched), `result: refused` (a guard said no), or
@@ -760,9 +762,10 @@ class DeployAI:
             return "reboot armed at " + when.isoformat(timespec="minutes")
         return "none armed"
 
-    def switch_with_guards(self, sha: str, after_success) -> None:
+    def switch_with_guards(self, sha: str) -> None:
         """The shared road: build, require the current system healthy, arm the guard, record,
-        switch, roll back (and un-record) if the new system never becomes healthy."""
+        then hand the switch to a transient unit that rolls back if the new system never
+        becomes healthy."""
         current = self.current_system()
         self.record_rollback(current)
 
@@ -776,27 +779,44 @@ class DeployAI:
 
         # Armed only now: a build that fails after an hour must not leave a reboot pending.
         self.arm_guard()
-        # The record lands before the switch: activation restarts units, and the ssh session that
-        # started the gate can die with them, so a record written afterwards would never land.
-        # Every path that leaves the old generation in place puts the snapshot back: the gate's
-        # rollback below, and `deploy-ai-boot-rollback` on boot after a guarded reboot.
-        if not self.dry_run:
-            self.finish_ai_records(sha)
-        try:
-            self.do_switch()
-        except SystemExit:
-            if not self.dry_run:
-                self.restore_records(sha)
-            self.clear_rollback()
-            self.cancel_guard()
-            raise
         if self.dry_run:
             # Nothing was switched, so nothing is recorded: a record claims what is live, and
             # `--status` would read a dry run as a deploy.
+            self.do_switch()
             self.clear_rollback()
             print("deploy-ai: nothing applied (--dry-run)")
             return
 
+        # The record lands before the switch: activation restarts units, and the ssh session that
+        # started the gate can die with them, so a record written afterwards would never land.
+        # Every path that leaves the old generation in place puts the snapshot back: the unit's
+        # rollback below, and `deploy-ai-boot-rollback` on boot after a guarded reboot.
+        self.finish_ai_records(sha)
+
+        # Everything after arm_guard runs as a transient systemd unit.  The ssh session that
+        # invoked the gate is recycled by activation — the deployer's login unit IS the gate — and
+        # a session severed mid-switch used to strand rollback-pending on a switched, healthy
+        # system, which the boot unit would then roll back on the next reboot.  Detaching the tail
+        # means the health wait, the record restore-or-drop, and the guard cancel always finish;
+        # rollback-pending now survives only a death before or during the switch, which is exactly
+        # when a boot rollback is wanted.
+        result = self.run(["systemd-run", "--unit=deploy-ai-switch", "--wait", "--collect",
+                           sys.argv[0], "--switch-toplevel", self.toplevel, "--sha", sha])
+        if result.returncode != 0:
+            fail(f"deploy of {sha} failed (switch unit exit {result.returncode}); check "
+                 f"`journalctl -u deploy-ai-switch` and `deploy-ai --status`")
+
+    def switch_tail(self, sha: str) -> int:
+        """The post-arm_guard sequence, run inside the transient switch unit."""
+        try:
+            self.do_switch()
+        except SystemExit:
+            # A failed switch leaves the old generation in place: undo the record so it
+            # claims only what is live.
+            self.restore_records(sha)
+            self.clear_rollback()
+            self.cancel_guard()
+            raise
         if not self.wait_health():
             print("deploy-ai: the new system never became healthy; switching back", file=sys.stderr)
             self.rollback()
@@ -804,11 +824,11 @@ class DeployAI:
             self.clear_rollback()
             self.cancel_guard()
             fail(f"deploy of {sha} failed and was rolled back; log: {os.path.join(self.state, 'log', 'build.log')}")
-
         self.drop_record_snapshot()
         self.clear_rollback()
         self.cancel_guard()
-        after_success(sha)
+        print(f"deploy-ai: ai is now running {sha} ({self.toplevel})")
+        return 0
 
     # `git archive` streams the commit's tree; `tar` needs somewhere to unpack it, and a bare mirror
     # has no worktree, so both directions go through a temporary directory.
@@ -970,8 +990,7 @@ class DeployAI:
         finally:
             if view != tree:
                 shutil.rmtree(view, ignore_errors=True)
-        self.switch_with_guards(sha, lambda recorded: print(
-            f"deploy-ai: ai is now running {recorded} ({self.toplevel})"))
+        self.switch_with_guards(sha)
 
     def do_submit(self) -> str:
         self.need()
@@ -1021,6 +1040,8 @@ def parse_args(argv):
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--vet", action="store_true")
+    parser.add_argument("--switch-toplevel", default="")
+    parser.add_argument("--sha", default="")
     parser.add_argument("-h", "--help", action="store_true")
     try:
         args, extra = parser.parse_known_args(argv)
@@ -1048,6 +1069,19 @@ def main(argv=None):
     tool.ref = args.ref
     tool.dry_run = args.dry_run
     tool.vet_only = args.vet
+
+    if args.switch_toplevel:
+        # Re-entry point of the transient switch unit armed by a real deploy
+        # (see switch_with_guards): the tail must finish even if the ssh session
+        # that started the deploy dies during activation.
+        tool.need()
+        tool.toplevel = args.switch_toplevel
+        if not args.sha:
+            print(USAGE, file=sys.stderr)
+            return 1
+        tool.sha = args.sha
+        tool.switch_tail(args.sha)
+        return 0
 
     if args.status:
         tool.need()
