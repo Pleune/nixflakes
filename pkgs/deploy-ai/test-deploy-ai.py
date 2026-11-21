@@ -719,6 +719,64 @@ class DryRun(TempMixin):
             self.assertFalse(os.path.exists(os.path.join(tool.state, name)), name)
 
 
+class Records(TempMixin):
+    """The record claims what is live, so it moves before the switch: activation restarts units,
+    and the ssh session that started the gate can die with them.  Every path that leaves the old
+    generation in place must put the snapshot back."""
+
+    def armed_tool(self, commit="a" * 40, toplevel="/nix/store/old"):
+        tool = self.make_tool()
+        tool.dry_run = False
+        tool.toplevel = "/nix/store/new"
+        Path(os.path.join(tool.state, "commit")).write_text(commit + "\n")
+        Path(os.path.join(tool.state, "toplevel")).write_text(toplevel + "\n")
+        tool.current_system = lambda: toplevel
+        tool.check_health = lambda: True
+        tool.arm_guard = lambda: None
+        tool.cancel_guard = lambda: None
+        return tool
+
+    def record(self, tool, name):
+        path = os.path.join(tool.state, name)
+        return Path(path).read_text().strip() if os.path.isfile(path) else ""
+
+    def test_the_record_lands_before_the_switch(self):
+        tool = self.armed_tool()
+        seen = {}
+        tool.do_switch = lambda: seen.update(
+            commit=self.record(tool, "commit"), toplevel=self.record(tool, "toplevel"))
+        tool.wait_health = lambda: True
+        with redirect_stdout(io.StringIO()):
+            tool.switch_with_guards("b" * 40, lambda sha: None)
+        self.assertEqual(seen["commit"], "b" * 40, "the record must be in place while the switch runs")
+        self.assertEqual(seen["toplevel"], "/nix/store/new")
+        self.assertEqual(self.record(tool, "commit"), "b" * 40)
+        for name in ("commit-previous", "toplevel-previous"):
+            self.assertFalse(os.path.exists(os.path.join(tool.state, name)),
+                             f"{name} is only a rollback insurance, not kept after a success")
+
+    def test_a_failed_switch_restores_the_record(self):
+        tool = self.armed_tool()
+        tool.run = lambda argv, **kwargs: Result(returncode=1)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            tool.switch_with_guards("b" * 40, lambda sha: self.fail("a failed switch must not record"))
+        self.assertEqual(self.record(tool, "commit"), "a" * 40)
+        self.assertEqual(self.record(tool, "toplevel"), "/nix/store/old")
+        self.assertFalse(os.path.exists(os.path.join(tool.state, "rollback-pending")))
+        self.assertIn("rolled back", Path(os.path.join(tool.state, "refs.log")).read_text())
+
+    def test_a_rollback_restores_the_record(self):
+        tool = self.armed_tool()
+        tool.do_switch = lambda: None
+        tool.wait_health = lambda: False
+        tool.rollback = lambda: True
+        with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            tool.switch_with_guards("b" * 40, lambda sha: self.fail("a rolled-back deploy must not record"))
+        self.assertEqual(self.record(tool, "commit"), "a" * 40)
+        self.assertEqual(self.record(tool, "toplevel"), "/nix/store/old")
+        self.assertIn("rolled back", Path(os.path.join(tool.state, "refs.log")).read_text())
+
+
 class Structure(unittest.TestCase):
     """Names inside DeployAI must not collide: an attribute that shares a method's name turns a
     call into a TypeError, which is how `--repo/--ref` used to fail."""
@@ -734,8 +792,8 @@ class Structure(unittest.TestCase):
         # before `def arm_guard`), and only a real submit hits the AttributeError because every
         # test stubs these on instances.  Presence must therefore be asserted on the class.
         for name in ("check_health", "wait_health", "record_rollback", "do_switch",
-                     "arm_guard", "cancel_guard", "finish_ai_records", "switch_with_guards",
-                     "apply_on_ai"):
+                     "arm_guard", "cancel_guard", "finish_ai_records", "restore_records",
+                     "drop_record_snapshot", "switch_with_guards", "apply_on_ai"):
             self.assertTrue(callable(getattr(deploy_ai.DeployAI, name, None)), name)
 
 

@@ -216,7 +216,10 @@ and boot, so a change can sit in the guest's system until ai switches again or t
 - `/home/builder/provisioned-commit` — the `ai` snapshot provisioning already applied here; while it
   names the snapshot `ai` runs, provisioning does nothing at all.
 - ai keeps its own state under `/var/lib/deploy-ai/`: the deployed source, the commit, the pending
-  rollback, the last build output and the deploy log.
+  rollback, the last build output and the deploy log.  The deploy record moves *before* the switch,
+  because activation cuts the ssh session that started the gate and a record written afterwards
+  would never land; every rollback path — the gate's own, and `deploy-ai-boot-rollback` on boot —
+  puts the previous record back, so `--status` only claims a commit that is really live.
 
 Provisioning runs on every ai deploy and moves only the `deployed` tag: nothing you committed here is
 discarded, nothing is reset, stashed or rewritten, and `main` stays where you left it. Push

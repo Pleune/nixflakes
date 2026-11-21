@@ -627,7 +627,9 @@ class DeployAI:
         if self.dry_run:
             print(f"deploy-ai: dry run; would switch ai to {self.toplevel}")
             return
-        self.run([os.path.join(self.toplevel, "bin", "switch-to-configuration"), "switch"])
+        result = self.run([os.path.join(self.toplevel, "bin", "switch-to-configuration"), "switch"])
+        if result.returncode != 0:
+            fail(f"the switch failed: switch-to-configuration exit {result.returncode}")
 
     # The guard is a timed reboot: if the new system hangs, boot finds the recorded rollback.
     def arm_guard(self) -> None:
@@ -644,6 +646,15 @@ class DeployAI:
         self.run(["systemctl", "cancel", "--when"], capture=True)
 
     def finish_ai_records(self, sha: str) -> None:
+        # Snapshot first: a rollback — the gate's own, or `deploy-ai-boot-rollback` after a
+        # guarded reboot — puts these back, because the record now moves before the switch.
+        for name in ("commit", "toplevel"):
+            path = os.path.join(self.state, name)
+            backup = path + "-previous"
+            if os.path.isfile(path):
+                shutil.copyfile(path, backup)
+            elif os.path.isfile(backup):
+                os.remove(backup)
         with open(os.path.join(self.state, "toplevel"), "w", encoding="utf-8") as handle:
             handle.write(self.toplevel + "\n")
         with open(os.path.join(self.state, "commit"), "w", encoding="utf-8") as handle:
@@ -651,6 +662,30 @@ class DeployAI:
         stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
         with open(os.path.join(self.state, "refs.log"), "a", encoding="utf-8") as handle:
             handle.write(f"{stamp}\t{sha}\t{self.toplevel}\n")
+
+    def restore_records(self, sha: str) -> None:
+        """Undo a pre-switch record: run this whenever the switch did not stick."""
+        for name in ("commit", "toplevel"):
+            backup = os.path.join(self.state, name + "-previous")
+            target = os.path.join(self.state, name)
+            if os.path.isfile(backup):
+                os.replace(backup, target)
+            else:
+                try:
+                    os.remove(target)
+                except OSError:
+                    pass
+        stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        with open(os.path.join(self.state, "refs.log"), "a", encoding="utf-8") as handle:
+            handle.write(f"{stamp}\t{sha}\trolled back\n")
+
+    def drop_record_snapshot(self) -> None:
+        """The switch stuck, so the snapshot has nothing left to protect."""
+        for name in ("commit", "toplevel"):
+            try:
+                os.remove(os.path.join(self.state, name + "-previous"))
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------ commands
 
@@ -726,8 +761,8 @@ class DeployAI:
         return "none armed"
 
     def switch_with_guards(self, sha: str, after_success) -> None:
-        """The shared road: build, require the current system healthy, arm the guard, switch, roll
-        back if the new system never becomes healthy."""
+        """The shared road: build, require the current system healthy, arm the guard, record,
+        switch, roll back (and un-record) if the new system never becomes healthy."""
         current = self.current_system()
         self.record_rollback(current)
 
@@ -741,7 +776,20 @@ class DeployAI:
 
         # Armed only now: a build that fails after an hour must not leave a reboot pending.
         self.arm_guard()
-        self.do_switch()
+        # The record lands before the switch: activation restarts units, and the ssh session that
+        # started the gate can die with them, so a record written afterwards would never land.
+        # Every path that leaves the old generation in place puts the snapshot back: the gate's
+        # rollback below, and `deploy-ai-boot-rollback` on boot after a guarded reboot.
+        if not self.dry_run:
+            self.finish_ai_records(sha)
+        try:
+            self.do_switch()
+        except SystemExit:
+            if not self.dry_run:
+                self.restore_records(sha)
+            self.clear_rollback()
+            self.cancel_guard()
+            raise
         if self.dry_run:
             # Nothing was switched, so nothing is recorded: a record claims what is live, and
             # `--status` would read a dry run as a deploy.
@@ -752,10 +800,12 @@ class DeployAI:
         if not self.wait_health():
             print("deploy-ai: the new system never became healthy; switching back", file=sys.stderr)
             self.rollback()
+            self.restore_records(sha)
             self.clear_rollback()
             self.cancel_guard()
             fail(f"deploy of {sha} failed and was rolled back; log: {os.path.join(self.state, 'log', 'build.log')}")
 
+        self.drop_record_snapshot()
         self.clear_rollback()
         self.cancel_guard()
         after_success(sha)
@@ -920,10 +970,8 @@ class DeployAI:
         finally:
             if view != tree:
                 shutil.rmtree(view, ignore_errors=True)
-        self.switch_with_guards(sha, lambda recorded: (
-            self.finish_ai_records(recorded),
-            print(f"deploy-ai: ai is now running {recorded} ({self.toplevel})"),
-        ))
+        self.switch_with_guards(sha, lambda recorded: print(
+            f"deploy-ai: ai is now running {recorded} ({self.toplevel})"))
 
     def do_submit(self) -> str:
         self.need()

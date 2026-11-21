@@ -354,6 +354,14 @@ in
         fi
         echo "deploy-ai: booting after a guarded reboot, switching back to $previous"
         "$previous/bin/switch-to-configuration" switch || true
+        # The deploy record moved ahead of the switch, so put it back with the generation it named.
+        for name in commit toplevel; do
+          if [ -e "${cfg.stateDir}/$name-previous" ]; then
+            mv "${cfg.stateDir}/$name-previous" "${cfg.stateDir}/$name"
+          fi
+        done
+        printf '%s\t%s\trolled back at boot\n' "$(date -Is)" \
+          "$(head -n1 "${cfg.stateDir}/commit" 2>/dev/null || echo unknown)" >> "${cfg.stateDir}/refs.log"
       '';
     };
   };
