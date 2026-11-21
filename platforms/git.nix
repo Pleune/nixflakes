@@ -115,6 +115,10 @@ in
         ENABLE_NOTIFY_MAIL = true;
         DISABLE_REGISTRATION = true;
       };
+      # Bot crawlers hitting /archive/ links generate tarballs on the fly and
+      # fill the disk with repo-archive cache (forgejo/forgejo#7011); refuse
+      # the downloads entirely. Git and Nix flake fetches are unaffected.
+      "repository".DISABLE_DOWNLOAD_SOURCE_ARCHIVES = true;
       "repository.pull-request".DEFAULT_MERGE_STYLE = "rebase";
       "repository.upload".FILE_MAX_SIZE = 60000;
       attachment.MAX_SIZE = 60000;
