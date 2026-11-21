@@ -873,8 +873,12 @@ class DeployAI:
         # means the health wait, the record restore-or-drop, and the guard cancel always finish;
         # rollback-pending now survives only a death before or during the switch, which is exactly
         # when a boot rollback is wanted.
+        # `sys.argv[0]` over ssh is the bare name `deploy-ai`, which the transient unit cannot
+        # resolve (its PATH has no /run/current-system/sw/bin) — systemd-run would exit 203/EXEC.
+        # Hand it the absolute path instead.
         result = self.run(["systemd-run", "--unit=deploy-ai-switch", "--wait", "--collect",
-                           sys.argv[0], "--switch-toplevel", self.toplevel, "--sha", sha])
+                           os.path.abspath(sys.argv[0]),
+                           "--switch-toplevel", self.toplevel, "--sha", sha])
         if result.returncode != 0:
             fail(f"deploy of {sha} failed (switch unit exit {result.returncode}); check "
                  f"`journalctl -u deploy-ai-switch` and `deploy-ai --status`")

@@ -813,6 +813,8 @@ class SwitchUnit(TempMixin):
             tool.switch_with_guards("a" * 40)
         self.assertEqual(calls[0][:4],
                          ["systemd-run", "--unit=deploy-ai-switch", "--wait", "--collect"])
+        # The re-entry binary must be absolute: the unit's PATH cannot resolve a bare name.
+        self.assertTrue(os.path.isabs(calls[0][4]), calls[0][4])
         self.assertEqual(calls[0][calls[0].index("--switch-toplevel") + 1], "/nix/store/new")
         self.assertEqual(calls[0][calls[0].index("--sha") + 1], "a" * 40)
 
