@@ -95,6 +95,7 @@ class TempMixin(unittest.TestCase):
             "DEPLOY_AI_BUILD_KEY": os.path.join(root, "build-key"),
             "DEPLOY_AI_HEALTH_UNITS": os.path.join(root, "health-units"),
             "DEPLOY_AI_HEALTH_URL": os.path.join(root, "health-url"),
+            "DEPLOY_AI_TRUSTED_SOURCES": os.path.join(root, "trusted-sources"),
         }
         # A host publishes what it considers healthy, so the tests start from a configured probe
         # (the gateway's real path) and override it when a case wants a broken one.
@@ -185,6 +186,75 @@ class Scope(TempMixin):
         tool = self.make_tool(DEPLOY_AI_ALLOWLIST="platforms/buildvm.nix\nmodules/nixos/\n")
         self.assertIn("platforms/buildvm.nix", tool.nearest_dir("platforms/ai.nix"))
         self.assertEqual(tool.nearest_dir("flake.nix"), "no top-level files are allowed")
+
+
+class TrustedSource(TempMixin):
+    """The trust route: a repo+branch the operator reviews at merge time deploys its tip as-is."""
+
+    TIP = "a" * 40
+    HOST = "https://git.pleunetowne.com/mitchpleune/nixflakes.git\tmain\n"
+
+    def tool_with_tip(self, repo: str, sha: str, **files: str) -> deploy_ai.DeployAI:
+        """A tool whose mirror answers `rev-parse` with `TIP`, so trust is about identity alone."""
+        tool = self.make_tool(**files)
+
+        def run(argv, **kwargs):
+            if "rev-parse" in argv:
+                return Result(stdout=self.TIP + "\n")
+            return Result()
+
+        tool.run = run
+        tool.repo = repo
+        tool.sha = sha
+        return tool
+
+    def test_canonical_identity_is_scheme_credentials_and_port_blind(self):
+        self.assertEqual(
+            deploy_ai.canonical_repo("https://git.pleunetowne.com/mitchpleune/nixflakes.git"),
+            deploy_ai.canonical_repo("ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git"),
+        )
+        self.assertEqual(
+            deploy_ai.canonical_repo("ssh://builder@127.0.0.1:2224/home/builder/nixflakes"),
+            "127.0.0.1/home/builder/nixflakes",
+        )
+
+    def test_the_tip_of_a_trusted_branch_is_trusted(self):
+        tool = self.tool_with_tip(
+            "ssh://git@git.pleunetowne.com:2223/mitchpleune/nixflakes.git", self.TIP,
+            DEPLOY_AI_TRUSTED_SOURCES=self.HOST)
+        self.assertEqual(tool.trust_match(),
+                         "git.pleunetowne.com/mitchpleune/nixflakes refs/heads/main")
+
+    def test_a_repo_on_the_vm_is_never_trusted(self):
+        # The guest's clone has its own unreviewed `main`; trusting it would defeat the route.
+        tool = self.tool_with_tip(
+            "ssh://builder@127.0.0.1:2224/home/builder/nixflakes", self.TIP,
+            DEPLOY_AI_TRUSTED_SOURCES=self.HOST)
+        self.assertEqual(tool.trust_match(), "")
+
+    def test_a_commit_behind_the_tip_is_not_trusted(self):
+        tool = self.tool_with_tip("https://git.pleunetowne.com/mitchpleune/nixflakes.git",
+                                  "b" * 40, DEPLOY_AI_TRUSTED_SOURCES=self.HOST)
+        self.assertEqual(tool.trust_match(), "")
+
+    def test_a_host_with_no_trusted_sources_trusts_nothing(self):
+        tool = self.tool_with_tip("https://git.pleunetowne.com/mitchpleune/nixflakes.git", self.TIP)
+        self.assertEqual(tool.trusted_sources(), [])
+        self.assertEqual(tool.trust_match(), "")
+
+    def test_a_trusted_tip_skips_the_descendant_refusal(self):
+        # After a gate submit the recorded base lives nowhere upstream, so a trusted tip must
+        # not be refused for not descending from it.
+        tool = self.tool_with_tip("https://git.pleunetowne.com/mitchpleune/nixflakes.git", "1" * 40)
+        tool.run = lambda argv, **kwargs: Result(returncode=1 if "merge-base" in argv else 0)
+        self.assertIsNone(tool.check_history("0" * 40, trusted=True))
+
+    def test_an_untrusted_non_descendant_still_refuses(self):
+        tool = self.tool_with_tip("https://git.pleunetowne.com/mitchpleune/nixflakes.git", "1" * 40)
+        tool.run = lambda argv, **kwargs: Result(returncode=1 if "merge-base" in argv else 0)
+        with refusal() as message:
+            tool.check_history("0" * 40)
+        self.assertIn("does not have the deployed commit", message.getvalue())
 
 
 class Denylist(TempMixin):

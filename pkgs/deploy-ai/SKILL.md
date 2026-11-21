@@ -267,3 +267,20 @@ The URL for your own work is the checkout on this VM:
 `--submit`; the repository route asks the git host as `builder`, so it only works once your key is
 registered there.  There is no `--rollback` or `--switch` to reach for: a deploy that never becomes
 healthy rolls itself back, and every build runs on the VM — ai has no mode that builds here.
+
+## Trusted deploys from `main`
+
+`/etc/deploy-ai/trusted-sources` lists repo+branch pairs (`nixflakes.deploy-ai.trustedSources`)
+whose current tip may deploy as-is: the operator reviews that branch when a PR merges, so merge
+review replaces the allowlist for `deploy-ai --repo <url> --ref <branch>` runs whose commit is
+the branch tip.  You cannot push `main` -- that is what makes the trust safe.  The dangerous-change
+route is therefore: open a PR (`git push origin HEAD:refs/for/main/<desc>`), the operator merges,
+then
+
+```bash
+deploy-ai --repo https://git.pleunetowne.com/mitchpleune/nixflakes.git --ref main
+```
+
+applies whatever landed, even changes to the gate's own paths.  The health probe, rollback, and
+reboot guard still run on every route, and `--submit` patches stay fully vetted: trust belongs to
+the reviewed branch, never to a patch.

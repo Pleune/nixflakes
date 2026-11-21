@@ -39,6 +39,9 @@ let
     buildMaxJobs = cfg.buildMaxJobs;
     privateInput = cfg.privateInput;
     denylist = cfg.submit.denylist;
+    # Repo+branch pairs trusted content-wise (see the option).  Going into the digest means a
+    # submitted patch can never add or widen a trusted source it is vetted against.
+    trustedSources = builtins.map (t: { inherit (t) repo ref; }) cfg.trustedSources;
     # nixpkgs retired security.sudo.wheelWheelGroup, so the wheel policy here is execWheelOnly plus
     # the extraRules the sudo module turns into sudoers lines.
     sudoExtraConfig = config.security.sudo.extraConfig;
@@ -188,6 +191,30 @@ in
       '';
     };
 
+    # A repo+branch the gate trusts content-wise: the operator reviews that branch when a PR
+    # merges, so `deploy-ai --repo <url> --ref <branch>` builds its current tip even when the
+    # diff moves paths outside the allowlist.  This is the reviewed channel: a `--submit` patch
+    # never gets this treatment, and the list itself lives in `policyDigest`, so the rules a
+    # patch is vetted against cannot be widened by the patch.
+    trustedSources = lib.mkOption {
+      type = with lib.types; listOf (submodule {
+        options = {
+          repo = lib.mkOption {
+            type = lib.types.str;
+            description = "Git URL of the trusted repository; deploy-ai matches it on host+path, ignoring scheme, credentials, port, and a trailing .git.";
+          };
+          ref = lib.mkOption {
+            type = lib.types.str;
+            default = "main";
+            description = "The trusted branch: a deploy is trusted only when its commit is this branch's current tip.";
+          };
+        };
+      });
+      default = [ ];
+      example = [ { repo = "https://git.example.com/o/r.git"; ref = "main"; } ];
+      description = "Repo+branch combinations that deploy as-is because merging them was the review.";
+    };
+
     policyDigest = lib.mkOption {
       type = lib.types.str;
       default = builtins.hashString "sha256" (builtins.toJSON policy);
@@ -271,6 +298,14 @@ in
     ];
 
     environment.etc."deploy-ai/allowlist".text = lib.concatStringsSep "\n" cfg.allowlist + "\n";
+
+    # One `repo<TAB>ref` line per trusted source, read by deploy-ai's trust route.  The contents
+    # are inside `policyDigest`, so a submitted patch cannot add a trusted source to the rules it
+    # is vetted against.
+    environment.etc."deploy-ai/trusted-sources" = {
+      text = lib.concatStringsSep "\n"
+        (map (t: "${t.repo}\t${t.ref}") cfg.trustedSources) + "\n";
+    };
 
     # What deploy-ai treats as healthy, read out of /etc like the allowlist.  Both are inside
     # `policyDigest`, so a submitted patch cannot move the probe to something that always answers

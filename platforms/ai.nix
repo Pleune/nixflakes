@@ -531,6 +531,14 @@ in
     # cannot authenticate would otherwise look like a hung deploy.
     buildMaxJobs = 4;
     privateInput = "${private}";
+    # `main` is the reviewed channel: every change reaches it through a PR the operator merges,
+    # so deploying its tip may touch anything -- including the gate itself -- while health,
+    # rollback, and the reboot guard still apply.  The agent cannot push `main`; merge review is
+    # what makes this safe.  The git host's repo is public, so ai fetches it anonymously; the
+    # match ignores scheme, credentials, and port, so either URL form names the same repo.
+    trustedSources = [
+      { repo = "https://git.pleunetowne.com/mitchpleune/nixflakes.git"; ref = "main"; }
+    ];
     # What a deploy may touch.  The gate diffs the candidate tree's content against `deployedSource`
     # and refuses anything outside these prefixes before building.  platforms/ stays off the list
     # except the files involved here -- ai's own, and the two the build VM is built from, since the

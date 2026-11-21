@@ -85,6 +85,12 @@ that fetches.  The build runs on ai, with --max-jobs taken from /etc/deploy-ai/b
 so it cannot take every core from the api server, and with --override-input private taken from
 /etc/deploy-ai/private-input so it never fetches a repository it has no key for.
 
+/etc/deploy-ai/trusted-sources names `repo<TAB>ref` pairs (`nixflakes.deploy-ai.trustedSources`)
+that the operator reviews at merge time.  A --repo/--ref run whose commit is the current tip of a
+trusted branch is trusted content-wise: the allowlist and the descendant check are skipped because
+merging the branch was the review.  Every other run takes the full scope checks, and no route ever
+skips the health probe, the rollback, or the reboot guard.
+
 --submit/--vet read a series from stdin, e.g.
 
   git format-patch --stdout deployed..main | ssh deployer@10.0.2.2 'deploy-ai --submit'
@@ -163,6 +169,29 @@ def matches(path: str, entries: list[str]) -> bool:
     return False
 
 
+def canonical_repo(url: str) -> str:
+    """Repo identity for the trust check: `host/path`, with scheme, credentials, port, and a
+    trailing `.git` ignored so the https and ssh forms of one repository are one identity.  The
+    host stays load-bearing: a repository on the VM (`127.0.0.1`) must never stand in for the
+    git host however its URL is spelled, and dropping only the port keeps that distinction
+    while letting either URL form of the real host match.
+    """
+    u = url.strip().lower()
+    if "://" in u:
+        rest = u.split("://", 1)[1]
+        if "@" in rest.split("/", 1)[0]:
+            rest = rest.split("@", 1)[1]
+        host, _, path = rest.partition("/")
+    else:  # scp-style `git@host:path`
+        user_host, _, path = u.partition(":")
+        host = user_host.rsplit("@", 1)[-1]
+    host = host.split(":")[0]
+    path = path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    return f"{host}/{path}"
+
+
 class DeployAI:
     """One invocation.  Every path is overridable so the unit tests can exercise the guards as an
     unprivileged user; the defaults are what the NixOS module installs."""
@@ -215,6 +244,10 @@ class DeployAI:
 
         self.deny_file = get("DEPLOY_AI_DENY_FILE", "/etc/deploy-ai/denylist")
         self.policy_file = get("DEPLOY_AI_POLICY_FILE", "/etc/deploy-ai/policy-digest")
+        # Repo+branch pairs the operator reviews at merge time, published by the module.  The
+        # trust file belongs to the running system and is inside the policy digest, so neither a
+        # candidate tree nor a submitted patch can vouch for itself.
+        self.trusted_file = get("DEPLOY_AI_TRUSTED_SOURCES", "/etc/deploy-ai/trusted-sources")
         self.inbox = get("DEPLOY_AI_INBOX", os.path.join(self.state, "inbox"))
         self.patch_size = 0
         self.submit_cap = 0
@@ -384,13 +417,49 @@ class DeployAI:
                 return path[len(prefix):]
         return path
 
-    def check_history(self, base: str) -> None:
+    def trusted_sources(self) -> list[tuple[str, str]]:
+        """`/etc/deploy-ai/trusted-sources`: `<repo>\t<ref>` lines naming repo+branch pairs the
+        operator reviews at merge time.  Read from the running system, so a candidate cannot
+        vouch for itself, and inside `policyDigest`, so a submitted patch cannot widen the trust
+        it is vetted against.
+        """
+        if not os.access(self.trusted_file, os.R_OK):
+            return []
+        entries = []
+        with open(self.trusted_file) as handle:
+            for line in handle.read().splitlines():
+                repo, _, ref = line.partition("\t")
+                repo, ref = repo.strip(), ref.strip()
+                if repo and ref:
+                    entries.append((repo, ref))
+        return entries
+
+    def trust_match(self) -> str:
+        """Why this run is a trusted deploy (a reason string), or `""`.  The commit must be the
+        current tip of a trusted branch -- not merely one of its ancestors -- so a trusted deploy
+        applies exactly what upstream made the head of that branch, and any older commit still
+        takes the scope checks it would have been vetted against.
+        """
+        if not self.repo or not self.sha:
+            return ""
+        mine = canonical_repo(self.repo)
+        for repo, ref in self.trusted_sources():
+            if canonical_repo(repo) != mine:
+                continue
+            tip = self.run(["git", "--git-dir", self.mirror, "rev-parse", "--verify",
+                            f"refs/heads/{ref}^{{commit}}"], capture=True)
+            if tip.returncode == 0 and tip.stdout.strip() == self.sha:
+                return f"{mine} refs/heads/{ref}"
+        return ""
+
+    def check_history(self, base: str, trusted: bool = False) -> None:
         """Require the candidate to descend from what is deployed, so a deploy cannot rewrite history.
 
         A gate deploy records the commit of the tree ai reconstructed, which lives in ai's retained
         base repository and never in the mirror being fetched, so an unresolvable base falls back to
         the commit the flake baseline came from; with neither in the mirror the check says it was
-        skipped instead of refusing a legitimate deploy.
+        skipped instead of refusing a legitimate deploy.  A trusted tip skips the refusal: its
+        lineage is upstream's merge review, not the gate's ancestry check.
         """
         if not self.mirror_has(base):
             fallback = read_first_line(self.baseline_commit_file)
@@ -403,6 +472,10 @@ class DeployAI:
                       f"is in {self.repo}; the descendant check is skipped", file=sys.stderr)
                 return
         if self.run(["git", "--git-dir", self.mirror, "merge-base", "--is-ancestor", base, self.sha]).returncode != 0:
+            if trusted:
+                print(f"deploy-ai: note: {self.sha} is the tip of a trusted branch; the descendant "
+                      f"check against {base} is skipped -- merging was the review", file=sys.stderr)
+                return
             die(f"{self.sha} does not have the deployed commit {base} in its history; rebase onto it, "
                 f"or the operator deploys out-of-band")
 
@@ -865,13 +938,17 @@ class DeployAI:
             die(f"{self.ref} does not exist in {self.repo}; run 'deploy-ai --repo \"{self.repo}\" --list'")
 
         base = self.baseline_commit()
-        self.check_history(base)
+        trusted = self.trust_match()
+        self.check_history(base, trusted=bool(trusted))
 
         self.acquire_lock()
         work = tempfile.mkdtemp(prefix="deploy-ai-tree.")
         try:
             self.unpack_local_tar(self.archive_dir(self.sha), work)
-            self.check_scope(work)
+            if trusted:
+                say("trust", f"{trusted}: merge-reviewed tip; the allowlist is not applied")
+            else:
+                self.check_scope(work)
             # The same road a submission takes: build it here, and re-evaluate the same source, so the
             # path being switched is one ai derived twice.
             self.apply_on_ai(work, self.sha)
