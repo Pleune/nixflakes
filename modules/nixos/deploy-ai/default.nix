@@ -180,14 +180,21 @@ in
       type = with lib.types; listOf str;
       default = [
         "modules/nixos/deploy-ai/"
-        "pkgs/deploy-ai/"
+        "pkgs/deploy-ai/deploy-ai.py"
+        "pkgs/deploy-ai/gate.nix"
+        "pkgs/deploy-ai/default.nix"
+        "pkgs/deploy-ai/test-deploy-ai.py"
+        "pkgs/deploy-ai/test-gate.nix"
         "flake.lock"
         "secrets/"
       ];
       description = ''
         Path prefixes no patch may touch at all.  These are the deployment machinery itself -- the
-        gate's module, its script, the input lock and the secrets tree -- so a patch can never widen
-        the rules it is vetted against.
+        gate's module, script and tests, the input lock and the secrets tree -- so a patch can never
+        widen the rules it is vetted against.  The gate's own SKILL.md is deliberately carved out:
+        it is documentation the agent maintains, not enforcement, and rides the normal deploy
+        routes.  Changing THIS list moves `policyDigest`, so the deploy that moves it must come
+        from a merge-reviewed trusted tip.
       '';
     };
 

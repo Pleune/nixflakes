@@ -175,8 +175,12 @@ after yourself.
    `docs/`, `README.md`, `lib/`, `modules/nixos/`, `config/`, `pkgs/`, `skills/`, `platforms/ai.nix`,
    `platforms/buildvm.nix` and `platforms/buildvm-bootstrap.nix`. Read `cat /etc/deploy-ai/allowlist`
    instead of trusting this list; it is why most of `platforms/` is not yours to change.
-4. No changed path is in `/etc/deploy-ai/denylist`: `modules/nixos/deploy-ai/`, `pkgs/deploy-ai/`,
-   `flake.lock`, `secrets/`. The thing doing the vetting cannot vet a change to itself.
+4. No changed path is in `/etc/deploy-ai/denylist`: `modules/nixos/deploy-ai/`, the gate's code and
+   tests under `pkgs/deploy-ai/` (`deploy-ai.py`, `gate.nix`, `default.nix`, the two test files),
+   `flake.lock`, `secrets/`. The thing doing the vetting cannot vet a change to itself -- but the
+   gate's own `SKILL.md` is deliberately NOT denied: it is documentation you maintain, and once
+   this carve-out is deployed it rides `--submit` like any doc change. Editing the denylist itself
+   moves the policy digest, so that change ships only from a merge-reviewed trusted tip.
 5. Nothing the patch moves changes the policy the gate runs under. That policy covers the allowlist,
    the gate's and build VM's keys, the users and their authorized keys, sudo, sshd, nix trust, the build
 cap, and the submit rules — so you cannot widen what is allowed. It is fixed on `ai`, and no patch can
@@ -239,7 +243,7 @@ around it.
 | `deploy-ai: refusing: --repo is required` | `--list` and `--ref` read a repository: add `--repo <url>`. |
 | `the patch does not apply to the deployed commit <base>; rebase it onto <base> and submit again` | Your base moved; rebase onto `deployed`. |
 | `refusing: '<path>' is outside the deploy-ai allowlist.` | That file is not yours; ask the operator. |
-| `refusing: '<path>' is on the deploy-ai denylist.` | The gate's own code, `flake.lock`, or secrets. |
+| `refusing: '<path>' is on the deploy-ai denylist.` | The gate's own code or tests, `flake.lock`, or secrets — not `pkgs/deploy-ai/SKILL.md`, which is editable. |
 | `the patch changes the deployment policy (allowlist, keys, users, sudoers); …` | It moves ssh keys, sudo, or the rules above. |
 | `patch too large: N bytes, over the M limit in /etc/deploy-ai/submit-max-bytes` | Split the series. |
 | `empty patch on stdin; nothing to submit` | `deployed..main` was empty — nothing committed, or you piped from the wrong range. |
