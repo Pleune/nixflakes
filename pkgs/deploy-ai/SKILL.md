@@ -266,7 +266,8 @@ The URL for your own work is the checkout on this VM:
 `--repo`/`--ref` is the operator's route, which fetches from a repository. You normally use
 `--submit`; the repository route asks the git host as `builder`, so it only works once your key is
 registered there.  There is no `--rollback` or `--switch` to reach for: a deploy that never becomes
-healthy rolls itself back, and every build runs on the VM — ai has no mode that builds here.
+healthy rolls itself back. ai builds ai's own system; the guest's system is built on the VM and
+provisioned from ai's tree by every ai switch.
 
 ## Trusted deploys from `main`
 
@@ -284,3 +285,11 @@ deploy-ai --repo https://git.pleunetowne.com/mitchpleune/nixflakes.git --ref mai
 applies whatever landed, even changes to the gate's own paths.  The health probe, rollback, and
 reboot guard still run on every route, and `--submit` patches stay fully vetted: trust belongs to
 the reviewed branch, never to a patch.
+
+When you are asked for a feature built on commits the operator has already merged into upstream
+`main`, the order is fixed: deploy the trusted route above FIRST to bring ai onto the merged tip,
+then `git fetch origin && git rebase deployed` here — `deployed` now names that tip — then deploy
+your own commits on top as usual (`--submit` from `deployed..main`). Rebasing onto the merged main
+and submitting BEFORE the trusted deploy is refused: the patch does not apply onto the commit ai
+runs, because ai still runs the old one. The same rule guards trust from below: only the merged tip
+of a trusted branch is trusted, so your unmerged commits stay fully vetted either route.
