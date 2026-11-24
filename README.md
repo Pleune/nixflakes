@@ -158,6 +158,14 @@ nix flake update
 nix develop . -c deploy
 ```
 
+## Deploy `ai` from the Hermes agent
+`ai` runs the Hermes agent, and that agent's shell is a qemu guest (`buildvm`) rather than the host.
+It clones and edits this flake there, then asks for a switch through the `deploy-ai` gate, which
+builds in the guest, health-probes, switches, and rolls itself back on failure. No `nixos-rebuild` on
+`ai`. See [docs/hermes-agent-flake-deploy.md](docs/hermes-agent-flake-deploy.md) for the design and
+limits, [docs/buildvm-ai-setup.md](docs/buildvm-ai-setup.md) for the operator steps, and
+`skills/deploy-ai/SKILL.md` for the agent-side instructions.
+
 ## Errata
 `nix build --rebuild nixpkgs#gitMinimal` tests sometimes randomly fail on ZFS. higher disk priority and higher ulimit seems to help, but does not fix it.
 
