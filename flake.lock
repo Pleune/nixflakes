@@ -305,6 +305,26 @@
         "type": "github"
       }
     },
+    "hermes-webui": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794659294,
+        "narHash": "sha256-0x3dN8v5ZzYzbbZ8FEsFJFlpXV2ODQrnyORx5MeThhw=",
+        "owner": "nesquena",
+        "repo": "hermes-webui",
+        "rev": "651f752092c43523791f40a0c38aa56c8619917a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nesquena",
+        "repo": "hermes-webui",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -623,17 +643,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1771993633,
-        "narHash": "sha256-V0M+NsS/NI6k+EYdVH9iJmQmUF/JIrl3sj6bLBIcK6w=",
+        "lastModified": 1794936511,
+        "narHash": "sha256-o15PlGIY1BNrXEVVWP9OMimaHd+3357mAR2toKhhkko=",
         "ref": "refs/heads/main",
-        "rev": "cc2f763386ee9739d588453efeaed9ff2a9c6f91",
-        "revCount": 16,
+        "rev": "d53bd4099bdb3275834733cbe49998edf6f7a934",
+        "revCount": 18,
         "type": "git",
-        "url": "ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git"
+        "url": "https://git.pleunetowne.com/mitchpleune/secrets.git"
       },
       "original": {
         "type": "git",
-        "url": "ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git"
+        "url": "https://git.pleunetowne.com/mitchpleune/secrets.git"
       }
     },
     "pyproject-build-systems": {
@@ -694,6 +714,7 @@
         "flake-parts": "flake-parts",
         "flake-utils": "flake-utils",
         "hermes-agent": "hermes-agent",
+        "hermes-webui": "hermes-webui",
         "home-manager": "home-manager",
         "jail-nix": "jail-nix",
         "lanzaboote": "lanzaboote",

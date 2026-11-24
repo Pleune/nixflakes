@@ -3,7 +3,7 @@
 
   nixConfig = {
     extra-substituters = [
-      "https://nix.pleunetowne.com"
+      #"https://nix.pleunetowne.com"
       "https://nix-community.cachix.org"
       "https://cache.nixos-cuda.org"
       "https://numtide.cachix.org"
@@ -97,8 +97,18 @@
       inputs.home-manager.follows = "home-manager";
     };
 
+    # Hermes WebUI (github:nesquena/hermes-webui).  Not in nixpkgs; it ships its own package and
+    # NixOS module (services.hermes-webui), consumed by platforms/ai.nix.
+    #
+    # Follows nixpkgs so the WebUI package and the Hermes agent venv it runs the agent with are
+    # built from the same package set.
+    hermes-webui = {
+      url = "github:nesquena/hermes-webui";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     private = {
-      url = "git+ssh://git@git.pleunetowne.com:2223/mitchpleune/secrets.git";
+      url = "git+https://git.pleunetowne.com/mitchpleune/secrets.git";
       inputs.agenix.follows = "agenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
@@ -171,11 +181,11 @@
           nixosConfigurations =
             let
               makeSystem =
-                system: name:
+                system: name: extraArgs:
                 withSystem system (
                   ctx:
                   inputs.nixpkgs.lib.nixosSystem {
-                    specialArgs = specialArgs ctx name;
+                    specialArgs = specialArgs ctx name // extraArgs;
                     modules = [
                       ./modules/nixos
                       ./config/nixos
@@ -183,27 +193,62 @@
                     ];
                   }
                 );
+              mk = name: makeSystem "x86_64-linux" name { };
+
+              # Snapshot of this flake's own source, kept in the ai system's roots.  deploy-ai
+              # diffs a candidate tree against it, which is how "what is deployed" is answerable
+              # without a git repository on the host.  Nix copies the *tracked* files here, so
+              # `.git`, untracked scratch (`state.json`, `.ralph/`) and gitignored paths are already
+              # out; the filter only catches tracked names we never want shipped.
+              #
+              # Note the filter's second argument is the file *type* (`"regular"`, `"directory"`),
+              # not the base name — match on `baseNameOf path` if you ever need names.
+              nixflakesSource = builtins.path {
+                path = ./.;
+                name = "nixflakes-source";
+                filter = path: _type:
+                  ! builtins.elem (baseNameOf path) [ ".direnv" "result" "state.json" "secrets" ];
+              };
+
+              # The Hermes agent's execution host.  Its disk image is never installed by ai: the
+              # guest is seeded with the seed image below and rebuilt from inside itself.
+              buildvm = makeSystem "x86_64-linux" "buildvm" { };
+
+              # Seed image for the guest disk.  Standalone on purpose: no host modules, no secrets
+              # input, and nothing of it needs to survive in ai's store after first boot.
+              buildvmBootstrap = inputs.nixpkgs.lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [ ./platforms/buildvm-bootstrap.nix ];
+              };
             in
             {
-              # live-iso = makeSystem "x86_64-linux" "live";
+              # live-iso = mk "live";
 
-              lxc = makeSystem "x86_64-linux" "lxc";
-              surface = makeSystem "x86_64-linux" "surface";
-              wsl = makeSystem "x86_64-linux" "wsl";
-              mitchpc = makeSystem "x86_64-linux" "mitchpc";
+              lxc = mk "lxc";
+              surface = mk "surface";
+              wsl = mk "wsl";
+              mitchpc = mk "mitchpc";
 
               # homelab
-              ai = makeSystem "x86_64-linux" "ai";
-              git = makeSystem "x86_64-linux" "git";
-              git-runner1 = makeSystem "x86_64-linux" "git-runner1";
-              immich = makeSystem "x86_64-linux" "immich";
-              jellyfin = makeSystem "x86_64-linux" "jellyfin";
-              jump = makeSystem "x86_64-linux" "jump";
-              llm = makeSystem "x86_64-linux" "llm";
-              nas = makeSystem "x86_64-linux" "nas";
-              nextcloud = makeSystem "x86_64-linux" "nextcloud";
-              notes = makeSystem "x86_64-linux" "notes";
-              paperless = makeSystem "x86_64-linux" "paperless";
+              # ai reaches the seed image through `self` (platforms/buildvm.nix reads
+              # `self.nixosConfigurations.buildvmBootstrap`), so nothing about the guest is threaded in
+              # here beyond what only the flake can supply.
+              ai = makeSystem "x86_64-linux" "ai" {
+                deployedSource = nixflakesSource;
+                deployedCommit = self.rev or self.dirtyRev or "";
+              };
+              buildvm = buildvm;
+              buildvmBootstrap = buildvmBootstrap;
+              git = mk "git";
+              git-runner1 = mk "git-runner1";
+              immich = mk "immich";
+              jellyfin = mk "jellyfin";
+              jump = mk "jump";
+              llm = mk "llm";
+              nas = mk "nas";
+              nextcloud = mk "nextcloud";
+              notes = mk "notes";
+              paperless = mk "paperless";
             };
 
           deploy.nodes =
@@ -279,6 +324,9 @@
                 # touching a generation.  The inputs' packages are not merged into pkgs here, and
                 # the overlay would leak a python-heavy package into every package set.
                 hermes-agent = inputs.hermes-agent.packages.${system}.default;
+
+                # The only way the agent can activate ai; see modules/nixos/deploy-ai.
+                deploy-ai = pkgs.deploy-ai;
               };
 
             legacyPackages = pkgs // {
@@ -308,7 +356,16 @@
                   ;
                 strataModule = import ./modules/nixos/strata;
                 strataPkg = pkgs.strata;
-              });
+              })
+              // (import ./modules/nixos/deploy-ai/tests {
+                inherit pkgs inputs;
+              })
+              // {
+                # The build VM platform's own boot check, owned by the buildvm module.
+                buildvm-guest-boot = pkgs.testers.runNixOSTest (
+                  import ./modules/nixos/virtualisation/buildvm/tests/guest-boot.nix { inherit inputs; }
+                );
+              };
 
             formatter = inputs'.nixpkgs.legacyPackages.nixfmt;
           };
