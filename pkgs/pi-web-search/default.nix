@@ -5,7 +5,7 @@
 }:
 let
   version = "1.7.0";
-  rev = "cc47d6f8d5f340fb5d77214dab20380c37e280f4";
+  rev = "9442b123c9dc56fcc659cdd013c9e6da0374235e";
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pi-web-search";
@@ -15,7 +15,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     owner = "ttttmr";
     repo = "pi-web-search";
     inherit rev;
-    hash = "sha256-l0sEmBifp/EdBuDBL1iVeLf4UbOS5W3VU0VFsEU8ocs=";
+    hash = "sha256-PWKlEF8bn89VIvSdXkSr6uBT2d8J45SWcmCCOJc0scU=";
   };
 
   dontBuild = true;

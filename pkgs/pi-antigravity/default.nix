@@ -5,12 +5,12 @@
   fetchurl,
 }:
 let
-  version = "0.7.3";
+  version = "0.13.0";
 
-  undiciVersion = "8.10.0";
+  undiciVersion = "8.12.3";
   undiciSrc = fetchurl {
     url = "https://registry.npmjs.org/undici/-/undici-${undiciVersion}.tgz";
-    hash = "sha256-nXLFbBetKz1m8AbVOUU3TMDSvGjzIkOUlblyJp9N5rw=";
+    hash = "sha256-4D+i7TR1J8kVAmwEgQ07m8+Yk6IXazFKpMKclFYS0Yw=";
   };
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
@@ -21,7 +21,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     owner = "Rahularya01";
     repo = "pi-antigravity";
     rev = "v${version}";
-    hash = "sha256-p0VTJxJM61HmDTg9nxd+zvaTzNOy8/Qu8ophMOjApCI=";
+    hash = "sha256-cde2GYdAZ6FvIWI0Zf1PI94tao1fwsic9fIegnRn8hU=";
   };
 
   installPhase = ''

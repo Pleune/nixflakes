@@ -4,19 +4,19 @@
   fetchFromGitHub,
 }:
 let
-  version = "0.9.0";
+  version = "0.10.0";
   src = fetchFromGitHub {
     owner = "heyhuynhgiabuu";
     repo = "pi-pretty";
     rev = "v${version}";
-    hash = "sha256-/7M8yp3wUrd/CdNoYAznQvGUNuiozoYqAnq15D23UU4=";
+    hash = "sha256-NJj1ECpYy9ZuXGZWPeZ+rzlqCIU76hFdRABXsOIOktg=";
   };
 in
 buildNpmPackage (finalAttrs: {
   pname = "pi-pretty";
   inherit version src;
 
-  npmDepsHash = "sha256-FjlaTp7xi4deQtoppedrEzzYFI16IwKREu5kooLv83Y=";
+  npmDepsHash = "sha256-7lxZa9TSl3q16bkcliOiIwk1sZyXvDaSPmvGF3UYvpw=";
 
   # vitest needs devDependencies, which the install hook prunes afterwards.
   doCheck = true;

@@ -3,13 +3,13 @@
   applyPatches,
 }:
 let
-  version = "2.7.1";
+  version = "2.15.0";
 
   upstreamSrc = fetchFromGitHub {
     owner = "juicesharp";
     repo = "rpiv-mono";
     rev = "v${version}";
-    hash = "sha256-fS5+nOwJiQ7LOIGh/PE3R1+U6SPQEouFVxVnjYz3PVc=";
+    hash = "sha256-L+c/p6yhTDznxszJ8kkAxxGEWfizf5rFbXmiIGClWKg=";
   };
 
   src =
@@ -25,6 +25,6 @@ in
 {
   inherit version src;
 
-  npmDepsHash = "sha256-MxD7JLe5hqu9IGVcohrqCor/u9/ny8t6bwjJP25aPW4=";
+  npmDepsHash = "sha256-GkzroNmbhTMSs1hCX4QGNbFWlgvv/Q+RNv1F1S8cK4k=";
   npmDepsFetcherVersion = 2;
 }

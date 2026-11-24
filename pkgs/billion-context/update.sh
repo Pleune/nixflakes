@@ -18,15 +18,21 @@ sha512_base64="${integrity#sha512-}"
 
 # Get GitHub source hash
 echo "Fetching GitHub source hash for v${version}..."
-# Create a temporary Nix expression to fetch the hash
-github_hash=$(nix flake prefetch "github:ranxianglei/billion-context/v${version}" 2>&1 | tail -1)
+# Ask Nix for the locked hash via JSON so warning/status lines can never leak
+# into the replacement string.
+github_hash=$(nix flake prefetch --json "github:ranxianglei/billion-context/v${version}" 2>/dev/null |
+  jq -r '(if type == "array" then .[0] else . end) | .hash')
+[[ -n "$github_hash" && "$github_hash" != null ]] || {
+  echo "Failed to determine GitHub source hash" >&2
+  exit 1
+}
 
 echo "Updating default.nix..."
 sed -i.bak \
   -e "s/version = \"[^\"]*\";/version = \"$version\";/" \
   -e "s|rev = \"v[^\"]*\";|rev = \"v${version}\";|" \
   -e "s|hash = \"sha256-[^\"]*\";|hash = \"${github_hash}\";|" \
-  -e "s/npmSha512 = \"[^\"]*\";/npmSha512 = \"${sha512_base64}\";/" \
+  -e "s|npmSha512 = \"[^\"]*\";|npmSha512 = \"${sha512_base64}\";|" \
   default.nix
 
 rm -f default.nix.bak

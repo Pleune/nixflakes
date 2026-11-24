@@ -8,12 +8,6 @@ let
 
   sandboxPermissions = import ../agent-sandbox/permissions.nix { inherit pkgs; };
 
-  antigravityAcp = pkgs.writeShellScript "pi-antigravity-acp" ''
-    # Keep the jail's calling identity; Google's default group lookup expects
-    # a nobody group, which is not present in every sandbox's group database.
-    exec ${lib.getExe pkgs.antigravity-acp} --uid= --gid= "$@"
-  '';
-
   rules =
     builtins.readFile (resourcesRoot + "/AGENTS.md")
     + "\n\n"
@@ -45,16 +39,23 @@ let
     pkgs.pi-rtk-optimizer
     pkgs.pi-web-search
     pkgs.pi-caveman
+    pkgs.pi-ralph-wiggum
+    pkgs.pi-session-recap
     #pkgs.pi-pretty
   ];
 
   extensions = lib.concatMap extensionFor extensionPackages;
+
+  # Only the packages listed here contribute skills; `passthru.skills` on other
+  # pi packages stays opt-in so enabling one never silently enables another.
+  skillPackages = [ pkgs.pi-ralph-wiggum ];
+  packagedSkills = lib.concatMap (pkg: pkg.passthru.skills or [ ]) skillPackages;
 in
 {
   pi.coding-agent = {
     settings.defaultTools = [ "+codemode" ];
     rules = rules;
-    skills = [ (resourcesRoot + "/skills") ];
+    skills = [ (resourcesRoot + "/skills") ] ++ packagedSkills;
     promptTemplates = [ (resourcesRoot + "/prompts") ];
     themes = [ (resourcesRoot + "/themes") ];
     inherit extensions;
@@ -64,7 +65,33 @@ in
       combinators:
       let
         statePaths = [
-          ".gemini/antigravity-acp"
+          # bili reads its config from $XDG_CONFIG_HOME/billion-context/, which the
+          # jail repoints at $PI_JAIL_HOME/.config, so a host bili config was
+          # invisible and bili silently ran on defaults (writing its own file onto
+          # tmpfs). Bind the host file so the real settings apply.
+          # CAVEAT: bili round-trips this file (it persists provider entries), so it
+          # can rewrite what is on the host; keys bili does not model may be dropped.
+          ".config/billion-context/billion-context.json"
+          # billion-context keeps its per-conversation ledger (folded blocks, ref
+          # assignments, per-session records) in the XDG data dir. The jail clears
+          # the environment and repoints HOME at $PI_JAIL_HOME, so without this bind
+          # that ledger lands on the sandbox's private tmpfs and dies with the pi
+          # process. Resuming a compressed chat then finds no session record: refs
+          # restart, folded originals come back on the wire, and bili re-summarizes
+          # the whole replayed history out of sight. Bind the host dir so resume
+          # inherits the parent's compression state instead.
+          ".local/share/billion-context"
+          # bili's chain tracker (`prefix-affinity.json`) and routing table
+          # (`plugin-conversations.json`) live in the XDG state dir. Resume of a
+          # forked/tree branch resolves its parent through those chains before
+          # loading the parent record from the data dir, so they need to survive
+          # too; `bili.log` landing here also keeps the trail after the run.
+          ".local/state/billion-context"
+          # pi-antigravity-bridge >= 1.10 drives `agy acp`, so the agy CLI's own
+          # state (brain, conversations, settings.json, credentials) must be
+          # writable in the jail. `.gemini/antigravity-acp` belonged to the
+          # retired standalone ACP server and is no longer bound.
+          ".gemini/antigravity-cli"
           ".gemini/config"
           ".pi/agent/antigravity-bridge"
           ".pi/agent/auth.json"
@@ -114,7 +141,9 @@ in
             mkdir -p "$PI_JAIL_HOME/.pi/agent"
             RUNTIME_ARGS+=(--ro-bind "$piPrettyConfig" "$PI_JAIL_HOME/.pi/agent/pi-pretty.json")
           fi
-          RUNTIME_ARGS+=(--setenv PATH "$PATH:${pkgs.rtk}/bin:${pkgs.xdg-utils}/bin")
+          # `agy` is the transport pi-antigravity-bridge >= 1.10 drives (both
+          # engines), so it has to be reachable inside the jail.
+          RUNTIME_ARGS+=(--setenv PATH "$PATH:${pkgs.rtk}/bin:${pkgs.xdg-utils}/bin:${pkgs.antigravity-cli}/bin")
 
           # Pi-only desktop access for browser/OAuth opening. Keep isolated
           # HOME/XDG config; do not broaden the generic agent-sandbox policy.
@@ -161,7 +190,6 @@ in
 
           # Google's allocator requires the kernel's possible CPU list.
           RUNTIME_ARGS+=(--ro-bind /sys/devices/system/cpu/possible /sys/devices/system/cpu/possible)
-          RUNTIME_ARGS+=(--setenv AGY_ACP_BIN "${antigravityAcp}")
         '')
       ];
   };

@@ -5,8 +5,8 @@
   fetchurl,
 }:
 let
-  version = "0.1.212";
-  npmSha512 = "Bwjl4StlMNcE3JWe15iKLATwk5q8rgiNgR/isk5fCnOYfhtE8vsrtJPCqA5WGvsT2yJ9p/j3k4NUAkQER5qjjg==";
+  version = "0.1.213";
+  npmSha512 = "27GMDHpqImsGev2Pw2JUyWImzJChggJVUqo6RNNeZ4CWFMnuKReQWFghOAZTBU05pmYho/2K0UZ7WWjQ+aBBWQ==";
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "billion-context";
@@ -16,7 +16,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     owner = "ranxianglei";
     repo = "billion-context";
     rev = "v${version}";
-    hash = "sha256-a2MAaWAHlGGoji7dDE7mBcAgDdlHrFwqBkKsrFS9LkY=";
+    hash = "sha256-b21DZTKfYmoCVnqnRUN/n40ASpG5Gx42kZrbbG/g3ds=";
   };
 
   npmTarball = fetchurl {

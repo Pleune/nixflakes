@@ -1,6 +1,6 @@
 --- a/package-lock.json
 +++ b/package-lock.json
-@@ -1071,7 +1071,8 @@
+@@ -1072,7 +1072,8 @@
        },
        "engines": {
          "node": ">=22.19.0"
@@ -10,7 +10,7 @@
      },
      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai": {
        "version": "0.80.2",
-@@ -1096,7 +1097,8 @@
+@@ -1097,7 +1098,8 @@
        },
        "engines": {
          "node": ">=22.19.0"
@@ -20,7 +20,7 @@
      },
      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui": {
        "version": "0.80.2",
-@@ -1109,7 +1111,8 @@
+@@ -1110,7 +1112,8 @@
        },
        "engines": {
          "node": ">=22.19.0"

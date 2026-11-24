@@ -5,7 +5,7 @@
 }:
 let
   version = "0.4.2";
-  rev = "39e6b998a2279c8fad4a2c6c64e26828c1d6023e";
+  rev = "842727466171c9e50209ed6fe53463a952e5a5f6";
 in
 stdenvNoCC.mkDerivation {
   pname = "pi-memory";
@@ -15,7 +15,7 @@ stdenvNoCC.mkDerivation {
     owner = "jayzeng";
     repo = "pi-memory";
     inherit rev;
-    hash = "sha256-20hbBZ3loTvpun+CTUp2dRU77eKtSw4J2bS8rvsRGgM=";
+    hash = "sha256-kkVK08sX9d7m1uT1XvG8Y0kplwmaDXf+rqS1LMmDgNw=";
   };
 
   installPhase = ''

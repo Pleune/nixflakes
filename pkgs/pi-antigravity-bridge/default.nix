@@ -4,8 +4,8 @@
   fetchFromGitHub,
 }:
 let
-  version = "1.9.2";
-  rev = "957cb0422272ad06422d0f58bf085030dcd219b7";
+  version = "1.10.4";
+  rev = "971ddefb101ee99333f589b907d114a3fe275584";
 in
 buildNpmPackage (finalAttrs: {
   pname = "pi-antigravity-bridge";
@@ -15,13 +15,13 @@ buildNpmPackage (finalAttrs: {
     owner = "EstebanForge";
     repo = "pi-extensions";
     inherit rev;
-    hash = "sha256-iSHhN42G/A7e/UweVHHjDOExaRAtYJP/JfDTqakEzwQ=";
+    hash = "sha256-onBVIKrF9ngU0JVvKyT6JHwyqynwk8z8XgSdl1S38dU=";
   };
 
-  patches = [
-    ./browser-opener-no-recursion.patch
-    ./enterprise-auth.patch
-  ];
+  # No local patches: upstream 1.10.0 dropped the standalone ACP server, its
+  # separate OAuth flow, and the BROWSER capture wrapper, so the old
+  # enterprise-auth and browser-opener-no-recursion patches have no target.
+  # Both engines now share the agy CLI's own Google credentials.
 
   # Limit the monorepo install to the bridge and its two source-only libraries.
   # Pi supplies its own peer packages; never install a second Pi runtime.
@@ -42,7 +42,7 @@ buildNpmPackage (finalAttrs: {
   '';
 
   npmDepsFetcherVersion = 2;
-  npmDepsHash = "sha256-9WkKJfa8EG4GyK5avmdCPHd2SBabkz8MQIhBEvJhgMQ=";
+  npmDepsHash = "sha256-hCoHw0g02uwAeIDh9CQ7bBNNEnhTb5edwCDQNxYU+Qk=";
   npmFlags = [ "--legacy-peer-deps" ];
   npmRebuildFlags = [ "--ignore-scripts" ];
   dontNpmBuild = true;
@@ -60,8 +60,13 @@ buildNpmPackage (finalAttrs: {
     assert.ok(CallToolRequestSchema);
     EOF
     test ! -e node_modules/@earendil-works/pi-coding-agent
-    node ${./test-browser-capture.mjs} packages/pi-antigravity-bridge/src/acp/browser-capture.ts
-    node ${./test-auth-methods.mjs} packages/pi-antigravity-bridge
+    # The native transport is the only auth path: a re-added browser-capture
+    # wrapper or standalone-server auth module would reintroduce the xdg-open
+    # recursion these removed local patches used to fix.
+    test -f packages/pi-antigravity-bridge/extensions/index.ts
+    test -f packages/pi-antigravity-bridge/src/acp/connection.ts
+    test ! -e packages/pi-antigravity-bridge/src/acp/browser-capture.ts
+    test ! -e packages/pi-antigravity-bridge/src/acp/auth.ts
     runHook postCheck
   '';
 

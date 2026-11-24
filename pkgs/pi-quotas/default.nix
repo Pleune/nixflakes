@@ -4,7 +4,7 @@
   fetchFromGitHub,
 }:
 let
-  version = "0.4.0";
+  version = "0.5.0";
 in
 stdenvNoCC.mkDerivation {
   pname = "pi-quotas";
@@ -14,7 +14,7 @@ stdenvNoCC.mkDerivation {
     owner = "latentminds-ai";
     repo = "pi-quotas";
     rev = "v${version}";
-    hash = "sha256-FK60s7wj42MxrjYhE9IAlT5TkOdqr/ZHqS5uKpMDZwU=";
+    hash = "sha256-5Yc93eFWpSBx1V1Q0xT1sEcz07sAyfLsEVaJQInsxu8=";
   };
 
   installPhase = ''

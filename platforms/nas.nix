@@ -165,7 +165,7 @@
   };
 
   # load propritary nvidia driver
-  services.xserver.videoDrivers = ["nvidia"];
+  services.xserver.videoDrivers = [ "nvidia" ];
 
   hardware = {
     enableRedistributableFirmware = true;
@@ -229,7 +229,9 @@
       enable = true;
       configuration = {
         server.http_listen_port = 3030;
-        server.http_listen_address = "::1";
+        # Containers push logs to this over the bridge, so it cannot stay on
+        # loopback. The firewall trusts br0, which is where they live.
+        server.http_listen_address = "::";
         auth_enabled = false;
 
         ingester = {
@@ -336,6 +338,16 @@
             }
           ];
         }
+        # iocaine's Prometheus server inside the jump container; the port and the
+        # bind address come from platforms/jump.nix.
+        {
+          job_name = "iocaine";
+          static_configs = [
+            {
+              targets = [ "jump.home.pleunetowne.com:42042" ];
+            }
+          ];
+        }
       ];
 
     };
@@ -391,7 +403,8 @@
     preseed = {
       config = {
         "core.https_address" = "0.0.0.0:8443";
-        "loki.api.url" = "http://localhost:${toString config.services.loki.configuration.server.http_listen_port}";
+        "loki.api.url" =
+          "http://localhost:${toString config.services.loki.configuration.server.http_listen_port}";
       };
       profiles = [
         {

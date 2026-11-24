@@ -19,6 +19,7 @@ in
   azure-storage-explorer = final.callPackage ./pkgs/azure-storage-explorer { };
   context-mode = final.callPackage ./pkgs/context-mode { };
   code-review-graph = final.callPackage ./pkgs/code-review-graph { };
+  deploy-ai = final.callPackage ./pkgs/deploy-ai { };
   trilium-git-sync = final.callPackage ./pkgs/trilium-git-sync { };
   pi-mcp-adapter = final.callPackage ./pkgs/pi-mcp-adapter { };
   pi-subagents = final.callPackage ./pkgs/pi-subagents { };
@@ -27,6 +28,8 @@ in
   pi-antigravity-bridge = final.callPackage ./pkgs/pi-antigravity-bridge { };
   pi-web-search = final.callPackage ./pkgs/pi-web-search { };
   pi-caveman = final.callPackage ./pkgs/pi-caveman { };
+  pi-ralph-wiggum = final.callPackage ./pkgs/pi-ralph-wiggum { };
+  pi-session-recap = final.callPackage ./pkgs/pi-session-recap { };
   pi-rtk-optimizer = final.callPackage ./pkgs/pi-rtk-optimizer { };
   pi-memory = final.callPackage ./pkgs/pi-memory { };
   pi-hermes-memory = final.callPackage ./pkgs/pi-hermes-memory { };
