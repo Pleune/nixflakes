@@ -322,6 +322,15 @@ in
       # endpoint is configured.
       browser.cdp_url = "http://127.0.0.1:9225";
 
+      # ai reaches the internet over NAT64/DNS64, so systemd-resolved answers public names with
+      # the well-known prefix 64:ff9b::/96 alongside (or instead of) the IPv4 address. Python's
+      # `ipaddress` classifies that prefix as reserved, so the browser tools' SSRF guard
+      # (`tools/url_safety.py`) rejects every public site whose DNS carries a NAT64 answer.
+      # `security.fake_ip_ranges` is the declared-sentinel exemption: answers in the block are
+      # dialed instead of rejected as private/internal. The prefix is pure IPv4-embedded public
+      # space, so naming it grants no reach the guard would otherwise deny.
+      security.fake_ip_ranges = [ "64:ff9b::/96" ];
+
       compression.enabled = true;
 
       # The deploy skill, read from the same tree the tool ships in.  Hermes looks for
