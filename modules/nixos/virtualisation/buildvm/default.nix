@@ -291,8 +291,20 @@ in
         type = types.str;
         default = "";
         description = ''
-          Commit the guest should be on, normally `self.rev` of ai's deploy.  Empty falls back to the
-          file provisioning records in the guest.
+          Commit the guest should be on, normally `self.rev` of ai's deploy.  Empty falls back to
+          `gatePendingFile` while a deploy is mid-switch, then to the file provisioning records in
+          the guest.
+        '';
+      };
+
+      gatePendingFile = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          Host file `deploy-ai` writes just before it hands the switch to its transient unit: the
+          commit that switch converges onto.  Provisioning runs inside that switch, and a patch
+          deploy carries no `self.rev`, so this file is the only live answer during activation.
+          Empty disables the read (hosts without a deploy gate).
         '';
       };
 
@@ -564,7 +576,8 @@ in
     # guest - the nixflakes tree into the guest's own store, by path - and switches the guest onto it,
     # one pass per changed snapshot.
     #
-    # The commit is `provision.targetCommit`, else what the guest recorded: the tree ai came from.
+    # The commit is `provision.targetCommit`, else the commit the deploy gate recorded for the switch
+    # in flight, else what the guest recorded: the tree ai came from.
     systemd.services.buildvm-provision = mkIf cfg.provision.enable {
       description = "Apply the buildvm guest's own NixOS config inside the guest";
       wantedBy = [ "multi-user.target" ];
@@ -593,6 +606,7 @@ in
         SCRATCH=${escapeShellArg cfg.provision.scratchDir}
         ATTR=${escapeShellArg cfg.provision.flakeAttr}
         TARGET_FILE=${escapeShellArg cfg.provision.targetFile}
+        GATE_PENDING=${escapeShellArg cfg.provision.gatePendingFile}
         MARKER=${escapeShellArg cfg.provision.markerFile}
         SOURCE=${escapeShellArg (cfg.provision.sourcePath or "")}
         ORIGIN=${escapeShellArg cfg.provision.origin}
@@ -706,8 +720,14 @@ in
         fi
 
         # The commit to apply.  A deploy records `<sha>-dirty`, which is no commit, so the suffix goes
-        # off; with nothing recorded, read what the guest says it runs.
+        # off.  `targetCommit` is empty on a patch deploy (the built tree carries no `.git`, so there
+        # is no `self.rev`), and this unit runs *inside* that deploy's switch: read the commit the
+        # gate wrote for the switch in flight, which is the only live answer.  With neither, read what
+        # the guest says it runs.
         TARGET="$COMMIT"
+        if [ -z "$TARGET" ] && [ -n "$GATE_PENDING" ]; then
+          TARGET=$(cat "$GATE_PENDING" 2>/dev/null | tr -d ' \n')
+        fi
         if [ -z "$TARGET" ] && [ -n "$TARGET_FILE" ]; then
           TARGET=$(gssh "cat '$TARGET_FILE' 2>/dev/null" | tr -d ' \n')
         fi

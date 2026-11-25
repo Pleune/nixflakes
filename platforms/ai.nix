@@ -491,6 +491,10 @@ in
       sourcePath = deployedSource;
       origin = guestOrigin;
       targetCommit = deployedCommit;
+      # A patch deploy has no `self.rev`; this is what names its commit to provisioning while the
+      # switch it triggers is still running.  `deploy-ai` writes it before handing the switch to its
+      # transient unit and removes it once the new system is recorded.
+      gatePendingFile = "/var/lib/deploy-ai/pending-commit";
       # The secrets tree ai itself evaluated, streamed into the guest and passed as --override-input
       # so the guest switch never fetches the secrets input at all.
       secretsDir = "/home/${guestUser}/secrets";

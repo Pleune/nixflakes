@@ -192,10 +192,11 @@ class World(TempBase):
         self.build_rc = 0
         self.policy = "abc123"        # the digest `nix eval` reports from the candidate tree
         self.guard = "infinity"       # what `systemctl show` reports (empty of a schedule: logind's
-        # schedule file is the truth; `reboot --when` writes it and `cancel --when` removes it).
+        # schedule file is the truth; `reboot --when` writes it and plain `cancel` removes it).
         self.schedule_path = os.path.join(self.root, "shutdown-scheduled")
         self.tool.shutdown_schedule = self.schedule_path
         self.cancel_failures = 0      # cancel attempts to fail first (a mid-switch logind restart)
+        self.pending_at_switch = ""   # /var/lib/deploy-ai/pending-commit as the switch saw it
         self.switch_rc = 0
         self.rollback_rc = 0
         self.boot_installs = True     # whether `switch-to-configuration boot` leaves an entry
@@ -267,6 +268,11 @@ class World(TempBase):
                     f"USEC={int(time.time() * 1_000_000) + 3_600_000_000}\nMODE=reboot\n")
                 return Result()               # the timed reboot arms
             if argv[1] == "cancel":
+                # Real systemctl: `cancel` takes no option.  `--when` belongs to `reboot`, and
+                # passing it to cancel is a usage error that cancels nothing -- the production
+                # failure this suite must not wave through.
+                if "--when" in argv:
+                    return Result(1, "", "systemctl: option '--when' requires an argument\n")
                 if self.cancel_failures > 0:
                     self.cancel_failures -= 1
                     return Result(1, "", "Failed to cancel scheduled shutdown: Bus not open\n")
@@ -274,10 +280,16 @@ class World(TempBase):
                     os.unlink(self.schedule_path)
                 except FileNotFoundError:
                     pass
-                return Result()               # `cancel --when` and friends succeed
+                return Result()               # plain `cancel` removes the schedule
         elif cmd == "systemd-run":
             # The transient unit re-enters the tail exactly as systemd would exec it, and a tail
-            # that exits takes the unit's exit code with it.
+            # that exits takes the unit's answer with it.  What provisioning would read during the
+            # switch is captured here: the gate's pending record at handoff time.
+            pending = os.path.join(self.tool.state, "pending-commit")
+            try:
+                self.pending_at_switch = Path(pending).read_text().strip()
+            except FileNotFoundError:
+                self.pending_at_switch = ""
             sha = argv[argv.index("--sha") + 1]
             if self.tail_rc != 0:
                 return Result(self.tail_rc)

@@ -72,6 +72,13 @@ forward that reaches *this VM* from ai; `deployer` does not exist there. The key
 
 The `|` above is on your side of the ssh. The remote command is the one quoted string.
 
+Sessions served by the api server (the WebUI) are request/response: the adapter declares
+`supports_async_delivery = False`, so a background `--submit` never sends you a completion notice —
+a deploy that "never notified" was not lost, it just had no one to notify.  Launch it in the
+background anyway (the ssh dies at activation by design) and pull the outcome yourself:
+`process_manage(action='wait'/'poll')` on the session id, then `deploy-ai --status` and
+`curl http://10.0.2.2:8642/health`.  Push-capable surfaces (Telegram, Discord) do get the notice.
+
 ## Reading the answer
 
 Every run ends with one line that says what happened, so you never have to infer it from prose:
@@ -216,7 +223,10 @@ and boot, so a change can sit in the guest's system until ai switches again or t
 ## What is recorded, and what survives
 
 - `/home/builder/deployed-commit` — what the guest was last converged onto, written by
-  `buildvm-provision`; the gate only reads it.
+  `buildvm-provision`; the gate only reads it.  While a deploy's switch is running, provisioning
+  takes the commit from `/var/lib/deploy-ai/pending-commit` — the gate writes it just before the
+  switch and removes it once the new system is recorded — because a patch deploy carries no
+  `self.rev`, and without that file the guest record names whatever the *previous* deploy recorded.
 - `/home/builder/nixflakes/DEPLOYED.md` — what provisioning applied, and the tag it moved.
 - the `deployed` tag in `/home/builder/nixflakes` — what the guest's provisioning tagged, and what
   `deployed..main` is measured against.
@@ -264,6 +274,7 @@ around it.
 | `another deploy-ai is running (pid <n>)` | Another gate is live right now.  A lock left behind by a gate killed mid-deploy names a dead pid and is reclaimed by the next run, so this row always means a concurrent deploy. |
 | `the system is unhealthy after the failed switch; the reboot guard stays armed` | Activation broke partway and the running system failed its own probes.  The boot pin names the previous generation and the guard's timed reboot restores it — reboot now to restore sooner. |
 | `deploy of <sha> failed and the switch-back also failed; the reboot guard stays armed` | The switcher itself broke.  Only the pinned old generation boots; the guard's reboot restores it — reboot, then investigate. |
+| `deploy-ai: warning: the guard reboot is still scheduled; run ...` | The cancel could not clear logind's schedule. On generations whose gate predates the plain-`cancel` fix, this is the old bug: that gate passed `--when` to `systemctl cancel`, which is a usage error, so every deploy left a reboot armed. Stand it down out-of-band on ai with `sudo systemctl cancel` (root only; the schedule reboots the pinned — healthy — generation, so it is not dangerous, just unwanted), then deploy the fix: the next healthy switch's tail stands the guard down itself. |
 | `buildvm-provision: guest did not come back after the switch; nothing recorded` | The guest wedged booting the new generation.  Nothing is recorded, the marker stays at the old snapshot, and the unit is left failed: `sudo systemctl restart buildvm-provision` on ai converges again after a fix, and the next deploy reruns provisioning by itself. |
 | `buildvm-provision: failed: the guest still boots <path>, not <path>` | The guest's loader default pointed at an older generation and re-pinning it once did not fix the boot.  Nothing is recorded; fix the guest's boot entries, then rerun provisioning. |
 | `--status` shows `boot pinned to <entry>` after an out-of-band switch | The manual switch never moved the boot pin, so a reboot boots the generation before it. Run `deploy-ai --confirm-boot` on ai. |

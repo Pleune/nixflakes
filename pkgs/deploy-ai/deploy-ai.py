@@ -894,11 +894,15 @@ class DeployAI:
         for _ in range(6):
             if not os.path.exists(self.shutdown_schedule):
                 return
-            self.run(["systemctl", "cancel", "--when"], capture=True)
+            # `cancel` takes no `--when`: that option belongs to `reboot`, and passing it makes
+            # systemctl answer "option '--when' requires an argument" with exit 1 — every attempt
+            # then does nothing and the schedule file outlives the deploy, which is exactly the
+            # production failure this loop exists to catch.
+            self.run(["systemctl", "cancel"], capture=True)
             time.sleep(2)
         if os.path.exists(self.shutdown_schedule):
             print("deploy-ai: warning: the guard reboot is still scheduled; run "
-                  "`systemctl cancel --when` on ai to stand it down", file=sys.stderr)
+                  "`systemctl cancel` on ai to stand it down", file=sys.stderr)
 
     # A deploy that only adds a port forward can leave qemu running the old command line: nothing
     # else in the unit changed, so activation never restarted it and the new forward goes nowhere.
@@ -936,6 +940,13 @@ class DeployAI:
                 os.remove(os.path.join(self.state, name + "-previous"))
             except OSError:
                 pass
+        # The switch is confirmed: provisioning already read `pending-commit` (if it ran at all),
+        # and `commit` is the truth from here on.  A leftover pending file would mislead the next
+        # provisioning on an out-of-band switch.
+        try:
+            os.remove(os.path.join(self.state, "pending-commit"))
+        except OSError:
+            pass
         with open(os.path.join(self.state, "toplevel"), "w", encoding="utf-8") as handle:
             handle.write(self.toplevel + "\n")
         with open(os.path.join(self.state, "commit"), "w", encoding="utf-8") as handle:
@@ -1072,6 +1083,14 @@ class DeployAI:
         # generation on its own.  The pin holds until the tail confirms it; nothing rewrites the
         # pin at boot, so a deploy that never confirmed leaves an old default and needs `--confirm-boot`.
         self.pin_boot(self.install_boot_entry(current))
+
+        # Before the handoff, record the commit this switch converges onto.  Activation restarts
+        # `buildvm-provision`, which runs *inside* this switch: a patch deploy carries no `self.rev`,
+        # so without this the guest falls back to the commit it recorded last deploy and its record
+        # names a stale commit forever.  The tail removes the file once the new system is recorded.
+        pending = os.path.join(self.state, "pending-commit")
+        with open(pending, "w", encoding="utf-8") as handle:
+            handle.write(sha + "\n")
 
         # Everything after arm_guard runs as a transient systemd unit: the health wait, the boot
         # confirmation, the records, and the guard cancel finish even if this session dies.  A

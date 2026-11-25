@@ -47,8 +47,13 @@ class TestDeployRoad(DeployWorld):
         assert (self.saw("systemctl reboot --when +60m"))  # the guard, armed before the switch
         assert (self.saw("systemd-run --unit=deploy-ai-switch --wait --collect"))
         assert (self.saw("--switch-toplevel /nix/store/new-system"))
-        assert (self.saw("systemctl cancel --when"))       # stood down once health passed
-        assert (not os.path.exists(self.schedule_path))    # logind's file gone: no reboot pending
+        assert (self.saw("systemctl cancel"))            # stood down once health passed
+        assert (not self.saw("systemctl cancel --when")) # cancel takes no option; that's a usage error
+        assert (not os.path.exists(self.schedule_path))  # logind's file gone: no reboot pending
+        # The guest's provisioning runs inside this switch: the handoff must carry the commit,
+        # and the record must be gone once the new system is recorded.
+        assert (self.pending_at_switch == sha)
+        assert (not os.path.exists(Path(self.tool.state, "pending-commit")))
         assert ("ai is now running" in out)
         # What is live: the records, and the boot pin that points at the running generation.
         assert (Path(self.tool.state, "commit").read_text().strip() == sha)
@@ -64,7 +69,7 @@ class TestDeployRoad(DeployWorld):
         self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
         verdict, _, _ = self.deploy()
         assert (verdict == "applied")
-        assert (self.calls.count("systemctl cancel --when") == 3)
+        assert (self.calls.count("systemctl cancel") == 3)
         assert (not os.path.exists(self.schedule_path))
 
     def test_a_guard_that_cannot_be_stood_down_says_so(self):
