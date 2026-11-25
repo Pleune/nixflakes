@@ -206,6 +206,16 @@ in
       xprop
       chromium
       dejavu_fonts
+      # computer_use's MCP driver: Hermes spawns `cua-driver mcp` *inside this guest* over the
+      # ssh exec channel (`bot_desktop.placement = "auto"` + ssh backend resolves to terminal
+      # placement, hermes services/bot_desktop/placement.py), so the binary has to be on the
+      # guest's PATH.  Its absence was the whole computer_use failure: the spawn died with a
+      # FileNotFoundError wrapped by the MCP client's TaskGroup into "unhandled errors in a
+      # TaskGroup (1 sub-exception)".
+      #
+      # callPackage'd here rather than overlaid: overlay.nix is outside the deploy-ai gate's
+      # allowlist, and only the guest needs this package.
+      (callPackage ../pkgs/cua-driver { })
     ]);
 
     nix.gc = {

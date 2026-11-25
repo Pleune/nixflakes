@@ -68,6 +68,10 @@ in
     guest.succeed("grep -q '^max-jobs = 2' /etc/nix/nix.conf")
     guest.succeed("grep -q '^cores = 2' /etc/nix/nix.conf")
     guest.succeed("test -f /var/lib/systemd/linger/builder")
+    # computer_use spawns `cua-driver` from the guest's PATH.  `--version` exercises the
+    # binary's dynamic loader (X11/PipeWire/libxkbcommon deps), so a missing package or a
+    # broken link both fail here.
+    guest.succeed("cua-driver --version")
     guest.succeed(
         "test \"$(systemctl show bot-xvnc -p StartLimitIntervalUSec)\" = 'StartLimitIntervalUSec=0'"
     )
