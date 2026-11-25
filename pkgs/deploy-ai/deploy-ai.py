@@ -248,6 +248,7 @@ class DeployAI:
         # nothing for anyone to remember to delete.
         self.boot_conf = get("DEPLOY_AI_BOOT_CONF", "/boot/loader/loader.conf")
         self.boot_entries = get("DEPLOY_AI_BOOT_ENTRIES", "/boot/loader/entries")
+        self.system_profile = get("DEPLOY_AI_SYSTEM_PROFILE", "/nix/var/nix/profiles/system")
 
         # How much of the machine a build here may take, published by the module so this package
         # names no ai-specific value.
@@ -772,12 +773,40 @@ class DeployAI:
     def install_boot_entry(self, toplevel: str) -> str:
         """The loader entry that boots `toplevel`, installing it when none exists.  A switch can
         activate a new system without ever writing its loader entry (the installer runs on `boot`
-        actions, not on every switch), so the entry a deploy pins has to be made here first."""
+        actions, not on every switch), so the entry a deploy pins has to be made here first.
+        The installer writes entries only for generations linked as system profiles, and a deploy
+        builds `--no-link`, so link first -- the same link nixos-rebuild performs."""
         entry = self.boot_entry_for(toplevel)
         if entry or self.dry_run:
             return entry
-        self.run([os.path.join(toplevel, "bin", "switch-to-configuration"), "boot"], capture=True)
+        self.link_profile(toplevel)
+        result = self.run([os.path.join(toplevel, "bin", "switch-to-configuration"), "boot"], capture=True)
+        if result.returncode != 0:
+            # Without this the installer's refusal is swallowed and the caller only sees "no entry".
+            print(f"deploy-ai: boot-loader install failed (exit {result.returncode}): "
+                  f"{(result.stderr or result.stdout or '').strip()[:400]}", file=sys.stderr)
         return self.boot_entry_for(toplevel)
+
+    def link_profile(self, toplevel: str) -> None:
+        """Link `toplevel` as a system generation profile.  systemd-boot's installer enumerates
+        `system-N-link` symlinks in /nix/var/nix/profiles and refuses when there are none, so a
+        deployed toplevel needs a profile to get a boot entry (and the profile doubles as a GC
+        root keeping the rollback target alive).  Written directly: the link format is just
+        symlinks, and the nix CLI has no profile-link command deploy-ai could call here."""
+        current = os.path.realpath(self.system_profile)
+        if current == os.path.realpath(toplevel):
+            return
+        profiles_dir = os.path.dirname(self.system_profile)
+        prefix = os.path.basename(self.system_profile) + "-"
+        generations = [
+            int(name[len(prefix) : -len("-link")])
+            for name in os.listdir(profiles_dir)
+            if name.startswith(prefix) and name.endswith("-link")
+        ]
+        new_link = f"{prefix}{max(generations, default=0) + 1}-link"
+        os.symlink(os.path.realpath(toplevel), os.path.join(profiles_dir, new_link))
+        os.symlink(new_link, f"{self.system_profile}.new")
+        os.rename(f"{self.system_profile}.new", self.system_profile)
 
     def set_loader_default(self, entry: str) -> bool:
         """Point the next boot at `entry`.  systemd-boot reads `default` from loader.conf;
@@ -1015,7 +1044,7 @@ class DeployAI:
         # so between the switch and the health confirmation below, any reboot boots the OLD
         # generation on its own.  The pin holds until the tail confirms it; nothing rewrites the
         # pin at boot, so a deploy that never confirmed leaves an old default and needs `--confirm-boot`.
-        self.pin_boot(self.boot_entry_for(current))
+        self.pin_boot(self.install_boot_entry(current))
 
         # Everything after arm_guard runs as a transient systemd unit: the health wait, the boot
         # confirmation, the records, and the guard cancel finish even if this session dies.  A
@@ -1043,7 +1072,7 @@ class DeployAI:
             # may have made the broken generation the boot default before failing.  Stand the
             # guard down only when the machine is demonstrably healthy; if activation broke
             # partway, the guard's own reboot is what walks ai back to the pinned generation.
-            self.pin_boot(self.boot_entry_for(self.read_rollback_previous()))
+            self.pin_boot(self.install_boot_entry(self.read_rollback_previous()))
             if self.check_health():
                 self.cancel_guard()
             else:
@@ -1053,7 +1082,7 @@ class DeployAI:
             raise
         if not self.wait_health():
             print("deploy-ai: the new system never became healthy; switching back", file=sys.stderr)
-            self.pin_boot(self.boot_entry_for(self.read_rollback_previous()))
+            self.pin_boot(self.install_boot_entry(self.read_rollback_previous()))
             if not self.rollback():
                 # Even the switch-back broke.  A broken machine with the guard cancelled recovers
                 # only when someone reboots into the pinned entry, so keep the guard armed and

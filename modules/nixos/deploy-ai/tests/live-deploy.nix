@@ -84,9 +84,14 @@ let
         fsType = "ext4";
       };
       fileSystems."/boot" = {
-        device = "none";
-        fsType = "tmpfs";
-        options = [ "defaults" ];
+        # The real ESP partition of the harness's GPT disk (label ESP, FAT32).  tmpfs was the
+        # test's blind spot: switch activations remount tmpfs (sysinit-reactivation restarts
+        # mount units) and wipe loader entries, so boot-pin bugs the real disk-backed /boot
+        # would expose never showed up.  noCheck keeps systemd-fsck (no fsck binary on this
+        # minimal system's PATH) from being pulled into boot.mount's chain.
+        device = "/dev/disk/by-label/ESP";
+        fsType = "vfat";
+        noCheck = true;
       };
       fileSystems."/nix/.ro-store" = {
         device = "nix-store";
@@ -231,14 +236,19 @@ testers.nixosTest {
     boot.loader.grub.enable = false;
     boot.loader.systemd-boot.enable = true;
     boot.loader.efi.canTouchEfiVariables = false;
-    # The test harness mkVMOverride's `fileSystems` from `virtualisation.fileSystems`,
-    # so the ESP stand-in must be declared on the virtualisation side for the node.
-    # /boot as tmpfs on the virtualisation side (the harness builds mount units from
-    # virtualisation.fileSystems).  No setup service: any service ordered before boot.mount
-    # collides with tmpfiles-setup in the sysinit/local-fs chain, and systemd resolves the
-    # cycle by deleting tmpfiles-setup — so /var/empty would never exist.
-    virtualisation.fileSystems."/boot".device = "none";
-    virtualisation.fileSystems."/boot".fsType = "tmpfs";
+    # The test harness mkVMOverride's `fileSystems` from `virtualisation.fileSystems`, so the
+    # ESP must be declared on the virtualisation side for the node.  `useBootLoader` + `useEFIBoot`
+    # switch the harness image from a partitionless root to a real GPT disk with a FAT32 ESP
+    # (label ESP), run the real systemd-boot installer during image build, and boot the VM through
+    # OVMF and that loader — exactly the disk-backed ESP the ai host has.  Entries the installer
+    # writes survive switch activations, the property tmpfs lacked.
+    virtualisation.useBootLoader = true;
+    virtualisation.useEFIBoot = true;
+    virtualisation.fileSystems."/boot" = {
+      device = "/dev/disk/by-label/ESP";
+      fsType = "vfat";
+      noCheck = true;
+    };
     virtualisation.memorySize = 4096;
     virtualisation.diskSize = 8192;
 
@@ -357,10 +367,14 @@ testers.nixosTest {
 
     gate.start()
     gate.wait_for_unit("multi-user.target")
-    # The os-provisioner image has no NixOS system profile; install-bootloader refuses to run
-    # with zero generations ("refusing to remove all boot loader entries").  Seed generation 1
-    # pointing at the booted system so the first switch can install the bootloader.
-    gate.succeed("mkdir -p /nix/var/nix/profiles && ln -sfn /run/current-system /nix/var/nix/profiles/system-1-link")
+    # The EFI harness image carries the real installer's output (profile link + loader entries),
+    # so normally nothing needs seeding.  Keep the fallback: install-bootloader refuses to run
+    # with zero generations ("refusing to remove all boot loader entries").
+    gate.succeed(
+        "test -e /nix/var/nix/profiles/system"
+        " || (mkdir -p /nix/var/nix/profiles"
+        " && ln -sfn /run/current-system /nix/var/nix/profiles/system-1"
+        " && ln -sfn system-1 /nix/var/nix/profiles/system)")
     gate.succeed(
         "(ls -ld /var /var/empty 2>&1; mount | grep boot; systemctl status systemd-tmpfiles-setup --no-pager -l 2>&1 | tail -12)"
         " | tee /dev/kmsg; true")
@@ -380,17 +394,13 @@ testers.nixosTest {
         "ssh -i /run/deploy-test/id_ed25519 -p 2224 -o BatchMode=yes"
         " -o StrictHostKeyChecking=accept-new builder@127.0.0.1 echo ok", 120)
 
-    # systemd-boot's install refuses an unmounted /boot, so require the ESP stand-in up front.
+    # systemd-boot's install refuses an unmounted /boot, so require the ESP mount up front.
     gate.succeed(
-        "mountpoint -q /boot || { systemctl status boot.mount esp-setup --no-pager -l >&2; ls -l /esp.img >&2; false; }")
+        "mountpoint -q /boot || { systemctl status boot.mount --no-pager -l >&2; ls -l /dev/disk/by-label >&2; false; }")
 
-    # The driver booted this VM's kernel directly; plant an entry so the running generation
-    # is pin-able, which is what provisioning does on a real machine before its first deploy.
-    gate.succeed(
-        'X=$(readlink -f /run/current-system) && mkdir -p /boot/loader/entries'
-        ' && printf "title base\\nlinux $X/kernel\\ninitrd $X/initrd\\noptions init=$X/init\\n"'
-        ' > /boot/loader/entries/nixos-live-base.conf'
-    )
+    # No planted entries: the gate's only boot entry must come from the real installer that
+    # deploy-ai runs -- that path (link profile, `switch-to-configuration boot`) is exactly what
+    # failed on the real ai after the `--no-link` build, and planting entries hid it.
 
     # The candidate closure and the pinned nixpkgs source are registered in the guest's Nix DB
     # (additionalPaths over the shared store), so the guest's deploy build is a cache hit with
@@ -444,6 +454,12 @@ testers.nixosTest {
     # over the serial console, and PATH is minimal there.
     gate.succeed(GATE + " --status 2>&1 | grep 'runs the running generation' >/dev/null")
     gate.succeed(GATE + " --status 2>&1 | grep 'none armed' >/dev/null")
+    # The pin must be real, not just reported: loader.conf's default names an entry file, and
+    # that entry names the running toplevel's init -- the same contract the firmware applies.
+    gate.succeed(
+        "load=$(grep '^default ' /boot/loader/loader.conf | cut -d' ' -f2)"
+        " && grep -qF \"init=$(readlink -f /run/current-system)/init\""
+        " /boot/loader/entries/$load")
     # `systemctl cancel --when` must clear logind's schedule file too, not just the transient
     # timer `--status` reads: a leftover /run/systemd/shutdown/scheduled reboots the host later.
     gate.succeed("cat /run/systemd/shutdown/scheduled 2>/dev/null || echo SCHEDULED_CLEARED")
@@ -506,10 +522,12 @@ testers.nixosTest {
         "test \"$(readlink -f /run/current-system)\" = \"$(cat /var/lib/deploy-ai/toplevel)\"")
     gate.succeed("test \"$(cat /var/lib/deploy-ai/commit)\" = \"" + r2 + "\"")
     gate.succeed("systemctl is-active fake-api.service | grep -q active")
-    # Not asserting the boot-pin row here: /boot in this mini system is a tmpfs that every switch
-    # activation remounts (sysinit-reactivation restarts mount units), so the pin written before
-    # the switch-back is wiped with the entries — an artifact the real ai host (disk-backed /boot)
-    # does not have.  Pin persistence is asserted in the v1/v2 flows, where it passes.
+    # Boot pin after rollback: the disk-backed /boot survives switch activations, so the loader
+    # default must now name the entry of what is live again -- the rolled-back generation.
+    gate.succeed(
+        "load=$(grep '^default ' /boot/loader/loader.conf | cut -d' ' -f2)"
+        " && grep -qF \"init=$(cat /var/lib/deploy-ai/toplevel)/init\""
+        " /boot/loader/entries/$load")
     gate.succeed(GATE + " --status 2>&1 | grep 'none armed' >/dev/null")
 
     # v4: a patch touching a path outside the allowlist must be refused BEFORE any build, with

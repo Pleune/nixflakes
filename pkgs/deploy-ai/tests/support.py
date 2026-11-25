@@ -144,6 +144,7 @@ class TempBase:
             # to pin and read.  `nixos-old` is the entry that boots the running toplevel.
             "DEPLOY_AI_BOOT_CONF": os.path.join(root, "loader.conf"),
             "DEPLOY_AI_BOOT_ENTRIES": os.path.join(root, "entries"),
+            "DEPLOY_AI_SYSTEM_PROFILE": os.path.join(root, "system-profile"),
         }
         Path(env["DEPLOY_AI_BOOT_CONF"]).write_text("timeout 5\ndefault nixos-*\n")
         entries = env["DEPLOY_AI_BOOT_ENTRIES"]
@@ -220,6 +221,18 @@ class World(TempBase):
         """Whether the machine was asked to run something containing `needle`."""
         return any(needle in call for call in self.calls)
 
+    @property
+    def profile_links(self) -> list[str]:
+        """The toplevels linked as system generation profiles, oldest generation first."""
+        profile_dir = os.path.dirname(self.tool.system_profile)
+        prefix = os.path.basename(self.tool.system_profile) + "-"
+        generations = {}
+        for name in os.listdir(profile_dir):
+            if name.startswith(prefix) and name.endswith("-link"):
+                generations[int(name[len(prefix) : -len("-link")])] = os.path.realpath(
+                    os.path.join(profile_dir, name))
+        return [generations[g] for g in sorted(generations)]
+
     def dispatch(self, argv, **kwargs):
         self.calls.append(" ".join(argv))
         cmd = argv[0]
@@ -261,6 +274,11 @@ class World(TempBase):
             return Result()
         elif cmd.endswith("bin/switch-to-configuration"):
             if argv[0] == os.path.join(self.gen_old, "bin", "switch-to-configuration"):
+                if argv[1] == "boot":  # install the entry naming the old generation
+                    if self.boot_installs:
+                        Path(self.tool.boot_entries, "nixos-old.conf").write_text(
+                            f"title NixOS\noptions init={self.gen_old}/init\n")
+                    return Result()
                 self.running = self.gen_old  # the rollback switched back for real
                 return Result(self.rollback_rc)
             toplevel = os.path.dirname(os.path.dirname(cmd))

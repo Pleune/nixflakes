@@ -55,6 +55,20 @@ class TestDeployRoad(DeployWorld):
         assert (sha in Path(self.tool.state, "refs.log").read_text())
         assert ("default nixos-new.conf" in Path(self.tool.boot_conf).read_text())
 
+    def test_a_host_with_no_entries_links_profiles_and_installs_entries(self):
+        # The ai reproduction: a deploy builds `--no-link`, so no system profile exists, and
+        # systemd-boot's installer writes nothing without profiles -- every pin found no entry.
+        # The deploy must link each generation it pins, then the installer produces entries.
+        sha = self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
+        os.remove(Path(self.tool.boot_entries, "nixos-old.conf"))
+        os.remove(Path(self.tool.boot_entries, "nixos-new.conf"))
+        verdict, _out, _err = self.deploy()
+        assert (verdict == "applied")
+        assert (self.saw("switch-to-configuration boot"))
+        assert (self.profile_links == [self.gen_old, self.TOPLEVEL])
+        assert ("default nixos-new.conf" in Path(self.tool.boot_conf).read_text())
+        assert (f"init={self.TOPLEVEL}/init" in Path(self.tool.boot_entries, "nixos-new.conf").read_text())
+
     def test_a_build_that_fails_switches_nothing_and_says_failed(self):
         self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
         self.build_rc = 1
