@@ -29,6 +29,9 @@ let
   firstLine = text: builtins.elemAt (builtins.match "([^\r\n]+)[\r\n]*" text) 0;
   guestPublicKey = firstLine (builtins.readFile "${private.secrets}/ai_buildvm_id_ed25519.pub");
 
+  # Hash of the hermes `settings` attrset, used as a systemd restartTrigger below.
+  hermesSettingsHash = builtins.hashString "sha256" (builtins.toJSON config.services.hermes-agent.settings);
+
   # Matches the user defined in platforms/buildvm.nix.
   guestUser = "builder";
 
@@ -375,6 +378,17 @@ in
       port = 9119;
     };
   };
+
+  # `settings` is deep-merged into `/var/lib/hermes/.hermes/config.yaml` by the module's activation
+  # script, and config.yaml is mutable state outside the unit: a settings-only change touches
+  # neither the package path nor `Environment=`, so systemd leaves both processes running against
+  # the stale config (the 64:ff9b SSRF exemption needed a manual restart for exactly this reason).
+  # Hashing settings into both units makes every declarative config change restart the services at
+  # switch time.  Only the hash goes into the world-readable unit file, since `settings` can carry
+  # secrets.  Upstreaming `restartTriggers` into the module itself is the real fix; this is the
+  # same declarative route applied downstream.
+  systemd.services.hermes-agent.serviceConfig.restartTriggers = [ hermesSettingsHash ];
+  systemd.services.hermes-backend.serviceConfig.restartTriggers = [ hermesSettingsHash ];
 
   # Hermes WebUI (github:nesquena/hermes-webui — not in nixpkgs, but it ships its own package and
   # NixOS module, so this is the clean path).  This replaces the hashboard that container mode
