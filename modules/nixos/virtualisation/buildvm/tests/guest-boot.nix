@@ -72,6 +72,22 @@ in
     # binary's dynamic loader (X11/PipeWire/libxkbcommon deps), so a missing package or a
     # broken link both fail here.
     guest.succeed("cua-driver --version")
+    # /tmp survives reboots here, so boot must wipe it wholesale (boot.tmp.cleanOnBoot ->
+    # `D! /tmp`).  A stale bot-desktop screen env (a published DISPLAY whose Xvnc died) would
+    # otherwise make Hermes adopt the dead display and computer_use spawn its driver against
+    # nothing; the wipe also covers arbitrary scratch files.  The `!` means the rule only runs
+    # with --boot, which is exactly how systemd-tmpfiles-setup.service invokes tmpfiles at boot,
+    # and tmpfiles never removes files younger than ~10s, so the planted files are backdated.
+    guest.succeed(
+        "mkdir -p /tmp/hermes-bot-desktop/default && echo 'DISPLAY=:20' > /tmp/hermes-bot-desktop/default/env"
+    )
+    guest.succeed("mkdir -p /tmp/stale-dir && touch /tmp/stale-file /tmp/stale-dir/nested")
+    guest.succeed("find /tmp/hermes-bot-desktop /tmp/stale-dir /tmp/stale-file -exec touch -d '1 hour ago' {} +")
+    guest.succeed("systemd-tmpfiles --create --remove --boot --exclude-prefix=/dev")
+    guest.succeed("! test -e /tmp/hermes-bot-desktop/default/env")
+    guest.succeed("! test -e /tmp/stale-file")
+    guest.succeed("! test -e /tmp/stale-dir")
+    guest.succeed("test -d /tmp")
     guest.succeed(
         "test \"$(systemctl show bot-xvnc -p StartLimitIntervalUSec)\" = 'StartLimitIntervalUSec=0'"
     )

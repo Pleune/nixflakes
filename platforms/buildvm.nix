@@ -224,6 +224,16 @@ in
       options = "--delete-older-than 14d";
     };
 
+    # /tmp here is disk-backed, so scratch state survives a reboot while everything that wrote it
+    # (Xvnc :20, browsers, Hermes' bot-desktop screen env) died with the old boot.  The one that
+    # bit us: sandbox_host.start() *adopts* a published /tmp/hermes-bot-desktop/<profile>/env
+    # DISPLAY without probing that an X server answers it, so after every reboot computer_use
+    # spawned cua-driver against a dead display ("no DISPLAY is set").  Wiping /tmp wholesale at
+    # boot (systemd's `D! /tmp` rule) makes start() always bring a fresh screen up and takes every
+    # other boot-stale scratch file with it.  Runtime /tmp use is untouched — the wipe is boot-only.
+    # (The gateway restart case is unaffected: no reboot, the live screen is adopted as designed.)
+    boot.tmp.cleanOnBoot = true;
+
     # Keep build logs from filling the guest disk.
     services.journald.settings.Journal = {
       SystemMaxUse = "512M";
