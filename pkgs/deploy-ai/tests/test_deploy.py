@@ -48,12 +48,34 @@ class TestDeployRoad(DeployWorld):
         assert (self.saw("systemd-run --unit=deploy-ai-switch --wait --collect"))
         assert (self.saw("--switch-toplevel /nix/store/new-system"))
         assert (self.saw("systemctl cancel --when"))       # stood down once health passed
+        assert (not os.path.exists(self.schedule_path))    # logind's file gone: no reboot pending
         assert ("ai is now running" in out)
         # What is live: the records, and the boot pin that points at the running generation.
         assert (Path(self.tool.state, "commit").read_text().strip() == sha)
         assert (Path(self.tool.state, "toplevel").read_text().strip() == self.TOPLEVEL)
         assert (sha in Path(self.tool.state, "refs.log").read_text())
         assert ("default nixos-new.conf" in Path(self.tool.boot_conf).read_text())
+
+    def test_a_cancel_rejected_by_a_mid_switch_logind_restart_is_retried(self):
+        # The production failure: a switch activation restarts dbus/logind just as the tail
+        # cancels the guard, so the first cancels fail; a swallowed one left ai scheduled to
+        # reboot an hour later while `--status` read "none armed".
+        self.cancel_failures = 2
+        self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
+        verdict, _, _ = self.deploy()
+        assert (verdict == "applied")
+        assert (self.calls.count("systemctl cancel --when") == 3)
+        assert (not os.path.exists(self.schedule_path))
+
+    def test_a_guard_that_cannot_be_stood_down_says_so(self):
+        # Beyond the retries the reboot really is pending; the deploy must warn instead of
+        # pretending, and `--status` must report it from logind's file.
+        self.cancel_failures = 99
+        self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
+        verdict, _, err = self.deploy()
+        assert (verdict == "applied")
+        assert ("still scheduled" in err)
+        assert ("reboot armed at" in self.tool.guard_row())
 
     def test_a_host_with_no_entries_links_profiles_and_installs_entries(self):
         # The ai reproduction: a deploy builds `--no-link`, so no system profile exists, and

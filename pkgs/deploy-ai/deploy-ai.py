@@ -250,6 +250,11 @@ class DeployAI:
         self.boot_entries = get("DEPLOY_AI_BOOT_ENTRIES", "/boot/loader/entries")
         self.system_profile = get("DEPLOY_AI_SYSTEM_PROFILE", "/nix/var/nix/profiles/system")
 
+        # logind's schedule file is the authoritative record of a pending timed reboot: the
+        # transient-timer property `systemctl show` reports can read empty while the reboot is
+        # still scheduled, so both the guard status and its cancel check this file.
+        self.shutdown_schedule = get("DEPLOY_AI_SHUTDOWN_SCHEDULE", "/run/systemd/shutdown/scheduled")
+
         # How much of the machine a build here may take, published by the module so this package
         # names no ai-specific value.
         self.max_jobs_file = get("DEPLOY_AI_MAX_JOBS", "/etc/deploy-ai/build-max-jobs")
@@ -882,7 +887,18 @@ class DeployAI:
                   file=sys.stderr)
 
     def cancel_guard(self) -> None:
-        self.run(["systemctl", "cancel", "--when"], capture=True)
+        # The schedule file is the proof of cancellation, not the exit code: a switch's activation
+        # can restart dbus/logind at exactly this moment, and one swallowed failure would leave the
+        # host scheduled to reboot an hour later.  Retry until the file is gone, then say so rather
+        # than pretend the guard stood down.
+        for _ in range(6):
+            if not os.path.exists(self.shutdown_schedule):
+                return
+            self.run(["systemctl", "cancel", "--when"], capture=True)
+            time.sleep(2)
+        if os.path.exists(self.shutdown_schedule):
+            print("deploy-ai: warning: the guard reboot is still scheduled; run "
+                  "`systemctl cancel --when` on ai to stand it down", file=sys.stderr)
 
     # A deploy that only adds a port forward can leave qemu running the old command line: nothing
     # else in the unit changed, so activation never restarted it and the new forward goes nowhere.
@@ -1007,10 +1023,21 @@ class DeployAI:
         return f"{fields[0]}  {short(fields[1])}  {fields[2]}"
 
     def guard_row(self) -> str:
-        """Whether the timed reboot that catches a hung switch is still pending."""
-        shown = self.run(["systemctl", "show", "reboot", "--property=NextElapseSince1970Usec"],
-                         capture=True)
-        usec = shown.stdout.partition("=")[2].strip()
+        """Whether the timed reboot that catches a hung switch is still pending.  The logind
+        schedule file is authoritative; the transient-timer property reads empty while a
+        `reboot --when` is pending."""
+        usec = ""
+        try:
+            with open(self.shutdown_schedule) as fh:
+                for line in fh:
+                    if line.startswith("USEC="):
+                        usec = line.partition("=")[2].strip()
+        except OSError:
+            pass
+        if not usec.isdigit():
+            shown = self.run(["systemctl", "show", "reboot",
+                              "--property=NextElapseSince1970Usec"], capture=True)
+            usec = shown.stdout.partition("=")[2].strip()
         if usec.isdigit() and int(usec) > 0:
             when = datetime.datetime.fromtimestamp(int(usec) / 1_000_000).astimezone()
             return "reboot armed at " + when.isoformat(timespec="minutes")
