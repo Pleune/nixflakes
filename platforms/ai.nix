@@ -324,6 +324,12 @@ in
       # the SSH exec stream itself (streams.forward_port), handing the tools a local endpoint -- the
       # same channel terminal() uses, so no qemu hostfwd/relay/tunnel is involved.  This also brings
       # browser_cdp and browser_dialog into the session, which appear whenever a CDP endpoint resolves.
+      #
+      # The activation deep-merges settings into config.yaml and keeps keys it no longer declares,
+      # so removing an old `browser.cdp_url` from this file leaves the stale value on disk forever.
+      # Declare the default explicitly instead: Hermes' DEFAULT_CONFIG uses "" and the override gate
+      # strips empty values, so "" means "unset" and overwrites any stale endpoint.
+      browser.cdp_url = "";
 
       # ai reaches the internet over NAT64/DNS64, so systemd-resolved answers public names with
       # the well-known prefix 64:ff9b::/96 alongside (or instead of) the IPv4 address. Python's
