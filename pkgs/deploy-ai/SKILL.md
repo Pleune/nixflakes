@@ -172,16 +172,19 @@ here: send them one at a time.
 
 Do not "work around" a refusal by patching the checkout yourself. `git apply`/`patch` onto
 `/home/builder/nixflakes` leaves `.rej` and `.orig` files behind, and the tree there is not what the
-gate vets — the gate applies your series onto ai's own deployed source, which it unpacks from
-`/etc/deploy-ai/deployed-source`. If you want to test locally, use `git apply --check` and clean up
-after yourself.
+gate vets — the gate applies your series onto ai's actually-deployed tree, which it caches at
+`/var/lib/deploy-ai/base-tree` after every successful deploy (patch submits and `--repo` deploys
+both refresh it). Only a gate that has never deployed falls back to the build-time source recorded
+in `/etc/deploy-ai/deployed-source`. If you want to test locally, use `git apply --check` and clean
+up after yourself.
 
 ## What the gate checks, in order
 
 1. The series is capped at `/etc/deploy-ai/submit-max-bytes` (262144 here) and an empty one is refused.
    It lands in `/var/lib/deploy-ai/inbox` as the record of what arrived.
-2. The series applies cleanly onto ai's deployed source, which the gate unpacks from
-   `/etc/deploy-ai/deployed-source`. It never trusts your tree.
+2. The series applies cleanly onto ai's deployed tree, cached at `/var/lib/deploy-ai/base-tree`
+   (falling back to `/etc/deploy-ai/deployed-source` only before the first gate deploy). It never
+   trusts your tree.
 3. Every changed path is inside the allowlist `/etc/deploy-ai/allowlist`. On `ai` that is `flake.nix`,
    `docs/`, `README.md`, `lib/`, `modules/nixos/`, `config/`, `pkgs/`, `skills/`, `platforms/ai.nix`,
    `platforms/buildvm.nix` and `platforms/buildvm-bootstrap.nix`. Read `cat /etc/deploy-ai/allowlist`

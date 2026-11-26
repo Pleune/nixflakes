@@ -12,7 +12,7 @@ import subprocess
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from support import DeployWorld, patch_input, refusal, row
+from support import DeployWorld, captured, patch_input, refusal, row
 
 
 class TestSubmitRoad(DeployWorld):
@@ -128,3 +128,79 @@ class TestSubmitRoad(DeployWorld):
         verdict, _out, err = self.submit(self.patch_of(sha))
         assert (verdict is None)
         assert ("deployedSource" in err)
+
+
+class TestDeployedBaseCache(DeployWorld):
+    """Patches apply onto what is deployed, not the build-time source.
+
+    `deployed-source` is written when the system is built and never moves, so after a deploy
+    the recorded source describes an older tree.  Every successful deploy therefore caches
+    the tree it landed, and the next patch rebased onto the deployed commit must apply onto
+    that cache even when the build-time source has drifted.
+    """
+
+    def setup_method(self):
+        super().setup_method(DEPLOY_AI_ALLOWLIST="platforms/\n",
+                             DEPLOY_AI_DENY_FILE="pkgs/deploy-ai/\n",
+                             DEPLOY_AI_SUBMIT_MAX_BYTES_FILE="10000",
+                             DEPLOY_AI_POLICY_FILE="abc123")
+        self.tool.vet_only = False
+        self.repo, self.deployed = self.origin(
+            **{"flake.nix": "{}\n", "platforms/buildvm.nix": "one\n"})
+        mirror = os.path.join(self.root, "mirror.git")
+        subprocess.run(["git", "clone", "--bare", "--quiet", self.repo, mirror], check=True)
+        self.tool.mirror = mirror
+
+    def patch_of(self, sha: str) -> bytes:
+        return subprocess.run(["git", "-C", self.repo, "format-patch", "-1", "--stdout", sha],
+                              capture_output=True, check=True).stdout
+
+    def submit(self, patch: bytes):
+        out, err = io.StringIO(), io.StringIO()
+        verdict = None
+        with patch_input(patch), redirect_stdout(out), redirect_stderr(err):
+            try:
+                verdict = self.tool.do_submit()
+            except SystemExit:
+                pass
+        return verdict, out.getvalue(), err.getvalue()
+
+    def deploy(self, ref="main"):
+        self.tool.repo = self.repo
+        self.tool.ref = ref
+        out, err = io.StringIO(), io.StringIO()
+        verdict = None
+        with redirect_stdout(out), redirect_stderr(err):
+            try:
+                verdict = self.tool.do_deploy()
+            except SystemExit:
+                pass
+        return verdict, out.getvalue(), err.getvalue()
+
+    def test_a_submit_caches_its_tree_and_the_next_submit_stacks_on_it(self):
+        first = self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
+        assert (self.submit(self.patch_of(first))[0] == "applied")
+        assert (os.path.isdir(self.tool.base_cache))
+        # The build-time source drifts -- the very state a gate deploy leaves behind.
+        Path(self.tool.baseline, "platforms/buildvm.nix").write_text("one\n")
+        second = self.revise(self.repo, **{"platforms/buildvm.nix": "three\n"})
+        verdict, out, err = self.submit(self.patch_of(second))
+        assert (verdict == "applied"), err
+        assert (row("changed", "platforms/buildvm.nix") in out)
+        # The cache now holds the second tree, and it -- not the drifted source -- is what
+        # `--status` reports as the patch base.
+        assert (Path(self.tool.base_cache, "platforms/buildvm.nix").read_text() == "three\n")
+        assert (row("baseline", f"{self.tool.base_cache} (cached tree) (present)") in
+               captured(self.tool.do_status))
+
+    def test_a_repo_deploy_refreshes_the_base_the_next_patch_applies_onto(self):
+        tip = self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
+        verdict, _out, err = self.deploy()
+        assert (verdict == "applied"), err
+        # The flake source is still the pre-deploy tree; a patch rebased onto the deployed
+        # tip must apply onto the cached tree the deploy left behind.
+        Path(self.tool.baseline, "platforms/buildvm.nix").write_text("one\n")
+        next_tip = self.revise(self.repo, **{"platforms/buildvm.nix": "three\n"})
+        verdict, _out, err = self.submit(self.patch_of(next_tip))
+        assert (verdict == "applied"), err
+        assert (Path(self.tool.base_cache, "platforms/buildvm.nix").read_text() == "three\n")
