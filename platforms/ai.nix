@@ -318,12 +318,12 @@ in
       # "gateway" to move the desktop back onto ai.
       bot_desktop.placement = "auto";
 
-      # browser_exec attaches over CDP to the Chromium the guest runs for it (platforms/buildvm.nix
-      # `chromium-cdp`, Xvnc :21); qemu forwards the guest's 9222 to ai's loopback 9225, alongside the
-      # ssh forward.  The Hermes image ships no Chromium, so without this the tool cannot start at all.
-      # Also brings browser_cdp and browser_dialog into the session, which only appear when a CDP
-      # endpoint is configured.
-      browser.cdp_url = "http://127.0.0.1:9225";
+      # No browser.cdp_url: with terminal.backend = ssh and bot_desktop.placement = "auto", the
+      # supported path is the sandbox browser (tools/browser_session_sandbox.py).  Hermes launches
+      # Chromium inside the guest (platforms/buildvm.nix installs it) and forwards the CDP port over
+      # the SSH exec stream itself (streams.forward_port), handing the tools a local endpoint -- the
+      # same channel terminal() uses, so no qemu hostfwd/relay/tunnel is involved.  This also brings
+      # browser_cdp and browser_dialog into the session, which appear whenever a CDP endpoint resolves.
 
       # ai reaches the internet over NAT64/DNS64, so systemd-resolved answers public names with
       # the well-known prefix 64:ff9b::/96 alongside (or instead of) the IPv4 address. Python's
