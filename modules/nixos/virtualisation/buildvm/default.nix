@@ -919,7 +919,9 @@ NOTE
             -drive if=pflash,format=raw,unit=1,file=${cfg.efiVarsPath} \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0,bootindex=0 \
-            -netdev user,id=n0,net=${cfg.netSubnet},host=${cfg.netGateway},dns=${cfg.netDns},dhcpstart=${cfg.netGuestAddress},hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-:22,hostfwd=tcp:127.0.0.1:${toString cfg.cdpPort}-:9222 \
+            # The forwarded ports dial an explicit guest address: with the bare `-:PORT` form
+            # slirp accepts the ai-side connection and stalls without ever SYNing the guest.
+            -netdev user,id=n0,net=${cfg.netSubnet},host=${cfg.netGateway},dns=${cfg.netDns},dhcpstart=${cfg.netGuestAddress},hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-${cfg.netGuestAddress}:22,hostfwd=tcp:127.0.0.1:${toString cfg.cdpPort}-${cfg.netGuestAddress}:9222 \
             -device virtio-net-pci,netdev=n0,mac=${cfg.netGuestMac} \
             -nographic
         '';
