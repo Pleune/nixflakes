@@ -148,6 +148,9 @@ in
     cudaPackages.cudatoolkit
     pciutils
     nvtopPackages.full
+    # The `signal-cli` device-link step runs on this console (`link` prints the URI/QR the
+    # phone scans); the daemon itself is the service below and carries its own copy.
+    signal-cli
   ];
 
   services.openssh.enable = true;
@@ -252,7 +255,15 @@ in
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME = "mitch";
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD = "hermes-bootstrap";
       HERMES_DASHBOARD_BASIC_AUTH_SECRET = "2W74lj6sTnRABgmlKGNN4SGqIzgvwExq6YP70XmE5z0=";
+      # The signal platform registers when SIGNAL_HTTP_URL + SIGNAL_ACCOUNT are set
+      # (plugins/platforms/signal/register.py).  Only the URL -- the account and the allowed-sender
+      # list are PII and come from environmentFiles below.
+      SIGNAL_HTTP_URL = "http://127.0.0.1:8084";
     };
+
+    # Merged into $HERMES_HOME/.env at activation, after agenix has decrypted
+    # (agenixInstall runs before `users`, and the hermes setup script depends on `users`).
+    environmentFiles = [ config.age.secrets."signal-account.env".path ];
 
     settings = {
       # The model is Strata on this very box (nixflakes.services.strata above), reached through
@@ -481,6 +492,41 @@ in
     owner = "root";
     group = "root";
     mode = "0600";
+  };
+
+  # Hermes' Signal identity: SIGNAL_ACCOUNT and SIGNAL_ALLOWED_USERS.  The phone number is PII, so
+  # it goes through agenix rather than `environment` (whose values are world-readable via
+  # `systemctl cat`).  Activation runs as root, and the hermes module's env merge reads this before
+  # dropping to the Hermes account, so the agenix default (root-owned 0400) is exactly right.
+  age.secrets."signal-account.env" = {
+    file = "${private.secrets}/signal-account.env.age";
+  };
+
+  # ── Signal ──────────────────────────────────────────────────────────────────
+  # The gateway's signal plugin (plugins/platforms/signal, env-enabled) talks HTTP to a signal-cli
+  # daemon on loopback.  Port 8084: 8080 is Strata, 8642 the gateway API, 8787 the WebUI.
+  #
+  # No --account here: the phone number must not reach the unit file or the repo, and with exactly
+  # one account linked into the datadir signal-cli infers it.  Link the device once (the phone:
+  # Settings -> Linked Devices -> Link New Device, or paste the URI):
+  #   sudo -u hermes signal-cli --datadir /var/lib/signal-cli link -n "HermesAgent"
+  # Until it is linked the daemon exits ("no accounts registered") and systemd retries -- harmless,
+  # and deliberately NOT in deploy-ai.healthUnits, so an unlinked device cannot fail a deploy.
+  systemd.services.signal-cli = {
+    description = "signal-cli HTTP daemon (Hermes' Signal platform bridge)";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      ExecStart = "${pkgs.signal-cli}/bin/signal-cli --datadir /var/lib/signal-cli daemon --http 127.0.0.1:8084";
+      User = "hermes";
+      Group = "hermes";
+      # StateDirectory's mode+owner makes the datadir group-writable for `hermes`, so a member of
+      # that group can run the `link` step without sudo.
+      StateDirectory = "signal-cli 0770 hermes hermes";
+      Restart = "on-failure";
+      RestartSec = "30s";
+    };
   };
 
   # ── The agent's execution host: a NixOS guest on the 1.82 TiB disk ───────────────
