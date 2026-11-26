@@ -894,15 +894,17 @@ class DeployAI:
         for _ in range(6):
             if not os.path.exists(self.shutdown_schedule):
                 return
-            # `cancel` takes no `--when`: that option belongs to `reboot`, and passing it makes
-            # systemctl answer "option '--when' requires an argument" with exit 1 — every attempt
-            # then does nothing and the schedule file outlives the deploy, which is exactly the
-            # production failure this loop exists to catch.
-            self.run(["systemctl", "cancel"], capture=True)
+            # `shutdown -c` is the only cancel that reaches logind's CancelScheduledShutdown.
+            # `systemctl cancel` must never be used here: since systemd ~258 the `cancel` verb
+            # is the job-cancel verb (Manager.ClearJobs) — it exits 0 and leaves the schedule
+            # file untouched, so exit-code checking alone reports success while a reboot stays
+            # armed. That is exactly the production failure this loop exists to catch; the
+            # schedule file, not any exit code, is the proof.
+            self.run(["shutdown", "-c"], capture=True)
             time.sleep(2)
         if os.path.exists(self.shutdown_schedule):
             print("deploy-ai: warning: the guard reboot is still scheduled; run "
-                  "`systemctl cancel` on ai to stand it down", file=sys.stderr)
+                  "`shutdown -c` on ai to stand it down", file=sys.stderr)
 
     # A deploy that only adds a port forward can leave qemu running the old command line: nothing
     # else in the unit changed, so activation never restarted it and the new forward goes nowhere.

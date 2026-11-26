@@ -460,9 +460,11 @@ testers.nixosTest {
         "load=$(grep '^default ' /boot/loader/loader.conf | cut -d' ' -f2)"
         " && grep -qF \"init=$(readlink -f /run/current-system)/init\""
         " /boot/loader/entries/$load")
-    # `systemctl cancel --when` must clear logind's schedule file too, not just the transient
-    # timer `--status` reads: a leftover /run/systemd/shutdown/scheduled reboots the host later.
-    gate.succeed("cat /run/systemd/shutdown/scheduled 2>/dev/null || echo SCHEDULED_CLEARED")
+    # logind's schedule file must be gone after the switch: `shutdown -c` is the only cancel
+    # reaching CancelScheduledShutdown (`systemctl cancel` is the job-cancel verb since
+    # systemd ~258 — it succeeds but leaves a leftover /run/systemd/shutdown/scheduled that
+    # reboots the host later, the production failure).
+    gate.succeed("test ! -e /run/systemd/shutdown/scheduled")
 
     # Watcher: runs INSIDE the guest via setsid, not `&` — the harness executes every command
     # as `bash -c ... | base64`, a non-interactive pipe context where bash refuses background

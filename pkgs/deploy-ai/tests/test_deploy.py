@@ -47,8 +47,8 @@ class TestDeployRoad(DeployWorld):
         assert (self.saw("systemctl reboot --when +60m"))  # the guard, armed before the switch
         assert (self.saw("systemd-run --unit=deploy-ai-switch --wait --collect"))
         assert (self.saw("--switch-toplevel /nix/store/new-system"))
-        assert (self.saw("systemctl cancel"))            # stood down once health passed
-        assert (not self.saw("systemctl cancel --when")) # cancel takes no option; that's a usage error
+        assert (self.saw("shutdown -c"))           # stood down once health passed: logind's cancel
+        assert (not self.saw("systemctl cancel"))  # the job-cancel verb: succeeds but cancels nothing
         assert (not os.path.exists(self.schedule_path))  # logind's file gone: no reboot pending
         # The guest's provisioning runs inside this switch: the handoff must carry the commit,
         # and the record must be gone once the new system is recorded.
@@ -69,7 +69,7 @@ class TestDeployRoad(DeployWorld):
         self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
         verdict, _, _ = self.deploy()
         assert (verdict == "applied")
-        assert (self.calls.count("systemctl cancel") == 3)
+        assert (self.calls.count("shutdown -c") == 3)
         assert (not os.path.exists(self.schedule_path))
 
     def test_a_guard_that_cannot_be_stood_down_says_so(self):
@@ -145,7 +145,7 @@ class TestDeployRoad(DeployWorld):
         assert ("the rollback switch exited 3" in err)
         assert ("switch-back also failed" in err)
         # A broken machine with no working rollback keeps its reboot insurance.
-        assert (not self.saw("systemctl cancel --when"))
+        assert (not self.saw("shutdown -c"))
 
     def test_a_dry_run_reports_the_switch_and_claims_nothing(self):
         self.revise(self.repo, **{"platforms/buildvm.nix": "two\n"})
@@ -300,5 +300,5 @@ class TestSwitchTail(World):
         assert ("switch unit exit 1" in err.getvalue())
         # The activation broke halfway, so the guard's own reboot is the rollback: it stays armed,
         # and the pin was moved back to the previous generation.
-        assert (not self.saw("systemctl cancel --when"))
+        assert (not self.saw("shutdown -c"))
         assert ("default nixos-old.conf" in Path(tool.boot_conf).read_text())
