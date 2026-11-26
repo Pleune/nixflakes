@@ -295,6 +295,23 @@ in
       };
     };
 
+    # Chrome binds DevTools to 127.0.0.1 only (the --remote-debugging-address flag is ignored by
+    # modern builds), but qemu's `hostfwd=tcp:127.0.0.1:9225-:9222` dials the guest's real IP
+    # (10.0.2.15), where nothing listens -- the host's 9225 therefore accepts the TCP handshake and
+    # hangs, and browser_exec's daemon times out attaching.  Relay the guest-IP port to loopback so
+    # the existing hostfwd lands on Chrome.
+    systemd.services.chromium-cdp-relay = lib.optionalAttrs config.nixflakes.buildvm.desktop {
+      description = "Bridge guest-IP :9222 to Chromium's loopback CDP so qemu's 9225 hostfwd lands";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "chromium-cdp.service" ];
+      unitConfig.StartLimitIntervalSec = 0;  # same reasoning as chromium-cdp
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${pkgs.socat}/bin/socat TCP-LISTEN:9222,bind=10.0.2.15,fork,reuseaddr TCP:127.0.0.1:9222";
+        Restart = "always";
+      };
+    };
+
     system.stateVersion = "25.05";
   };
 }
