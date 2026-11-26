@@ -84,9 +84,17 @@ in
         # qemu's NAT gateway and its built-in resolver, which forwards to ai's resolver.  Both are set here
         # rather than through `networking.defaultGateway`/`networking.nameservers` because those are
         # keyed on interface *names*, which is exactly what cannot be relied on.
-        Gateway = "10.0.2.2";
         DNS = "10.0.2.3";
       };
+
+      # The default route carries a deliberately high metric: it exists for host<->guest management
+      # (and as a fallback if the LAN lease dies), but internet egress must leave through the LAN
+      # lease so Epic/Cloudflare see the residential IP.  41-buildvm-lan's DHCP route wins at metric 10.
+      routes = [ { routeConfig = { Gateway = "10.0.2.2"; Metric = 600; }; } ];
+
+      # libslirp advertises its NAT64 gateway as an IPv6 default route too; same story -- raise its
+      # metric so the router's RA default wins for real internet traffic.
+      ipv6AcceptRAConfig.RouteMetric = 600;
 
       # qemu hands this address out over DHCP; taking it statically does not depend on libslirp's pool.
       address = [ "10.0.2.15/24" ];
@@ -111,9 +119,12 @@ in
         DNSDefaultRoute = true;
       };
 
-      dhcpConfig = {
-        # Beat 40-buildvm-nat's static Gateway=10.0.2.2 default route (metric 100) so internet
-        # egress leaves through the lease.
+      # The router's IPv6 default route must beat libslirp's NAT64 RA (metric 600 there).
+      ipv6AcceptRAConfig.RouteMetric = 10;
+
+      dhcpV4Config = {
+        # Beat 40-buildvm-nat's managed default route (metric 600) so internet egress leaves
+        # through the lease and Cloudflare sees the residential IP.
         RouteMetric = 10;
       };
     };
