@@ -192,6 +192,7 @@ in
       nixVersions.latest
       deploy-rs
       jq
+      python3 # Hermes' sandbox CDP port relay runs `python3 -c` inside the guest via ssh
     ] ++ optionals config.nixflakes.buildvm.desktop (with pkgs; [
       tigervnc # Xvnc
       xfwm4
