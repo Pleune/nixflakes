@@ -92,6 +92,32 @@ in
       address = [ "10.0.2.15/24" ];
     };
 
+    # LAN NIC (a bridge tap on ai's physical interface): the router hands this VM a real DHCP
+    # lease, so it looks like a home-lan machine instead of a NAT client of ai.  That is the whole
+    # point -- Epic/Cloudflare bot-fingerprint ai's datacenter-style egress and refuse browser
+    # logins from it, while a residential lease passes Turnstile.  The router's resolver answers
+    # the `.home.pleunetowne.com` names (this VM registers as `buildvm`), and its NAT64 answers are
+    # the ones ai's Hermes guard already exempts (`security.fake_ip_ranges`).
+    #
+    # MAC-matched like 40-buildvm-nat for the same reason, mirroring
+    # `nixflakes.virtualisation.buildvm.lanNic.mac`.  With the host's lanNic disabled no NIC carries
+    # this MAC and the unit is inert.
+    systemd.network.networks."41-buildvm-lan" = {
+      matchConfig.MACAddress = "52:54:00:12:34:57";
+
+      networkConfig = {
+        DHCP = "yes";
+        # Router DNS must beat the NAT resolver (10.0.2.3) on the other NIC.
+        DNSDefaultRoute = true;
+      };
+
+      dhcpConfig = {
+        # Beat 40-buildvm-nat's static Gateway=10.0.2.2 default route (metric 100) so internet
+        # egress leaves through the lease.
+        RouteMetric = 10;
+      };
+    };
+
     # The guest boots its own disk: qemu gets no -kernel/-initrd/-append, so the loader has to live
     # in the image and `nixos-rebuild switch` inside the guest has to be able to reinstall it.
     system.switch.enable = true;

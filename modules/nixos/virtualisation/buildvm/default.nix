@@ -11,6 +11,9 @@ let
   # The guest's ordinary user has no sudo, so activation can only run as root: keys the host runs as
   # root are the ones authorized in the guest's /root/.ssh/authorized_keys.
   rootKeyList = filter (k: k.owner == "root" && k.guestRoot) loginKeyList;
+  # Fixed names for the LAN bridge so ai.nix, qemu, and `ip` on the console all speak the same one.
+  bridgeName = "br-buildvm";
+  tapName = "vm-buildvm";
 in
 {
   options.nixflakes.virtualisation.buildvm = {
@@ -176,6 +179,43 @@ in
         predictable interface names are not stable in this VM, and a unit that stops matching leaves
         the card DOWN with no address.
       '';
+    };
+
+    # The slirp NIC makes the guest manageable from ai, but its internet egress is ai's own
+    # connection, and Epic/Cloudflare bot-fingerprint that datacenter-style address (NAT64/CGNAT):
+    # Turnstile resets forever and the agent's browser logins die there.  A Linux bridge on ai's
+    # physical NIC gives the guest a second NIC whose traffic leaves through the residential IP the
+    # bot gates trust: the router hands it a real DHCP lease, LAN names resolve, and the guest
+    # registers as `buildvm.home.pleunetowne.com`.
+    #
+    # Declarative throughout: systemd-networkd creates the guest's tap (netdev Kind=tap) and NixOS'
+    # networking.bridges enslaves it plus the host NIC, so qemu needs no runtime `ip link` dance --
+    # an earlier macvtap version failed activation twice because creating the device and handing
+    # qemu its fd could only happen inside ExecStart's shell.  The tradeoff is that the bridge owns
+    # the host NIC, so the host drops NetworkManager for networkd (ai.nix) and DHCP lands on the
+    # bridge, which adopts enp4s0's MAC and therefore keeps the router's existing lease for `ai`.
+    lanNic = mkOption {
+      type = types.submodule {
+        options = {
+          enable = mkEnableOption "a second guest NIC on a LAN bridge over the host interface";
+          parentDevice = mkOption {
+            type = types.str;
+            default = "";
+            example = "enp4s0";
+            description = "Host interface the bridge enslaves.";
+          };
+          mac = mkOption {
+            type = types.str;
+            default = "52:54:00:12:34:57";
+            description = ''
+              MAC of the LAN NIC.  The guest matches its DHCP unit on it exactly as `netGuestMac`
+              pins the NAT NIC; platforms/buildvm.nix mirrors this value.
+            '';
+          };
+        };
+      };
+      default = { };
+      description = "LAN NIC (bridge tap) for the build VM.  Disabled by default.";
     };
 
     # Plain pkgs.OVMF, not OVMFFull: the latter compiles in Secure Boot, which would reject the
@@ -897,7 +937,9 @@ NOTE
 
     systemd.services.buildvm = {
       description = "buildvm - NixOS build VM for the Hermes agent (qemu/KVM)";
-      after = [ "network-online.target" "buildvm-install.service" ];
+      # After networkd so the LAN tap (netdev Kind=tap) exists when qemu attaches it; a qemu that
+      # starts too early fails and Restart=always retries.
+      after = [ "network-online.target" "systemd-networkd.service" "buildvm-install.service" ];
       wants = [ "network-online.target" ];
       requires = [ "buildvm-install.service" ];
       wantedBy = [ "multi-user.target" ];
@@ -909,8 +951,14 @@ NOTE
         # stub, so qemu gets no -kernel/-initrd/-append and the kernel command line comes from the
         # guest's own loader entries.  unit=0 is the read-only firmware, unit=1 the writable variable
         # store buildvm-install seeds.
-        # Keep notes outside ExecStart: systemd joins the backslash continuation lines into one
-        # command line, so a # inside it would reach qemu as an argument.
+        # The forwarded ports dial an explicit guest address: with the bare `-:PORT` form slirp
+        # accepts the ai-side connection and stalls without ever SYNing the guest.
+        #
+        # With lanNic the second NIC is a plain qemu tap: systemd-networkd creates it declaratively
+        # (netdev Kind=tap below) and the bridge enslaves it, so ExecStart is bare qemu again -- the
+        # macvtap version needed a shell to create the device and hand qemu an fd, and activation
+        # died twice on that shell.  If qemu starts before the tap exists it fails and Restart=always
+        # retries until networkd has created it.
         ExecStart = ''
           ${pkgs.qemu}/bin/qemu-system-x86_64 \
             -machine q35 -cpu host -enable-kvm \
@@ -919,10 +967,9 @@ NOTE
             -drive if=pflash,format=raw,unit=1,file=${cfg.efiVarsPath} \
             -drive file=${cfg.disk},if=none,id=vd0,format=raw,cache=writeback \
             -device virtio-blk-pci,drive=vd0,bootindex=0 \
-            # The forwarded ports dial an explicit guest address: with the bare `-:PORT` form
-            # slirp accepts the ai-side connection and stalls without ever SYNing the guest.
             -netdev user,id=n0,net=${cfg.netSubnet},host=${cfg.netGateway},dns=${cfg.netDns},dhcpstart=${cfg.netGuestAddress},hostfwd=tcp:127.0.0.1:${toString cfg.sshPort}-${cfg.netGuestAddress}:22,hostfwd=tcp:127.0.0.1:${toString cfg.cdpPort}-${cfg.netGuestAddress}:9222 \
             -device virtio-net-pci,netdev=n0,mac=${cfg.netGuestMac} \
+            ${optionalString cfg.lanNic.enable "-netdev tap,id=n1,ifname=${tapName},script=no,downscript=no -device virtio-net-pci,netdev=n1,mac=${cfg.lanNic.mac}"} \
             -nographic
         '';
         # qemu exits when the guest powers off; bring it back as a real host would.
@@ -931,5 +978,28 @@ NOTE
         TimeoutStopSec = "30s";
       };
     };
+
+    # The LAN bridge, declaratively: systemd-networkd creates the guest's tap the moment it starts
+    # (a netdev is instantiated by the .network the bridge module generates for it), and NixOS'
+    # networking.bridges enslaves the tap plus the host NIC.  DHCP lands on the bridge, which
+    # adopts enp4s0's MAC, so the router's lease for `ai` and its `.home.pleunetowne.com` name
+    # follow the bridge instead of the physical NIC.
+    #
+    # Every value is `mkIf`-guarded rather than an attrset merge: forcing `cfg.lanNic` while this
+    # module's own config definition is being built recurses infinitely, because that definition
+    # is itself a definition of `cfg.lanNic`.
+    systemd.network.netdevs."${tapName}" = mkIf cfg.lanNic.enable {
+      netdevConfig = { Kind = "tap"; Name = tapName; };
+      # qemu's virtio-net attaches with IFF_VNET_HDR, and TUNSETIFF demands the device's flags to
+      # match, so the tap must carry it from creation.  (systemd spells it VNetHeader; nixpkgs'
+      # option list is strict.)
+      tapConfig.VNetHeader = true;
+    };
+    networking.bridges."${bridgeName}".interfaces = mkIf cfg.lanNic.enable [
+      cfg.lanNic.parentDevice
+      tapName
+    ];
+    networking.interfaces."${bridgeName}".useDHCP = mkIf cfg.lanNic.enable true;
+    networking.interfaces."${cfg.lanNic.parentDevice}".useDHCP = mkIf cfg.lanNic.enable false;
   };
 }

@@ -52,6 +52,22 @@ in
     address = [ "10.0.2.15/24" ];
   };
 
+  # Mirror of platforms/buildvm.nix's 41-buildvm-lan: with the host's lanNic enabled the installer
+  # sees the LAN bridge NIC too, and fetching nixpkgs over the LAN lease is the fast path.  Inert
+  # when no NIC carries this MAC.
+  systemd.network.networks."41-buildvm-lan" = {
+    matchConfig.MACAddress = "52:54:00:12:34:57";
+
+    networkConfig = {
+      DHCP = "yes";
+      DNSDefaultRoute = true;
+    };
+
+    dhcpConfig = {
+      RouteMetric = 10;
+    };
+  };
+
   system.stateVersion = "25.05";
   networking.hostName = "buildvm";
 

@@ -103,7 +103,12 @@ in
     hermes-webui.nixosModules.default
   ];
 
-  networking.networkmanager.enable = true;
+  # systemd-networkd rather than NetworkManager: the build VM's LAN bridge (lanNic below) enslaves
+  # enp4s0, and NM would fight networkd for a slave NIC.  Host DHCP lands on the bridge, set by the
+  # buildvm module; `useDHCP = false` keeps networkd from also putting a DHCP client on the slave.
+  networking.networkmanager.enable = false;
+  networking.useNetworkd = true;
+  networking.useDHCP = false;
   time.timeZone = "America/Detroit";
   i18n.defaultLocale = "en_US.UTF-8";
   i18n.extraLocaleSettings = {
@@ -562,6 +567,15 @@ in
       guestRoot = false;
     };
     sshPort = guestPort;
+    # Second guest NIC: a tap enslaved to a bridge over the wired interface, so the VM browses from
+    # the home connection's residential lease (buildvm.home.pleunetowne.com) instead of ai's NAT64
+    # egress, which Epic and Cloudflare bot-block.  enp4s0 is this box's only NIC (wired); the
+    # bridge takes its MAC, and all management traffic -- the ssh backend on 2224, the deploy gate,
+    # provisioning -- keeps the slirp NIC and 10.0.2.x.
+    lanNic = {
+      enable = true;
+      parentDevice = "enp4s0";
+    };
     cpus = guestCpus;
     memoryMiB = guestMemoryMiB;
     userName = guestUser;
