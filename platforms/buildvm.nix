@@ -247,6 +247,16 @@ in
     # (Do NOT raise the daemon's LimitNOFILE instead: virtiofsd would then hold one O_PATH fd
     # per shared inode until FUSE FORGET, parking ~100k fds for a single nixpkgs eval.)
 
+    # Hermes' sandbox browser probe (tools/bot_desktop/sandbox_host.py `_CHROMIUM_PROBE`) only
+    # accepts a Playwright folder layout ($PLAYWRIGHT_BROWSERS_PATH / /opt/playwright /
+    # ~/.cache/ms-playwright), which NixOS never ships.  Pointing that layout at the system
+    # Chromium declaratively means the probe passes from first boot — no runtime shim that a guest
+    # rebuild would erase — and it runs as any user since /opt is world-readable.
+    systemd.tmpfiles.rules = lib.optionals config.nixflakes.buildvm.desktop [
+      "d /opt/playwright/chromium-1/chrome-linux64 0755 root root -"
+      "L /opt/playwright/chromium-1/chrome-linux64/chrome - - - - ${pkgs.chromium}/bin/chromium"
+    ];
+
     # A browser the agent can drive: browser_exec on ai attaches over CDP to the Chromium here.
     # The bot-desktop display (:20) belongs to the gateway and appears and disappears with its
     # session, so this browser gets its own Xvnc on :21 (VNC viewers reach it through ai at

@@ -396,6 +396,14 @@ in
   systemd.services.hermes-agent.serviceConfig.restartTriggers = [ hermesSettingsHash ];
   systemd.services.hermes-backend.serviceConfig.restartTriggers = [ hermesSettingsHash ];
 
+  # The sandbox browser caches its Chromium probe on the ssh env object for the env's whole
+  # lifetime (tools/bot_desktop/sandbox_host.py:149-158 caches None permanently once ssh answers
+  # without a Playwright-layout browser), and a guest rebuild/reboot invalidates what was probed.
+  # PartOf ties both Hermes units to the VM: `systemctl restart buildvm` (or a switch that
+  # rebuilds the guest) restarts the gateway with it, so a stale probe can never outlive the guest.
+  systemd.services.hermes-agent.unitConfig.PartOf = "buildvm.service";
+  systemd.services.hermes-backend.unitConfig.PartOf = "buildvm.service";
+
   # Hermes WebUI (github:nesquena/hermes-webui — not in nixpkgs, but it ships its own package and
   # NixOS module, so this is the clean path).  This replaces the hashboard that container mode
   # cannot run.
