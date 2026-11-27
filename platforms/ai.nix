@@ -264,11 +264,20 @@ in
       # (plugins/platforms/signal/register.py).  Only the URL -- the account and the allowed-sender
       # list are PII and come from environmentFiles below.
       SIGNAL_HTTP_URL = "http://127.0.0.1:8084";
+      # The discord platform registers on DISCORD_BOT_TOKEN alone
+      # (plugins/platforms/discord/gateway_env.py); the token comes from environmentFiles below.
+      # These two are plain routing settings: only mitch's user may talk to the bot, and cron /
+      # notification delivery defaults to the #general channel of the Hermes server.
+      DISCORD_ALLOWED_USERS = "234475400313569280";
+      DISCORD_HOME_CHANNEL = "1571677591901962386";
     };
 
     # Merged into $HERMES_HOME/.env at activation, after agenix has decrypted
     # (agenixInstall runs before `users`, and the hermes setup script depends on `users`).
-    environmentFiles = [ config.age.secrets."signal-account.env".path ];
+    environmentFiles = [
+      config.age.secrets."signal-account.env".path
+      config.age.secrets."discord.env".path
+    ];
 
     settings = {
       # The model is Strata on this very box (nixflakes.services.strata above), reached through
@@ -505,6 +514,13 @@ in
   # dropping to the Hermes account, so the agenix default (root-owned 0400) is exactly right.
   age.secrets."signal-account.env" = {
     file = "${private.secrets}/signal-account.env.age";
+  };
+
+  # Hermes' Discord credential: DISCORD_BOT_TOKEN.  Same rationale as signal-account.env above --
+  # the token must not reach the unit file or the repo; it is merged into the gateway's .env by the
+  # hermes module's environmentFiles.
+  age.secrets."discord.env" = {
+    file = "${private.secrets}/discord.env.age";
   };
 
   # ── Signal ──────────────────────────────────────────────────────────────────

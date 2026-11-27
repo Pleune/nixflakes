@@ -643,11 +643,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795719254,
-        "narHash": "sha256-eA9GcxkX3qcKcQ7ZWOXKWK7ctzHPL4EFhP+kicp/xjM=",
+        "lastModified": 1795749588,
+        "narHash": "sha256-wlnHV1z3WimMsShk29opZiso+AXyLBOCRTWIfmmxcyg=",
         "ref": "refs/heads/main",
-        "rev": "1bb245d809f33e0ff1e4dff96749f35a4efa1498",
-        "revCount": 19,
+        "rev": "d467156136a493bbb41ee00d27b3662b5c4d4502",
+        "revCount": 20,
         "type": "git",
         "url": "https://git.pleunetowne.com/mitchpleune/secrets.git"
       },
