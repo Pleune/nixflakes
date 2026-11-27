@@ -32,6 +32,16 @@ let
   # Hash of the hermes `settings` attrset, used as a systemd restartTrigger below.
   hermesSettingsHash = builtins.hashString "sha256" (builtins.toJSON config.services.hermes-agent.settings);
 
+  # Hash of the gateway environment, also a restartTrigger.  `environment` / `environmentFiles`
+  # reach the gateway only through $HERMES_HOME/.env (never the unit file), so activation rewrites
+  # .env but systemd sees no unit change and leaves the gateway running with the old env --
+  # a platform token added this way registers only after a restart.  Triggering on the env
+  # contents closes that gap for every future env change.
+  hermesEnvironmentHash = builtins.hashString "sha256" (builtins.toJSON {
+    environment = config.services.hermes-agent.environment;
+    environmentFiles = config.services.hermes-agent.environmentFiles;
+  });
+
   # Matches the user defined in platforms/buildvm.nix.
   guestUser = "builder";
 
@@ -418,8 +428,8 @@ in
   # switch time.  Only the hash goes into the world-readable unit file, since `settings` can carry
   # secrets.  Upstreaming `restartTriggers` into the module itself is the real fix; this is the
   # same declarative route applied downstream.
-  systemd.services.hermes-agent.serviceConfig.restartTriggers = [ hermesSettingsHash ];
-  systemd.services.hermes-backend.serviceConfig.restartTriggers = [ hermesSettingsHash ];
+  systemd.services.hermes-agent.serviceConfig.restartTriggers = [ hermesSettingsHash hermesEnvironmentHash ];
+  systemd.services.hermes-backend.serviceConfig.restartTriggers = [ hermesSettingsHash hermesEnvironmentHash ];
 
   # The sandbox browser caches its Chromium probe on the ssh env object for the env's whole
   # lifetime (tools/bot_desktop/sandbox_host.py:149-158 caches None permanently once ssh answers
